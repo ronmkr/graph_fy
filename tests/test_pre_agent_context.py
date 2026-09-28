@@ -128,6 +128,20 @@ def test_task_context_extraction(sample_task_graph):
     assert res["briefing_tokens"] > 0
     assert res["compression_ratio"] >= 0.0
 
+    # CCR On-Demand Implementation Handle
+    assert "get_symbol_implementation" in p_ctx
+
+    # Strict Determinism (bitwise identical output across repeated invocations for prompt cache)
+    res2 = task_context(
+        "router request dispatch handling",
+        graph=G,
+        db_path=db_path,
+        root_dir=root,
+        token_budget=1000,
+        include_diagram=True,
+    )
+    assert res["prompt_context"] == res2["prompt_context"]
+
 
 def test_task_context_empty_task():
     res = task_context("")

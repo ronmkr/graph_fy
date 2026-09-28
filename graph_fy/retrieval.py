@@ -1918,11 +1918,11 @@ def task_context(
             diagram_nodes[safe_e] = clee.replace('"', "'")
             edge_tuples.append((safe_nid, safe_e, "calls"))
 
-    for snid, slbl in list(diagram_nodes.items())[:12]:
+    for snid, slbl in sorted(diagram_nodes.items())[:12]:
         diagram_lines.append(f'    {snid}["{slbl}"]')
 
     seen_edges: set[tuple[str, str]] = set()
-    for u, v, rel in edge_tuples[:16]:
+    for u, v, rel in sorted(edge_tuples)[:16]:
         if (u, v) not in seen_edges and u in diagram_nodes and v in diagram_nodes:
             seen_edges.add((u, v))
             diagram_lines.append(f"    {u} --> {v}")
@@ -1948,7 +1948,7 @@ def task_context(
         f"**Blast Radius Risk**: {risk_tier} (Risk Score: {risk_score:.2f}, {downstream_impact_count} downstream dependents)",
     ]
     if affected_tests:
-        lines.append(f"**Verification Targets (Tests)**: {', '.join(affected_tests[:6])}")
+        lines.append(f"**Verification Targets (Tests)**: {', '.join(sorted(affected_tests)[:6])}")
     if co_changed_files:
         co_str = ", ".join(f"`{f}` ({int(freq*100)}% co-change)" for f, freq in co_changed_files)
         lines.append(f"**Historically Co-Changed Files**: {co_str}")
@@ -1967,6 +1967,7 @@ def task_context(
     for c in candidates:
         if current_chars >= char_budget:
             break
+        nid = c.get("node_id", "")
         lbl = c.get("label", "")
         spath = c.get("source_path", "")
         sloc = c.get("source_location", "")
@@ -1975,6 +1976,8 @@ def task_context(
         callees = c.get("callees", [])
 
         meta_parts = [f"// Symbol: {lbl} ({spath}:{sloc})"]
+        if nid:
+            meta_parts.append(f'// [On-Demand Body: get_symbol_implementation("{nid}")]')
         if callers:
             c_str = ", ".join(callers[:5]) + (f" (+{len(callers)-5} more)" if len(callers) > 5 else "")
             meta_parts.append(f"// Callers: {c_str}")
