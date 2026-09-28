@@ -521,7 +521,7 @@ def test_agent_subcommand_install_and_uninstall(tmp_path):
         assert not skill.exists()
 
 
-def test_claude_subcommand_installs_skill(tmp_path):
+def test_claude_subcommand_installs_skill(tmp_path, monkeypatch):
     """'graph_fy claude install' installs the skill as well as registering hooks/md."""
     from graph_fy.__main__ import main
 
@@ -530,15 +530,10 @@ def test_claude_subcommand_installs_skill(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
 
-    with patch("graph_fy.__main__.Path.home", return_value=home):
-        with patch("sys.argv", ["graph_fy", "claude", "install"]):
-            import os
-            old = os.getcwd()
-            try:
-                os.chdir(project)
-                main()
-            finally:
-                os.chdir(old)
+    monkeypatch.chdir(project)
+    with patch("graph_fy.__main__.Path.home", return_value=home), \
+         patch("sys.argv", ["graph_fy", "claude", "install"]):
+        main()
 
     assert (home / ".claude" / "skills" / "graph_fy" / "SKILL.md").exists()
     assert (project / "CLAUDE.md").exists()
@@ -569,10 +564,11 @@ def test_gemini_and_antigravity_subcommand_install_and_uninstall(tmp_path):
         assert not skill.exists()
 
 
-def test_uninstall_all_removes_skills_and_invokes_binary_uninstall(tmp_path):
+def test_uninstall_all_removes_skills_and_invokes_binary_uninstall(tmp_path, monkeypatch):
     """'graph_fy uninstall' removes skills across platforms and attempts binary uninstall."""
     from graph_fy.__main__ import main
 
+    monkeypatch.chdir(tmp_path)
     home = tmp_path / "home"
     home.mkdir()
 

@@ -715,42 +715,20 @@ def _strip_graph_fy_hook(settings_path: Path) -> None:
     print(f"  .claude/{settings_path.name}  ->  PreToolUse hook removed")
 def _uninstall_binary() -> bool:
     """Attempt to uninstall the tool/package via uv, pipx, or pip."""
-    import shutil
     import subprocess
 
-    uninstalled = False
+    for tool, prefix in (("uv tool", ["uv", "tool", "uninstall"]), ("pipx", ["pipx", "uninstall"])):
+        if shutil.which(prefix[0]):
+            for name in ("graph-fy", "graph_fy", "graphify"):
+                try:
+                    res = subprocess.run([*prefix, name], capture_output=True, text=True)
+                    if res.returncode == 0 and ("Uninstalled" in (res.stdout + res.stderr) or tool == "pipx"):
+                        print(f"  {tool:<16} ->  uninstalled {name}")
+                        return True
+                except Exception:
+                    pass
+    return False
 
-    # Try uv tool uninstall
-    if shutil.which("uv"):
-        for name in ("graph-fy", "graph_fy", "graphify"):
-            try:
-                res = subprocess.run(
-                    ["uv", "tool", "uninstall", name],
-                    capture_output=True,
-                    text=True,
-                )
-                if res.returncode == 0 and "Uninstalled" in (res.stdout + res.stderr):
-                    print(f"  uv tool          ->  uninstalled {name}")
-                    uninstalled = True
-            except Exception:
-                pass
-
-    # Try pipx
-    if not uninstalled and shutil.which("pipx"):
-        for name in ("graph_fy", "graph-fy", "graphify"):
-            try:
-                res = subprocess.run(
-                    ["pipx", "uninstall", name],
-                    capture_output=True,
-                    text=True,
-                )
-                if res.returncode == 0:
-                    print(f"  pipx             ->  uninstalled {name}")
-                    uninstalled = True
-            except Exception:
-                pass
-
-    return uninstalled
 
 
 def uninstall_all(project_dir: Path | None = None, purge: bool = False) -> None:
@@ -988,35 +966,19 @@ def dispatch_install_cli(cmd: str) -> bool:
             print("Usage: graph_fy claude [install|uninstall]", file=sys.stderr)
             sys.exit(1)
 
-    elif cmd in ("copilot", "agent"):
+    elif cmd in ("copilot", "agent", "gemini", "antigravity"):
+        target = _canonical_platform(cmd)
         subcmd = sys.argv[2] if len(sys.argv) > 2 else ""
         if subcmd == "install":
             if "--project" in sys.argv[3:]:
-                _project_install("copilot", Path("."))
+                _project_install(target, Path("."))
             else:
-                install(platform="copilot")
+                install(platform=target)
         elif subcmd == "uninstall":
             if "--project" in sys.argv[3:]:
-                _project_uninstall("copilot", Path("."))
+                _project_uninstall(target, Path("."))
             else:
-                removed = _remove_skill_file("copilot")
-                print("skill removed" if removed else "nothing to remove")
-        else:
-            print(f"Usage: graph_fy {cmd} [install|uninstall]", file=sys.stderr)
-            sys.exit(1)
-
-    elif cmd in ("gemini", "antigravity"):
-        subcmd = sys.argv[2] if len(sys.argv) > 2 else ""
-        if subcmd == "install":
-            if "--project" in sys.argv[3:]:
-                _project_install(cmd, Path("."))
-            else:
-                install(platform=cmd)
-        elif subcmd == "uninstall":
-            if "--project" in sys.argv[3:]:
-                _project_uninstall(cmd, Path("."))
-            else:
-                removed = _remove_skill_file(cmd)
+                removed = _remove_skill_file(target)
                 print("skill removed" if removed else "nothing to remove")
         else:
             print(f"Usage: graph_fy {cmd} [install|uninstall]", file=sys.stderr)
