@@ -45,7 +45,8 @@ ROADMAP.md
 .pending_changes
 
 # IDE & Editor configs
-.claude/
+.claude/*
+!.claude/skills/
 .cursor/
 .gemini/
 .antigravity/
@@ -62,6 +63,8 @@ ROADMAP.md
 skills/
 !graph_fy/skills/
 !graph_fy/skills/**
+!.claude/skills/
+!.claude/skills/**
 !tools/skillgen/fragments/core/
 !tools/skillgen/fragments/core/**
 node_modules/
