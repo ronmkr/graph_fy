@@ -36,6 +36,14 @@ from graph_fy.paths import graph_fy_OUT as _graph_fy_OUT
 from graph_fy.paths import os_replace_with_fallback as _os_replace_with_fallback
 
 
+def _safe_mkdir(path: Path) -> None:
+    """Create directory and parents safely, handling dangling symlinks in the hierarchy."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        path.resolve().mkdir(parents=True, exist_ok=True)
+
+
 def _write_version_stamp(skill_dst: Path, version: str) -> None:
     """Atomically write ``.graph_fy_version`` beside ``skill_dst``.
 
@@ -156,7 +164,7 @@ def _copy_skill_file(platform_name: str, *, project: bool = False, project_dir: 
         sys.exit(1)
 
     skill_dst = _platform_skill_destination(platform_name, project=project, project_dir=project_dir)
-    skill_dst.parent.mkdir(parents=True, exist_ok=True)
+    _safe_mkdir(skill_dst.parent)
 
     # Install the references/ sidecar (or clear an orphan one) BEFORE writing
     # SKILL.md, so SKILL.md is the last artifact laid down. An install that is
@@ -322,7 +330,7 @@ def _register_always_on_block(target: Path, prefix: str, registration: str) -> N
                 target.write_text(content.rstrip() + registration, encoding="utf-8")
                 print(f"{prefix}skill registered in {target}")
         else:
-            target.parent.mkdir(parents=True, exist_ok=True)
+            _safe_mkdir(target.parent)
             target.write_text(registration.lstrip(), encoding="utf-8")
             print(f"{prefix}created at {target}")
     except OSError as exc:
@@ -358,10 +366,14 @@ _PLATFORM_CONFIG: dict[str, dict] = {
         "skill_refs": "claude",
     },
 }
-_PLATFORM_ALIASES: dict[str, str] = {}
+_PLATFORM_ALIASES: dict[str, str] = {
+    "agent": "copilot",
+    "copilot-agent": "copilot",
+    "github-copilot": "copilot",
+}
 def _canonical_platform(platform_name: str) -> str:
     """Resolve a CLI platform alias to its real _PLATFORM_CONFIG key."""
-    return _PLATFORM_ALIASES.get(platform_name, platform_name)
+    return _PLATFORM_ALIASES.get(platform_name.lower(), platform_name)
 def _replace_or_append_section(content: str, marker: str, new_section: str) -> str:
     """Idempotently update or append a graph_fy-owned section in shared files.
 
@@ -660,7 +672,7 @@ def _install_claude_hook(project_dir: Path, strict: bool = False, project: bool 
     is then committed and an installing machine's path is wrong there (#3129).
     """
     settings_path = project_dir / ".claude" / "settings.json"
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    _safe_mkdir(settings_path.parent)
 
     settings = _read_settings_for_merge(settings_path)
 
@@ -701,6 +713,46 @@ def _strip_graph_fy_hook(settings_path: Path) -> None:
     settings["hooks"]["PreToolUse"] = filtered
     settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
     print(f"  .claude/{settings_path.name}  ->  PreToolUse hook removed")
+def _uninstall_binary() -> bool:
+    """Attempt to uninstall the tool/package via uv, pipx, or pip."""
+    import shutil
+    import subprocess
+
+    uninstalled = False
+
+    # Try uv tool uninstall
+    if shutil.which("uv"):
+        for name in ("graph-fy", "graph_fy", "graphify"):
+            try:
+                res = subprocess.run(
+                    ["uv", "tool", "uninstall", name],
+                    capture_output=True,
+                    text=True,
+                )
+                if res.returncode == 0 and "Uninstalled" in (res.stdout + res.stderr):
+                    print(f"  uv tool          ->  uninstalled {name}")
+                    uninstalled = True
+            except Exception:
+                pass
+
+    # Try pipx
+    if not uninstalled and shutil.which("pipx"):
+        for name in ("graph_fy", "graph-fy", "graphify"):
+            try:
+                res = subprocess.run(
+                    ["pipx", "uninstall", name],
+                    capture_output=True,
+                    text=True,
+                )
+                if res.returncode == 0:
+                    print(f"  pipx             ->  uninstalled {name}")
+                    uninstalled = True
+            except Exception:
+                pass
+
+    return uninstalled
+
+
 def uninstall_all(project_dir: Path | None = None, purge: bool = False) -> None:
     """Remove graph_fy from every platform detected in the current project."""
     pd = project_dir or Path(".")
@@ -711,6 +763,8 @@ def uninstall_all(project_dir: Path | None = None, purge: bool = False) -> None:
     # cleanup at the project dir (#2215).
     claude_uninstall(pd, remove_user_skill=True)
     _remove_skill_file("copilot")
+    _remove_skill_file("gemini")
+    _remove_skill_file("antigravity")
 
     # Git hook
     try:
@@ -730,7 +784,11 @@ def uninstall_all(project_dir: Path | None = None, purge: bool = False) -> None:
         else:
             print(f"\n  {_graph_fy_OUT}/  ->  not found (nothing to purge)")
 
-    print("\nDone. Run 'pip uninstall graph_fyy' to remove the package itself.")
+    binary_removed = _uninstall_binary()
+    if binary_removed:
+        print("\nDone. Skills and binary uninstalled successfully.")
+    else:
+        print("\nDone. Run 'uv tool uninstall graph_fy' or 'pip uninstall graph_fy' to remove the package itself.")
 def claude_uninstall(project_dir: Path | None = None, *, project: bool = False, remove_user_skill: bool | None = None) -> None:
     """Remove the graph_fy skill tree (SKILL.md + references/) and the graph_fy
     section from CLAUDE.md and its local-only variants, plus the PreToolUse hook.
@@ -806,6 +864,9 @@ def _strip_graph_fy_md_section(target: Path) -> bool:
 _CLI_INSTALL_COMMANDS = frozenset({
     "claude",
     "copilot",
+    "agent",
+    "gemini",
+    "antigravity",
     "install",
     "uninstall",
 })
@@ -863,7 +924,7 @@ def dispatch_install_cli(cmd: str) -> bool:
                     sys.exit(1)
                 selected_platform = arg
                 i += 1
-        chosen_platform = selected_platform or default_platform
+        chosen_platform = _canonical_platform(selected_platform or default_platform)
         if project_scope:
             _project_install(chosen_platform, Path("."), strict=strict)
         else:
@@ -901,11 +962,14 @@ def dispatch_install_cli(cmd: str) -> bool:
                 i += 1
         if project_scope:
             if selected_platform:
-                _project_uninstall(selected_platform, Path("."))
+                _project_uninstall(_canonical_platform(selected_platform), Path("."))
             else:
                 _project_uninstall_all(Path("."))
         else:
-            uninstall_all(purge=purge)
+            if selected_platform:
+                _remove_skill_file(_canonical_platform(selected_platform))
+            else:
+                uninstall_all(purge=purge)
     elif cmd == "claude":
         subcmd = sys.argv[2] if len(sys.argv) > 2 else ""
         if subcmd == "install":
@@ -913,6 +977,7 @@ def dispatch_install_cli(cmd: str) -> bool:
             if "--project" in sys.argv[3:]:
                 _project_install("claude", Path("."), strict=_strict)
             else:
+                install(platform="claude")
                 claude_install(strict=_strict)
         elif subcmd == "uninstall":
             if "--project" in sys.argv[3:]:
@@ -923,7 +988,7 @@ def dispatch_install_cli(cmd: str) -> bool:
             print("Usage: graph_fy claude [install|uninstall]", file=sys.stderr)
             sys.exit(1)
 
-    elif cmd == "copilot":
+    elif cmd in ("copilot", "agent"):
         subcmd = sys.argv[2] if len(sys.argv) > 2 else ""
         if subcmd == "install":
             if "--project" in sys.argv[3:]:
@@ -937,7 +1002,24 @@ def dispatch_install_cli(cmd: str) -> bool:
                 removed = _remove_skill_file("copilot")
                 print("skill removed" if removed else "nothing to remove")
         else:
-            print("Usage: graph_fy copilot [install|uninstall]", file=sys.stderr)
+            print(f"Usage: graph_fy {cmd} [install|uninstall]", file=sys.stderr)
+            sys.exit(1)
+
+    elif cmd in ("gemini", "antigravity"):
+        subcmd = sys.argv[2] if len(sys.argv) > 2 else ""
+        if subcmd == "install":
+            if "--project" in sys.argv[3:]:
+                _project_install(cmd, Path("."))
+            else:
+                install(platform=cmd)
+        elif subcmd == "uninstall":
+            if "--project" in sys.argv[3:]:
+                _project_uninstall(cmd, Path("."))
+            else:
+                removed = _remove_skill_file(cmd)
+                print("skill removed" if removed else "nothing to remove")
+        else:
+            print(f"Usage: graph_fy {cmd} [install|uninstall]", file=sys.stderr)
             sys.exit(1)
     else:
         return False
