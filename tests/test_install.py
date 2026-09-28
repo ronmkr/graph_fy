@@ -470,3 +470,123 @@ def test_project_uninstall_removes_the_bare_hook_command(tmp_path, monkeypatch):
             main()
 
     assert not [c for c in _hook_commands(settings.read_text(encoding="utf-8")) if "graph_fy" in c]
+
+
+def test_copilot_install_with_dangling_symlink_parent(tmp_path, requires_symlinks):
+    """Ensure install handles dangling symlinks in parent directories (e.g. ~/.copilot -> ~/.config/copilot)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    target_config = home / ".config" / "copilot"
+    copilot_symlink = home / ".copilot"
+    copilot_symlink.symlink_to(target_config)
+    assert not target_config.exists()
+    assert copilot_symlink.is_symlink()
+    assert not copilot_symlink.exists()
+
+    with patch("graph_fy.__main__.Path.home", return_value=home):
+        install(platform="copilot")
+
+    skill = home / ".copilot" / "skills" / "graph_fy" / "SKILL.md"
+    assert skill.exists()
+    assert target_config.exists()
+
+
+def test_install_agent_alias_resolves_to_copilot(tmp_path):
+    """'agent' alias installs to copilot destination."""
+    from graph_fy.__main__ import main
+
+    home = tmp_path / "home"
+    home.mkdir()
+    with patch("graph_fy.__main__.Path.home", return_value=home):
+        with patch("sys.argv", ["graph_fy", "install", "agent"]):
+            main()
+
+    assert (home / ".copilot" / "skills" / "graph_fy" / "SKILL.md").exists()
+
+
+def test_agent_subcommand_install_and_uninstall(tmp_path):
+    """'graph_fy agent install' and uninstall route to copilot."""
+    from graph_fy.__main__ import main
+
+    home = tmp_path / "home"
+    home.mkdir()
+    with patch("graph_fy.__main__.Path.home", return_value=home):
+        with patch("sys.argv", ["graph_fy", "agent", "install"]):
+            main()
+        skill = home / ".copilot" / "skills" / "graph_fy" / "SKILL.md"
+        assert skill.exists()
+
+        with patch("sys.argv", ["graph_fy", "agent", "uninstall"]):
+            main()
+        assert not skill.exists()
+
+
+def test_claude_subcommand_installs_skill(tmp_path, monkeypatch):
+    """'graph_fy claude install' installs the skill as well as registering hooks/md."""
+    from graph_fy.__main__ import main
+
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+
+    monkeypatch.chdir(project)
+    with patch("graph_fy.__main__.Path.home", return_value=home), \
+         patch("sys.argv", ["graph_fy", "claude", "install"]):
+        main()
+
+    assert (home / ".claude" / "skills" / "graph_fy" / "SKILL.md").exists()
+    assert (project / "CLAUDE.md").exists()
+
+
+def test_gemini_and_antigravity_subcommand_install_and_uninstall(tmp_path):
+    """'graph_fy gemini install' and 'graph_fy antigravity install' route properly."""
+    from graph_fy.__main__ import main
+
+    home = tmp_path / "home"
+    home.mkdir()
+    with patch("graph_fy.__main__.Path.home", return_value=home):
+        with patch("sys.argv", ["graph_fy", "gemini", "install"]):
+            main()
+        skill = home / ".gemini" / "config" / "skills" / "graph_fy" / "SKILL.md"
+        assert skill.exists()
+
+        with patch("sys.argv", ["graph_fy", "gemini", "uninstall"]):
+            main()
+        assert not skill.exists()
+
+        with patch("sys.argv", ["graph_fy", "antigravity", "install"]):
+            main()
+        assert skill.exists()
+
+        with patch("sys.argv", ["graph_fy", "antigravity", "uninstall"]):
+            main()
+        assert not skill.exists()
+
+
+def test_uninstall_all_removes_skills_and_invokes_binary_uninstall(tmp_path, monkeypatch):
+    """'graph_fy uninstall' removes skills across platforms and attempts binary uninstall."""
+    from graph_fy.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    for p in ("copilot", "gemini"):
+        with patch("graph_fy.__main__.Path.home", return_value=home):
+            with patch("sys.argv", ["graph_fy", p, "install"]):
+                main()
+
+    assert (home / ".copilot" / "skills" / "graph_fy" / "SKILL.md").exists()
+    assert (home / ".gemini" / "config" / "skills" / "graph_fy" / "SKILL.md").exists()
+
+    with patch("graph_fy.__main__.Path.home", return_value=home), \
+         patch("graph_fy.install._uninstall_binary", return_value=True) as mock_bin_uninst:
+        with patch("sys.argv", ["graph_fy", "uninstall"]):
+            main()
+
+    assert not (home / ".copilot" / "skills" / "graph_fy" / "SKILL.md").exists()
+    assert not (home / ".gemini" / "config" / "skills" / "graph_fy" / "SKILL.md").exists()
+    assert mock_bin_uninst.called
+
+

@@ -14,6 +14,7 @@ requires-python = ">=3.10"
 dependencies = [
     "networkx>=3.4",
     "numpy>=1.21",
+    "pyyaml>=6.0",
     "rapidfuzz>=3.0",
     "tomli>=2.0.1; python_version < '3.11'",
     "tree-sitter>=0.23.0,<0.26",
@@ -152,6 +153,9 @@ norecursedirs = [
 ]
 filterwarnings = [
     "ignore:Skipping collection of '.hypothesis' directory.*:UserWarning",
+    "ignore:semantic cache skipped out-of-scope source_file.*:RuntimeWarning",
+    "ignore:Please import `random` from the `scipy.sparse` namespace.*:DeprecationWarning",
+    "ignore:The keyword argument 'nopython=False' was supplied.*:Warning",
 ]
 
 [tool.bandit]
