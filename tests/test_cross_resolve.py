@@ -285,3 +285,47 @@ secrets:
     # Env references
     assert "database_url" in ref_data["envs"]["referenced"] or "db_host" in ref_data["envs"]["referenced"]
 
+
+def test_resolve_cross_boundary_api_routes():
+    """Verify that frontend fetch/axios calls resolve to backend route handlers via routes_to edges."""
+    from graph_fy.cross_resolve import resolve_cross_format_dependencies
+
+    nodes = [
+        # Backend FastAPI/OpenAPI route
+        {
+            "id": "backend_get_users",
+            "label": "get_user_by_id",
+            "type": "route",
+            "http_method": "GET",
+            "http_path": "/api/v1/users/{id}",
+            "source_file": "backend/api/users.py",
+        },
+        # Frontend component calling fetch
+        {
+            "id": "frontend_user_profile",
+            "label": "UserProfileComponent",
+            "type": "component",
+            "text": "const res = await fetch('/api/v1/users/42');",
+            "source_file": "frontend/src/UserProfile.tsx",
+        },
+        # Frontend component calling axios
+        {
+            "id": "frontend_edit_profile",
+            "label": "editProfile",
+            "type": "function",
+            "text": "return axios.get('/api/v1/users/:id');",
+            "source_file": "frontend/src/api.ts",
+        },
+    ]
+    edges = []
+
+    res_nodes, res_edges = resolve_cross_format_dependencies(nodes, edges)
+    route_edges = [
+        (e["source"], e["target"], e["relation"])
+        for e in res_edges
+        if e.get("relation") == "routes_to"
+    ]
+
+    assert ("frontend_user_profile", "backend_get_users", "routes_to") in route_edges
+    assert ("frontend_edit_profile", "backend_get_users", "routes_to") in route_edges
+

@@ -25,7 +25,7 @@ check:
 
 # Run local AST knowledge graph sync (zero API cost)
 update-graph:
-    uv run python -m graph_fy.cli update .
+    uv run graph_fy update .
 
 # Run security audit on dependencies
 audit:

@@ -294,3 +294,100 @@ def test_explain_direction_recovered_from_src_tgt_markers(monkeypatch, tmp_path,
     out = capsys.readouterr().out
     assert "<-- spoke.ts [calls]" in out
     assert "--> spoke.ts" not in out
+
+
+def test_semantic_weighting_prefers_calls_over_containment(monkeypatch, tmp_path, capsys):
+    """Semantic impedance: a longer call chain (3 hops of calls=3.0) must beat
+    a 2-hop AST containment shortcut (2 hops of contains=7.0)."""
+    data = {
+        "directed": False, "multigraph": False, "graph": {},
+        "nodes": [
+            {"id": "source_fn", "label": "sourceFn()", "source_file": "src/app.ts"},
+            {"id": "file_node", "label": "app.ts", "source_file": "src/app.ts"},
+            {"id": "mid1", "label": "midOne()", "source_file": "src/mid.ts"},
+            {"id": "mid2", "label": "midTwo()", "source_file": "src/mid.ts"},
+            {"id": "target_fn", "label": "targetFn()", "source_file": "src/app.ts"},
+        ],
+        "links": [
+            # 2-hop containment shortcut (2 hops, weight 3.5 + 3.5 = 7.0)
+            {"source": "file_node", "target": "source_fn", "_src": "file_node", "_tgt": "source_fn",
+             "relation": "contains", "confidence": "EXTRACTED"},
+            {"source": "file_node", "target": "target_fn", "_src": "file_node", "_tgt": "target_fn",
+             "relation": "contains", "confidence": "EXTRACTED"},
+            # 3-hop execution call chain (3 hops, weight 1.0 + 1.0 + 1.0 = 3.0)
+            {"source": "source_fn", "target": "mid1", "_src": "source_fn", "_tgt": "mid1",
+             "relation": "calls", "confidence": "EXTRACTED"},
+            {"source": "mid1", "target": "mid2", "_src": "mid1", "_tgt": "mid2",
+             "relation": "calls", "confidence": "EXTRACTED"},
+            {"source": "mid2", "target": "target_fn", "_src": "mid2", "_tgt": "target_fn",
+             "relation": "calls", "confidence": "EXTRACTED"},
+        ],
+    }
+    gp = tmp_path / "graph.json"
+    gp.write_text(json.dumps(data))
+
+    # Default weighted: chooses the 3-hop execution path over the 2-hop containment shortcut
+    out_weighted = _run(monkeypatch, gp, "sourceFn", "targetFn", capsys, "--undirected")
+    assert "Shortest path (3 hops):" in out_weighted
+    assert "midOne" in out_weighted
+    assert "midTwo" in out_weighted
+    assert "app.ts" not in out_weighted
+
+    # Explicit --unweighted: takes the 2-hop containment shortcut
+    out_unweighted = _run(monkeypatch, gp, "sourceFn", "targetFn", capsys, "--undirected", "--unweighted")
+    assert "Shortest path (2 hops):" in out_unweighted
+    assert "app.ts" in out_unweighted
+
+
+def test_canonical_search_graph_caching(tmp_path):
+    """G.graph['_canonical_search_views'] caches the materialized view across queries."""
+    from graph_fy.retrieval import get_canonical_search_graph
+    data = {
+        "directed": False, "multigraph": False, "graph": {},
+        "nodes": [
+            {"id": "a", "label": "A"},
+            {"id": "b", "label": "B"},
+        ],
+        "links": [
+            {"source": "a", "target": "b", "relation": "calls"},
+        ],
+    }
+    G = nx.node_link_graph(data, edges="links")
+    assert "_canonical_search_views" not in G.graph
+
+    v1 = get_canonical_search_graph(G, undirected=False, weighted=True)
+    assert "_canonical_search_views" in G.graph
+    v2 = get_canonical_search_graph(G, undirected=False, weighted=True)
+    assert v1 is v2  # Identity check: zero-realloc cache hit
+
+
+def test_path_flags_before_positional(monkeypatch, tmp_path, capsys):
+    """Flags like --undirected or --graph can appear before positional arguments."""
+    p = _write_graph(tmp_path)
+    monkeypatch.setattr(mainmod, "_check_skill_version", lambda _: None)
+    monkeypatch.setattr(
+        mainmod.sys,
+        "argv",
+        ["graph_fy", "path", "--undirected", "--graph", str(p), "validateSanitySession", "createPatchHandler"],
+    )
+    mainmod.main()
+    out = capsys.readouterr().out
+    assert "Shortest path (1 hops):" in out
+    assert "validateSanitySession()" in out
+    assert "createPatchHandler()" in out
+
+
+def test_explain_flags_before_positional(monkeypatch, tmp_path, capsys):
+    """Flags like --terse or --graph can appear before positional node label in explain."""
+    p = _write_graph(tmp_path)
+    monkeypatch.setattr(mainmod, "_check_skill_version", lambda _: None)
+    monkeypatch.setattr(
+        mainmod.sys,
+        "argv",
+        ["graph_fy", "explain", "--terse", "--graph", str(p), "createPatchHandler"],
+    )
+    mainmod.main()
+    out = capsys.readouterr().out
+    assert "createPatchHandler" in out
+    assert "calls -> validate" in out
+

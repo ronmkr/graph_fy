@@ -340,7 +340,10 @@ def _clean_fts_query(
             ]
             clean_near = [t.replace('"', '').strip("-_") for t in near_tokens if t.replace('"', '').strip("-_")]
             if len(clean_near) >= 2:
-                inner_near = " ".join(f'"{t}"' if any(c in t for c in "-_ :/") else t for t in clean_near)
+                inner_near = " ".join(
+                    f'"{t}"' if t.upper() in {"AND", "OR", "NOT"} or " " in t else t
+                    for t in clean_near
+                )
                 parts.append(f"NEAR({inner_near}, 10)")
 
     return " OR ".join(parts)
@@ -660,17 +663,37 @@ def query(
         # title=5.0, headings=3.0, tags=4.0, body=1.0
         # In FTS5, bm25() returns negative values (lower = more relevant);
         # we negate it so higher positive score = more relevant.
-        cur.execute(
-            """
-            SELECT node_id, (-1.0 * bm25(nodes_fts, 5.0, 3.0, 4.0, 1.0)) AS bm25_score
-            FROM nodes_fts
-            WHERE nodes_fts MATCH ?
-            ORDER BY bm25(nodes_fts, 5.0, 3.0, 4.0, 1.0) ASC
-            LIMIT ?;
-            """,
-            (clean_q, seed_limit),
-        )
-        seed_rows = cur.fetchall()
+        seed_rows = []
+        try:
+            cur.execute(
+                """
+                SELECT node_id, (-1.0 * bm25(nodes_fts, 5.0, 3.0, 4.0, 1.0)) AS bm25_score
+                FROM nodes_fts
+                WHERE nodes_fts MATCH ?
+                ORDER BY bm25(nodes_fts, 5.0, 3.0, 4.0, 1.0) ASC
+                LIMIT ?;
+                """,
+                (clean_q, seed_limit),
+            )
+            seed_rows = cur.fetchall()
+        except sqlite3.OperationalError:
+            raw_words = [t.strip("-") for t in re.findall(r"[A-Za-z0-9_\-]+", query_text) if t.strip("-")]
+            if raw_words:
+                safe_fallback_q = " OR ".join(f'"{w}"' for w in raw_words)
+                try:
+                    cur.execute(
+                        """
+                        SELECT node_id, (-1.0 * bm25(nodes_fts, 5.0, 3.0, 4.0, 1.0)) AS bm25_score
+                        FROM nodes_fts
+                        WHERE nodes_fts MATCH ?
+                        ORDER BY bm25(nodes_fts, 5.0, 3.0, 4.0, 1.0) ASC
+                        LIMIT ?;
+                        """,
+                        (safe_fallback_q, seed_limit),
+                    )
+                    seed_rows = cur.fetchall()
+                except Exception:
+                    seed_rows = []
 
         # If search term yields 0 or very few BM25 results, and fuzzy matching is enabled,
         # perform broader fuzzy expansion if not already applied
@@ -922,12 +945,101 @@ def query(
         conn.close()
 
 
+DEFAULT_RELATION_WEIGHTS: dict[str, float] = {
+    # Highway: Direct execution flow & runtime dispatch
+    "calls": 1.0,
+    "indirect_call": 1.1,
+    "routes_to": 1.0,
+    "handles": 1.0,
+    "triggered_by": 1.0,
+    "fetches_from": 1.0,
+    "calls_workflow": 1.0,
+    "uses_action": 1.1,
+    # Arterial: Module imports & inheritance dependencies
+    "imports": 1.3,
+    "imports_from": 1.3,
+    "depends_on": 1.3,
+    "uses": 1.4,
+    "inherits": 1.2,
+    "implements": 1.2,
+    # References & metadata links
+    "references": 2.0,
+    "references_constant": 2.0,
+    "references_env": 2.0,
+    "references_secret": 2.0,
+    # Structural boundaries (penalize traversing via AST containment)
+    "defines": 2.5,
+    "defines_schema": 2.5,
+    "defines_rpc": 2.5,
+    "contains": 3.5,
+    "has_step": 3.0,
+    "has_stage": 3.0,
+}
+DEFAULT_EDGE_WEIGHT: float = 1.5
+
+
+def get_edge_weight(rel: str | None) -> float:
+    """Return semantic impedance weight for an edge relation."""
+    if not rel:
+        return 1.0
+    return DEFAULT_RELATION_WEIGHTS.get(rel, DEFAULT_EDGE_WEIGHT)
+
+
+def get_canonical_search_graph(
+    G: nx.Graph,
+    undirected: bool = False,
+    weighted: bool = True,
+) -> nx.Graph | nx.DiGraph:
+    """Return a deterministic, cached search graph view for pathfinding.
+
+    Preserves node and edge sorting for cross-seed determinism (#2074), recovers
+    caller->callee direction from _src/_tgt markers (#2309), applies semantic
+    impedance weights to prioritize execution paths over AST containment,
+    and caches the materialized view on G.graph to eliminate per-query
+    graph rebuilds.
+    """
+    cache = G.graph.setdefault("_canonical_search_views", {})
+    key = (bool(undirected), bool(weighted))
+    if key in cache:
+        return cache[key]
+
+    if undirected:
+        view = nx.Graph()
+        view.add_nodes_from(sorted(G.nodes, key=str))
+        edge_map: dict[tuple[Any, Any], float] = {}
+        for u, v, d in G.edges(data=True):
+            a, b = (u, v) if str(u) <= str(v) else (v, u)
+            pair = (a, b)
+            w = get_edge_weight(d.get("relation")) if weighted else 1.0
+            if pair not in edge_map or w < edge_map[pair]:
+                edge_map[pair] = w
+        for (u, v) in sorted(edge_map.keys(), key=lambda p: (str(p[0]), str(p[1]))):
+            view.add_edge(u, v, weight=edge_map[(u, v)])
+    else:
+        view = nx.DiGraph()
+        view.add_nodes_from(sorted(G.nodes, key=str))
+        edge_map: dict[tuple[Any, Any], float] = {}
+        for u, v, d in G.edges(data=True):
+            s = d.get("_src", u)
+            t = d.get("_tgt", v)
+            pair = (s, t)
+            w = get_edge_weight(d.get("relation")) if weighted else 1.0
+            if pair not in edge_map or w < edge_map[pair]:
+                edge_map[pair] = w
+        for (u, v) in sorted(edge_map.keys(), key=lambda p: (str(p[0]), str(p[1]))):
+            view.add_edge(u, v, weight=edge_map[(u, v)])
+
+    cache[key] = view
+    return view
+
+
 def trace(
     G: nx.Graph,
     source: str,
     target: str,
     *,
     directed: bool = True,
+    weighted: bool = True,
 ) -> list[dict[str, Any]]:
     """Shortest-path traversal across graph nodes from source to target.
 
@@ -948,8 +1060,9 @@ def trace(
             return []
 
     try:
-        graph_view = G if directed else G.to_undirected()
-        path_nodes = nx.shortest_path(graph_view, source, target)
+        view = get_canonical_search_graph(G, undirected=not directed, weighted=weighted)
+        weight_attr = "weight" if weighted else None
+        path_nodes = nx.shortest_path(view, source, target, weight=weight_attr)
     except (nx.NetworkXNoPath, nx.NodeNotFound):
         return []
 
@@ -957,7 +1070,7 @@ def trace(
     for i in range(len(path_nodes) - 1):
         u = path_nodes[i]
         v = path_nodes[i + 1]
-        edata = G.get_edge_data(u, v) or {}
+        edata = G.get_edge_data(u, v) or G.get_edge_data(v, u) or {}
         if isinstance(edata, dict) and 0 in edata and not isinstance(edata.get("relation"), str):
             edata = edata[0]
         result.append({
@@ -1383,9 +1496,11 @@ def diff_context(
         proc = subprocess.run(
             ["git", "diff", "-U0", base_ref],
             cwd=str(root_path),
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=False,
+            timeout=5,
         )
         diff_text = proc.stdout or ""
     except Exception:
@@ -1396,9 +1511,11 @@ def diff_context(
             proc2 = subprocess.run(
                 ["git", "diff", "-U0"],
                 cwd=str(root_path),
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=5,
             )
             diff_text = proc2.stdout or ""
         except Exception:
@@ -1549,9 +1666,11 @@ def diff_context(
             log_proc = subprocess.run(
                 ["git", "log", "--pretty=format:---COMMIT---", "--name-only", "-n", "50"],
                 cwd=str(root_path),
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=5,
             )
             commits = log_proc.stdout.split("---COMMIT---")
             target_set = {Path(f).as_posix() for f in file_changes.keys()}
@@ -1871,9 +1990,11 @@ def task_context(
             log_proc = subprocess.run(
                 ["git", "log", "--pretty=format:---COMMIT---", "--name-only", "-n", "50"],
                 cwd=str(root_path),
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=5,
             )
             commits = log_proc.stdout.split("---COMMIT---")
             target_set = {Path(f).as_posix() for f in candidate_files}

@@ -16,6 +16,8 @@ from graph_fy.lint import (
     check_missing_secrets_and_envs,
     check_dangling_and_orphans,
     check_dead_code,
+    check_cyclic_dependencies,
+    check_layer_violations,
     add_explicit_backlink_edges,
 )
 
@@ -248,3 +250,46 @@ def test_check_dead_code_flags_unreferenced_symbols():
     assert findings[0]["rule"] == "dead_code"
     assert findings[0]["symbol"] == "unused_legacy_helper"
     assert findings[0]["node_id"] == "fn_dead"
+
+
+def test_check_cyclic_dependencies():
+    nodes = [
+        {"id": "mod_a", "label": "module_a", "source_file": "pkg/a.py"},
+        {"id": "mod_b", "label": "module_b", "source_file": "pkg/b.py"},
+        {"id": "mod_c", "label": "module_c", "source_file": "pkg/c.py"},
+    ]
+    # A -> B -> C -> A (cycle)
+    edges = [
+        {"source": "mod_a", "target": "mod_b", "relation": "imports"},
+        {"source": "mod_b", "target": "mod_c", "relation": "imports"},
+        {"source": "mod_c", "target": "mod_a", "relation": "imports_from"},
+    ]
+
+    findings = check_cyclic_dependencies(nodes, edges)
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "cyclic_dependency"
+    assert findings[0]["severity"] == "warning"
+    assert findings[0]["cycle_length"] == 3
+    assert "pkg/a.py" in findings[0]["message"]
+    assert "pkg/b.py" in findings[0]["message"]
+    assert "pkg/c.py" in findings[0]["message"]
+
+
+def test_check_layer_violations():
+    nodes = [
+        {"id": "core_svc", "label": "CoreService", "source_file": "core/service.py"},
+        {"id": "cli_main", "label": "cli_main", "source_file": "cli/main.py"},
+    ]
+    # Forbidden: core importing cli
+    edges = [
+        {"source": "core_svc", "target": "cli_main", "relation": "imports"},
+    ]
+
+    findings = check_layer_violations(nodes, edges)
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "architectural_layer_violation"
+    assert findings[0]["severity"] == "error"
+    assert findings[0]["inner_layer"] == "core"
+    assert findings[0]["outer_layer"] == "cli"
+    assert "core/service.py" in findings[0]["message"]
+    assert "cli/main.py" in findings[0]["message"]

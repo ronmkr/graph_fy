@@ -57,7 +57,10 @@ Why `graph_fy` represents a fundamental architectural evolution over original Gr
 |---|---|---|
 | **Core Architecture** | Requires external LLMs / cloud API keys to extract entities and summarize chunks. | **100% Zero-LLM Local Compute**. Native tree-sitter AST, deterministic statistical graph algorithms, and SQLite FTS5 BM25. **Zero API keys, zero cloud costs.** |
 | **Agent Briefing Flow** | Reactive: agent searches blind, reads entire files into prompt context, and exhausts token limits. | **Proactive Zero-LLM Analysis Briefing**. `graph_fy context "<task>"` (MCP `get_agent_context`) builds an architectural map, Mermaid flow diagram, and exact skeletons **before** calling frontier models. |
-| **Token Reduction** | Monolithic file dumps; quickly fills context windows on medium/large repos. | **Multi-Tier Elision & Hub Compaction**. **104.1x token compression** measured on FastAPI monorepo (119k raw tokens $\to$ 1.1k briefing tokens, **99.04% savings**). |
+| **Token Reduction** | Monolithic file dumps; quickly fills context windows on medium/large repos. | **Multi-Tier Elision & Hub Compaction**. **99.9% token compression** measured across 5 real-world stress test workflows (839k raw tokens $\to$ 883 context tokens, **950.3x compression**). |
+| **Pathfinding & Navigation** | Naive unweighted graph search; per-query graph cloning and false-shortcut AST containment jumps. | **Semantic Dijkstra & Canonical Search Caching**. Weights execution highways (`calls`, `routes_to`) over containment (`defines`). Pre-cached search subgraphs deliver **0.31 ms median traversal (159.8x speedup)**. |
+| **Full-Stack API Boundaries** | Disconnected graphs between frontend and backend source files. | **Cross-Boundary API Route Linking**. Dynamic parameter normalization (`:id`, `{id}` $\to$ `/{}`) resolving frontend client requests (`fetch`, `axios`) to backend endpoints via `routes_to` edges. |
+| **Architecture Governance** | None; manual structural inspection. | **Built-in Architecture Linters**. Tarjan SCC cycle detection (`graph_fy lint --cycles`) and hierarchical layer boundary enforcement (`graph_fy lint --layers`). |
 | **Context Window Guarding** | Unbounded candidate dumps bombard the LLM agent. | **Anti-Bombardment Protocol**: Adaptive 3-tier elision ladder (Tier 1 AST $\to$ Tier 2 signature $\to$ Tier 3 citation), RepoGraph boundary pruning, and hub caller compaction. |
 | **Monorepo Centrality** | Slow $O(V \cdot E)$ betweenness centrality that stalls on 5,000+ nodes (#341). | **Fast Pivot Sampling ($k \le 100$)**. Computes betweenness in <0.8s on 50,000+ node graphs with 96%+ rank fidelity. |
 | **Diff-Scoped Review** | Requires re-extracting entire repository or reading full modified files. | **Git Diff-Scoped Ego Retrieval**. `graph_fy diff` analyzes modified line hunks, 1-hop callers, and blast radius in <30ms. |
@@ -69,7 +72,7 @@ Why `graph_fy` represents a fundamental architectural evolution over original Gr
 ## Documentation & Deep Dives
 
 - [**Architecture Document**](docs/ARCHITECTURE.md): Complete module responsibilities, pipeline overview, extraction schema, security model, and anti-bombardment guardrails.
-- [**Benchmarks & Verification**](docs/BENCHMARKS.md): Monorepo evaluation on `fastapi/fastapi`, token compression measurements, sampled centrality benchmarks, and exploratory round-trip elimination.
+- [**Benchmarks & Verification**](docs/BENCHMARKS.md): Monorepo evaluation on `fastapi/fastapi`, 5-scenario real-world token stress tests, sampled centrality benchmarks, and exploratory round-trip elimination.
 
 ---
 
@@ -80,6 +83,11 @@ Why `graph_fy` represents a fundamental architectural evolution over original Gr
 graph_fy context "router request dispatch"    # zero-LLM architectural briefing for LLM agents
 graph_fy diff HEAD                            # diff-scoped blast radius & 1-hop callers for review
 graph_fy refine --code "def handle(req): ..." # resolve missing types and dependencies from draft code
+
+# Architecture Governance & Linters
+graph_fy lint                                 # audit codebase for circular dependencies and layer violations
+graph_fy lint --cycles                        # detect Tarjan SCC dependency loops
+graph_fy lint --layers                        # enforce clean decoupled layer hierarchies
 
 # Graph Generation & Incremental Updates
 graph_fy .                                    # build graph and search index in graph_fy_out/
@@ -92,7 +100,7 @@ graph_fy query "auth flow"                    # BM25 search expanded via graph t
 graph_fy query "auth flow" --terse            # Caveman mode: high-signal, compact output
 graph_fy query "auth flow" --skeleton         # AST code skeletons (types & signatures without bodies)
 graph_fy query "auth flow" --rag-prompt       # prompt-ready context block with strict budget packing
-graph_fy path "Frontend" "Database"           # shortest cross-layer dependency path
+graph_fy path "Frontend" "Database"           # shortest cross-layer dependency path (semantic Dijkstra)
 graph_fy explain "UserService"                # BM25, graph-hop, and centrality breakdown
 graph_fy impact "APIRoute"                    # predictive blast radius risk & affected tests
 
@@ -123,8 +131,8 @@ graph_fy --mcp                                # launch local MCP stdio server
 ## Development
 
 ```bash
-git clone https://github.com/ronmkr/grafify.git
-cd grafify
+git clone https://github.com/ronmkr/graph_fy.git
+cd graph_fy
 uv sync --all-extras
 uv run pytest tests/ -q
 ```

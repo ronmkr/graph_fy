@@ -1127,12 +1127,46 @@ def _parse_gitignore_line(raw: str) -> str:
     return _nfc(line)
 
 
+def _is_valid_git_marker(dot_git: Path, is_home: bool = False) -> bool:
+    """Whether ``dot_git`` is a valid git marker (#4444).
+
+    At the user's home directory boundary, a ``.git`` directory must be a genuine
+    git repository (with ``HEAD``, ``objects/``, and ``refs/``) to avoid leaking
+    a stray home-level ``.git`` or ``~/.gitignore`` into scanned projects.
+    """
+    try:
+        if dot_git.is_dir():
+            if not is_home:
+                return True
+            return (dot_git / "HEAD").is_file() and (dot_git / "objects").is_dir() and (dot_git / "refs").is_dir()
+        if dot_git.is_file():
+            with dot_git.open("rb") as fh:
+                return fh.read(7) == b"gitdir:"
+    except OSError:
+        pass
+    return False
+
+
+def _has_vcs_marker(directory: Path, is_home: bool = False) -> bool:
+    for marker in _VCS_MARKERS:
+        path = directory / marker
+        if marker == ".git":
+            if _is_valid_git_marker(path, is_home=is_home):
+                return True
+        elif path.exists():
+            return True
+    return False
+
+
 def _find_vcs_root(start: Path) -> Path | None:
-    """Walk upward from start; return the first directory containing a VCS marker."""
+    """Walk upward from start; return the first directory containing a VCS marker.
+
+    ``.git`` at the home directory only counts when it is a valid repo marker (#4444).
+    """
     current = start.resolve()
     home = Path.home()
     while True:
-        if any((current / m).exists() for m in _VCS_MARKERS):
+        if _has_vcs_marker(current, is_home=(current == home)):
             return current
         parent = current.parent
         if parent == current or current == home:

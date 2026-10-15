@@ -1687,27 +1687,12 @@ def _shortest_path_text(G: nx.Graph, arguments: dict) -> str:
                 )
     max_hops = int(arguments.get("max_hops", 8))
     undirected = bool(arguments.get("undirected", False))
+    weighted = bool(arguments.get("weighted", True))
     try:
-        # Deterministic path (#2074): the hash-seeded undirected view picked an
-        # arbitrary route among equal-length paths. Build a sorted, materialized
-        # graph so the chosen path is canonical. Serve's shared G is left
-        # untouched (its degree feeds query-seed tie-breaks).
-        if undirected:
-            _und = nx.Graph()
-            _und.add_nodes_from(sorted(G.nodes))
-            _und.add_edges_from(sorted((min(u, v), max(u, v)) for u, v in G.edges()))
-            path_nodes = nx.shortest_path(_und, src_nid, tgt_nid)
-        else:
-            # Directed by default (#2487). True direction is NOT raw arc
-            # order: legacy canonicalized files persist a flipped arc with
-            # _src/_tgt markers (#2309), so build the digraph from _src/_tgt
-            # (falling back to the loaded arc) rather than to_directed().
-            _dg = nx.DiGraph()
-            _dg.add_nodes_from(sorted(G.nodes))
-            _dg.add_edges_from(sorted(
-                (d.get("_src", u), d.get("_tgt", v)) for u, v, d in G.edges(data=True)
-            ))
-            path_nodes = nx.shortest_path(_dg, src_nid, tgt_nid)
+        from graph_fy.retrieval import get_canonical_search_graph
+        view = get_canonical_search_graph(G, undirected=undirected, weighted=weighted)
+        weight_attr = "weight" if weighted else None
+        path_nodes = nx.shortest_path(view, src_nid, tgt_nid, weight=weight_attr)
     except (nx.NetworkXNoPath, nx.NodeNotFound):
         src_label = G.nodes[src_nid].get("label", src_nid)
         tgt_label = G.nodes[tgt_nid].get("label", tgt_nid)

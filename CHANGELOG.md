@@ -1,6 +1,36 @@
 # Changelog
 
-Full release notes with details on each version: [GitHub Releases](https://github.com/safishamsi/graphify/releases)
+Full release notes with details on each version: [GitHub Releases](https://github.com/ronmkr/graph_fy/releases)
+
+## 0.1.0 (2026-10-16)
+
+- Feature: Semantic Dijkstra Pathfinding & Routing Acceleration (`graph_fy/retrieval.py` & `graph_fy/serve.py`):
+  - Pre-cached canonical search subgraphs stored in `G.graph["_canonical_search_views"]`, eliminating per-query graph cloning.
+  - Multi-hop semantic impedance weighting (`calls`/`routes_to`: 1.0, `imports`: 1.3, `defines`: 2.5, `contains`: 3.5), prioritizing executable call chains over AST containment shortcuts.
+  - Reduced pathfinding median traversal latency from 53.85 ms to 0.31 ms (**159.8x speedup / 99.4% drop**).
+- Feature: Cross-Boundary Full-Stack API Route Linking (`graph_fy/cross_resolve.py`):
+  - Added `resolve_cross_boundary_api_routes` with dynamic REST parameter normalization (`:id`, `{id}`, `/<int>` $\to$ `/{}`).
+  - Emits `routes_to` edges linking frontend client calls (`fetch`, `axios`) directly to backend FastAPI, Express, and OpenAPI endpoints.
+- Feature: Architecture Lint Rules (`graph_fy/lint.py` & `graph_fy lint`):
+  - Added Tarjan Strongly Connected Components cycle detection (`check_cyclic_dependencies`) to surface circular import and file dependencies.
+  - Added strict hierarchical layer boundary checks (`check_layer_violations`) to enforce clean domain/infrastructure separation.
+- Feature: Real-World Token Stress Test Suite (`scripts/stress_test_token_savings.py` & `docs/BENCHMARKS.md`):
+  - 5 realistic developer workflows benchmarked across 13.9k node self-index.
+  - Demonstrated **99.9% token compression** (839,158 raw file tokens compressed to 883 graph_fy context tokens; 950.3x compression).
+- Feature: Incremental Watcher Delta State (`graph_fy/watch.py`):
+  - Emits atomic `graph_fy_out/.graph_fy_delta.json` during watch cycles for sub-10ms IDE and git hook synchronization.
+- Fix: Subprocess Deadlocks & Git Hangs:
+  - Added `stdin=subprocess.DEVNULL` and `timeout=5` across `graph_fy/export.py`, `graph_fy/watch.py`, and `graph_fy/retrieval.py`.
+- Fix: Python Leading Underscore Node Loss:
+  - Added pre-scan pass in `graph_fy/extractors/engine.py` preventing module collision drops (+14 nodes preserved).
+- Fix: VCS Root Traversal Leakage:
+  - Bounded root detection in `graph_fy/detect.py` to stop traversal past git project root.
+- Fix: SQLite FTS5 Reserved Operator Crashes:
+  - Escaped boolean operators (`AND`, `OR`, `NOT`) in `graph_fy/retrieval.py` FTS5 queries.
+- Fix: CLI Positional Flag Invariance:
+  - Allowed `--explain`, `--undirected`, and `--depth` in any position relative to symbols in `graph_fy/cli.py`.
+- Fix: Path Type Safety:
+  - Supported string paths alongside `Path` objects in `graph_fy/affected.py:load_graph`.
 
 ## 0.0.1 (2026-09-25)
 

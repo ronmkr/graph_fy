@@ -840,7 +840,15 @@ def _python_pre_scan_underscore_collisions(root_node, source: bytes, stem: str) 
     def _record(plain_nid: str, name: str) -> None:
         groups.setdefault(plain_nid, set()).add(name)
 
-    for child in root_node.children:
+    def _undecorated(node):
+        # `@dataclass class X` / `@property def x` wrap the definition in a
+        # decorated_definition; the walker mints the wrapped one's id unchanged.
+        if node.type == "decorated_definition":
+            return node.child_by_field_name("definition") or node
+        return node
+
+    classes: list = []
+    for child in map(_undecorated, root_node.children):
         if child.type == "function_definition":
             name_node = child.child_by_field_name("name")
             if name_node is not None:
@@ -855,16 +863,21 @@ def _python_pre_scan_underscore_collisions(root_node, source: bytes, stem: str) 
             class_name = _read_text(class_name_node, source)
             if not class_name:
                 continue
-            class_nid = _make_id(stem, class_name)
-            for member in body.children:
-                if member.type != "function_definition":
-                    continue
-                name_node = member.child_by_field_name("name")
-                if name_node is None:
-                    continue
-                name = _read_text(name_node, source)
-                if name:
-                    _record(_make_id(class_nid, name), name)
+            _record(_make_id(stem, class_name), class_name)
+            classes.append((class_name, body))
+
+    module_groups = {nid: names for nid, names in groups.items() if len(names) >= 2}
+    for class_name, body in classes:
+        class_nid = _python_underscore_salted_nid(_make_id(stem, class_name), class_name, module_groups)
+        for member in map(_undecorated, body.children):
+            if member.type != "function_definition":
+                continue
+            name_node = member.child_by_field_name("name")
+            if name_node is None:
+                continue
+            name = _read_text(name_node, source)
+            if name:
+                _record(_make_id(class_nid, name), name)
 
     return {nid: names for nid, names in groups.items() if len(names) >= 2}
 
@@ -3614,6 +3627,8 @@ def _extract_generic(
 
     def ensure_named_node(name: str, line: int) -> str:
         nid = _make_id(stem, ".".join(namespace_stack), name)
+        if config.ts_module == "tree_sitter_python":
+            nid = _python_underscore_salted_nid(nid, name, python_underscore_groups)
         if nid in seen_ids:
             return nid
         nid = _make_id(name)
@@ -3726,6 +3741,10 @@ def _extract_generic(
                 ruby_segments = class_name.split("::")
                 class_name = "::".join(ruby_namespace + ruby_segments)
             class_nid = _make_id(stem, ".".join(namespace_stack), class_name)
+            if config.ts_module == "tree_sitter_python" and parent_class_nid:
+                class_nid = _make_id(parent_class_nid, class_name)
+            elif config.ts_module == "tree_sitter_python":
+                class_nid = _python_underscore_salted_nid(class_nid, class_name, python_underscore_groups)
             line = node.start_point[0] + 1
             metadata = None
             ruby_reopened = (

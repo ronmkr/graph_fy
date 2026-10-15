@@ -4,6 +4,9 @@ from __future__ import annotations
 import io
 import os
 from pathlib import Path
+import pytest
+
+pypdf = pytest.importorskip("pypdf")
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
