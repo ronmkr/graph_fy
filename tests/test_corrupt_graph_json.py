@@ -49,5 +49,6 @@ def test_valid_graph_still_loads(tmp_path):
     )
     # none of these should raise
     load_graph(p)
+    load_graph(str(p))  # string path must not raise AttributeError
     _read_json_file(p)
     build_merge([], graph_path=p, dedup=False)

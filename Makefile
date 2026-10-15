@@ -17,7 +17,7 @@ check:
 	uv run pyright
 
 update-graph:
-	uv run python -m graph_fy.cli update .
+	uv run graph_fy update .
 
 audit:
 	uv run pip-audit

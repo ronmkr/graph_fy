@@ -420,6 +420,130 @@ def check_dead_code(
     return findings
 
 
+def check_cyclic_dependencies(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    max_cycles: int = 15,
+) -> list[dict[str, Any]]:
+    """Detect circular/cyclic dependencies between files and modules.
+
+    Constructs a directed file-level dependency graph from `imports`, `imports_from`,
+    and `depends_on` relations across distinct files, then detects elementary
+    cycles using NetworkX.
+    """
+    findings: list[dict[str, Any]] = []
+    nodes_by_id = {str(n.get("id")): n for n in nodes if "id" in n}
+
+    file_graph = nx.DiGraph()
+    dependency_relations = {"imports", "imports_from", "depends_on"}
+
+    for e in edges:
+        rel = str(e.get("relation", ""))
+        if rel not in dependency_relations:
+            continue
+        src_id = str(e.get("source", ""))
+        tgt_id = str(e.get("target", ""))
+        src_file = e.get("source_file") or (nodes_by_id.get(src_id, {}).get("source_file"))
+        tgt_file = nodes_by_id.get(tgt_id, {}).get("source_file")
+        if src_file and tgt_file and src_file != tgt_file:
+            file_graph.add_edge(str(src_file), str(tgt_file))
+
+    if not file_graph.number_of_nodes():
+        return findings
+
+    try:
+        cycles = list(nx.simple_cycles(file_graph))
+    except Exception:
+        cycles = []
+
+    cycles.sort(key=lambda c: (len(c), c))
+    seen_cycle_keys = set()
+    for cycle in cycles[:max_cycles]:
+        min_idx = cycle.index(min(cycle))
+        canonical = tuple(cycle[min_idx:] + cycle[:min_idx])
+        if canonical in seen_cycle_keys:
+            continue
+        seen_cycle_keys.add(canonical)
+
+        cycle_display = " -> ".join(cycle + [cycle[0]])
+        findings.append({
+            "rule": "cyclic_dependency",
+            "severity": "warning",
+            "cycle": cycle + [cycle[0]],
+            "cycle_length": len(cycle),
+            "source_file": cycle[0],
+            "source_location": "L1",
+            "message": f"Cyclic dependency detected across {len(cycle)} files: {cycle_display}",
+        })
+
+    return findings
+
+
+def check_layer_violations(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    custom_rules: list[tuple[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Detect architectural layer violations where inner/lower layers import outer/upper layers.
+
+    Clean Architecture Invariant:
+    Core / Domain / Engine / Storage must NOT import Presentation / CLI / UI / Views.
+    """
+    findings: list[dict[str, Any]] = []
+    nodes_by_id = {str(n.get("id")): n for n in nodes if "id" in n}
+
+    rules = custom_rules or [
+        ("domain", "cli"),
+        ("core", "cli"),
+        ("engine", "cli"),
+        ("extractors", "cli"),
+        ("models", "cli"),
+        ("db", "cli"),
+        ("domain", "ui"),
+        ("core", "ui"),
+        ("engine", "ui"),
+        ("models", "ui"),
+        ("core", "views"),
+        ("domain", "controllers"),
+    ]
+
+    seen = set()
+    for e in edges:
+        rel = str(e.get("relation", ""))
+        if rel not in ("imports", "imports_from", "calls"):
+            continue
+
+        src_id = str(e.get("source", ""))
+        tgt_id = str(e.get("target", ""))
+        src_file = str(e.get("source_file") or nodes_by_id.get(src_id, {}).get("source_file") or "").lower().replace("\\", "/")
+        tgt_file = str(nodes_by_id.get(tgt_id, {}).get("source_file") or "").lower().replace("\\", "/")
+
+        if not src_file or not tgt_file or src_file == tgt_file:
+            continue
+
+        for inner_pat, outer_pat in rules:
+            if (f"/{inner_pat}/" in f"/{src_file}" or src_file.startswith(f"{inner_pat}/") or f"_{inner_pat}" in src_file) and \
+               (f"/{outer_pat}/" in f"/{tgt_file}" or tgt_file.startswith(f"{outer_pat}/") or f"_{outer_pat}" in tgt_file):
+                key = (src_file, tgt_file, inner_pat, outer_pat)
+                if key not in seen:
+                    seen.add(key)
+                    findings.append({
+                        "rule": "architectural_layer_violation",
+                        "severity": "error",
+                        "source_file": e.get("source_file") or nodes_by_id.get(src_id, {}).get("source_file", ""),
+                        "source_location": e.get("source_location", "L1"),
+                        "inner_layer": inner_pat,
+                        "outer_layer": outer_pat,
+                        "imported_file": nodes_by_id.get(tgt_id, {}).get("source_file", ""),
+                        "message": (
+                            f"Architectural layer violation: inner layer '{src_file}' ({inner_pat}) "
+                            f"imports outer layer '{tgt_file}' ({outer_pat})."
+                        ),
+                    })
+
+    return findings
+
+
 def add_explicit_backlink_edges(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
@@ -466,6 +590,8 @@ def run_lint(
     graph_or_extraction: nx.Graph | dict[str, Any],
     check_orphans: bool = True,
     check_dead: bool = True,
+    check_cycles: bool = True,
+    check_layers: bool = True,
 ) -> dict[str, Any]:
     """Execute all deterministic lint and drift rules against a graph or extraction dict.
 
@@ -504,6 +630,14 @@ def run_lint(
     # 6. Dead Code / Unreferenced Symbols
     if check_dead:
         findings.extend(check_dead_code(nodes, edges))
+
+    # 7. Cyclic dependencies between files
+    if check_cycles:
+        findings.extend(check_cyclic_dependencies(nodes, edges))
+
+    # 8. Architectural Layer Violations
+    if check_layers:
+        findings.extend(check_layer_violations(nodes, edges))
 
     errors = sum(1 for f in findings if f.get("severity") == "error")
     warnings = sum(1 for f in findings if f.get("severity") == "warning")

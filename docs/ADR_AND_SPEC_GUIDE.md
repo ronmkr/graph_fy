@@ -37,8 +37,10 @@ An ADR captures an important architectural decision, along with its context, alt
 * Introducing a new framework, library, or language version.
 * Choosing a persistent data store or communication protocol (REST vs. gRPC vs. Event-driven).
 * Enforcing architectural patterns (Hexagonal Architecture, CQRS, zero-ORM policy).
-* Establishing security boundaries or data compliance rules.
 * **Do NOT write an ADR for**: Trivial refactors, standard bug fixes, or day-to-day implementation details.
+
+### Repository ADR Index:
+* [ADR-001: Project-Specific Unix Agent Skills Over Monolithic Generic Frameworks](adr/ADR-001-project-specific-unix-skills.md)
 
 ### The Canonical ADR Template (`docs/adr/ADR-001-template.md`)
 

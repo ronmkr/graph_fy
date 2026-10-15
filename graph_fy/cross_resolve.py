@@ -362,7 +362,104 @@ def resolve_cross_format_dependencies(
     # 8. Cross-resolve RTK Query endpoints to backend routes
     resolve_rtk_backend_edges(nodes, edges)
 
+    # 9. Cross-resolve generic frontend HTTP client calls (fetch, axios) to backend routes
+    resolve_cross_boundary_api_routes(nodes, edges)
+
     return nodes, edges
+
+
+def _normalize_route_path(path: str) -> str:
+    """Normalize route path: strip protocol, host, query params, trailing slash, and unify :id / {id} param syntax."""
+    import re
+    p = path.strip().strip("'\"`")
+    p = p.split("?")[0]
+    if "://" in p:
+        p = "/" + p.split("://", 1)[1].split("/", 1)[-1] if "/" in p.split("://", 1)[1] else "/"
+    p = re.sub(r"[:<][a-zA-Z0-9_]+>?", "{}", p)
+    p = re.sub(r"\{[a-zA-Z0-9_]+\}", "{}", p)
+    p = re.sub(r"/[0-9]+(?=/|$)", "/{}", p)
+    p = re.sub(r"/[0-9a-fA-F\-]{16,}(?=/|$)", "/{}", p)
+    p = "/" + p.strip("/")
+    return p.lower()
+
+
+def resolve_cross_boundary_api_routes(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Connect frontend HTTP client calls (fetch, axios) to backend route endpoints.
+
+    Discovers:
+    1. Backend routes: OpenAPI operations, FastAPI endpoints, Express/NestJS handlers.
+    2. Frontend client calls: fetch('/api/...'), axios.get('/api/...'), apiClient.post(...)
+    When normalized paths match, adds `routes_to` edges with confidence `INFERRED`.
+    """
+    import re
+    seen_edges: set[tuple[str, str, str]] = {
+        (str(e.get("source")), str(e.get("target")), str(e.get("relation")))
+        for e in edges
+    }
+    new_edges: list[dict[str, Any]] = []
+
+    # 1. Collect backend route providers: (node, norm_path, method)
+    backend_routes: list[tuple[dict[str, Any], str, str]] = []
+    for n in nodes:
+        ntype = str(n.get("type", "")).lower()
+        lbl = str(n.get("label", ""))
+        route_path = n.get("path") or n.get("route") or n.get("http_route") or n.get("http_path") or ""
+        method = str(n.get("http_method") or n.get("method") or "").upper()
+
+        if ntype in ("openapi_operation", "openapi_path") or lbl.startswith("OpenAPI:"):
+            if not route_path and ":" in lbl:
+                route_path = lbl.split(":")[-1]
+            if route_path:
+                backend_routes.append((n, _normalize_route_path(route_path), method or "GET"))
+        elif any(k in ntype for k in ("route", "endpoint", "api_handler", "rpc")):
+            if route_path:
+                backend_routes.append((n, _normalize_route_path(route_path), method or "GET"))
+        elif any(lbl.startswith(prefix) for prefix in ("Route:", "Endpoint:", "API:")):
+            if not route_path:
+                route_path = lbl.split(":", 1)[-1]
+            backend_routes.append((n, _normalize_route_path(route_path), method or "GET"))
+
+    if not backend_routes:
+        return new_edges
+
+    # 2. Discover client callers with route paths
+    for n in nodes:
+        client_path = n.get("target_url") or n.get("http_path") or n.get("api_path") or ""
+        method = str(n.get("http_method") or n.get("method") or "GET").upper()
+        if not client_path:
+            txt = str(n.get("text", "")) or str(n.get("label", ""))
+            fetch_match = re.search(r"""(?:fetch|axios(?:\.(?:get|post|put|delete|patch))?)\s*\(\s*["'`](\/[a-zA-Z0-9_\-\/{}:]+)["'`]""", txt)
+            if fetch_match:
+                client_path = fetch_match.group(1)
+                if "axios." in txt:
+                    method_match = re.search(r"axios\.(get|post|put|delete|patch)", txt)
+                    if method_match:
+                        method = method_match.group(1).upper()
+
+        if client_path:
+            norm_client = _normalize_route_path(client_path)
+            for b_node, norm_b, b_method in backend_routes:
+                if norm_client == norm_b or (norm_client != "/" and norm_client.endswith(norm_b)) or (norm_b != "/" and norm_b.endswith(norm_client)):
+                    if not method or not b_method or method == b_method or method == "ALL" or b_method == "ALL":
+                        key = (n["id"], b_node["id"], "routes_to")
+                        if key not in seen_edges and n["id"] != b_node["id"]:
+                            seen_edges.add(key)
+                            edge = {
+                                "source": n["id"],
+                                "target": b_node["id"],
+                                "relation": "routes_to",
+                                "confidence": "INFERRED",
+                                "weight": 1.0,
+                                "source_file": n.get("source_file", ""),
+                                "source_location": n.get("source_location", "L1"),
+                            }
+                            edges.append(edge)
+                            new_edges.append(edge)
+
+    return new_edges
 
 
 def find_secret_and_env_cross_references(

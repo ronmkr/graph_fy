@@ -292,12 +292,13 @@ def format_affected(
     return "\n".join(lines)
 
 
-def load_graph(path: Path) -> nx.Graph:
+def load_graph(path: Path | str) -> nx.Graph:
     import json
     from networkx.readwrite import json_graph
 
+    p = Path(path)
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         raise RuntimeError(
             f"Cannot read graph file {path}: {exc}. "

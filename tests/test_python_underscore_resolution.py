@@ -218,3 +218,123 @@ def test_collision_in_one_class_does_not_salt_unrelated_class(tmp_path: Path) ->
     assert b_foo["id"] == f"{class_b_id}_foo", (
         "an unrelated class's non-colliding _foo was needlessly salted"
     )
+
+
+def _labels_to_ids(result: dict) -> dict[str, str]:
+    return {n["label"]: n["id"] for n in _rationale_free_nodes(result)}
+
+
+def test_class_and_function_case_collision_both_extracted(tmp_path: Path) -> None:
+    """requests/sessions.py shape: a class and its lowercase factory."""
+    path = _write_py(tmp_path, '''
+        class Session:
+            pass
+
+        def session():
+            return Session()
+    ''')
+    ids = _labels_to_ids(extract_python(path))
+    assert "Session" in ids, f"class missing (#2810): {sorted(ids)}"
+    assert "session()" in ids, f"function missing (#2810): {sorted(ids)}"
+    assert ids["Session"] != ids["session()"]
+
+
+def test_class_and_function_case_collision_is_order_independent(tmp_path: Path) -> None:
+    """Function declared first must not change which declarations survive or what ids they get."""
+    class_first = _labels_to_ids(extract_python(_write_py(tmp_path, '''
+        class Session:
+            pass
+
+        def session():
+            return Session()
+    ''')))
+    func_first = _labels_to_ids(extract_python(_write_py(tmp_path, '''
+        def session():
+            return Session()
+
+        class Session:
+            pass
+    ''')))
+    assert class_first["Session"] == func_first["Session"]
+    assert class_first["session()"] == func_first["session()"]
+
+
+def test_class_and_class_case_collision_both_extracted(tmp_path: Path) -> None:
+    path = _write_py(tmp_path, '''
+        class Foo:
+            pass
+
+        class FOO:
+            pass
+    ''')
+    ids = _labels_to_ids(extract_python(path))
+    assert "Foo" in ids and "FOO" in ids, f"a class was dropped: {sorted(ids)}"
+    assert ids["Foo"] != ids["FOO"]
+
+
+def test_class_underscore_collision_public_class_keeps_plain_id(tmp_path: Path) -> None:
+    solo_id = _labels_to_ids(extract_python(_write_py(tmp_path, '''
+        class Pair:
+            pass
+    ''')))["Pair"]
+    ids = _labels_to_ids(extract_python(_write_py(tmp_path, '''
+        class _Pair:
+            pass
+
+        class Pair:
+            pass
+    ''')))
+    assert "_Pair" in ids and "Pair" in ids
+    assert ids["Pair"] == solo_id
+    assert ids["_Pair"] != solo_id
+
+
+def test_methods_of_a_salted_class_keep_underscore_protection(tmp_path: Path) -> None:
+    path = _write_py(tmp_path, '''
+        class Session:
+            def _get(self):
+                return 1
+
+            def get(self):
+                return self._get()
+
+        def session():
+            return Session()
+    ''')
+    ids = _labels_to_ids(extract_python(path))
+    assert "._get()" in ids and ".get()" in ids, f"a method was dropped: {sorted(ids)}"
+    assert ids["._get()"] != ids[".get()"]
+    assert ids[".get()"].startswith(ids["Session"]), "method not scoped under its class"
+
+
+def test_constructor_call_binds_to_the_salted_class(tmp_path: Path) -> None:
+    path = _write_py(tmp_path, '''
+        class Session:
+            pass
+
+        def session():
+            return Session()
+    ''')
+    result = extract_python(path)
+    ids = _labels_to_ids(result)
+    pairs = {(e["source"], e["target"]) for e in result["edges"]}
+    assert (ids["session()"], ids["Session"]) in pairs, (
+        f"no edge from session() to the Session class: {result['edges']}"
+    )
+    assert (ids["session()"], ids["session()"]) not in pairs
+
+
+def test_decorated_class_and_function_case_collision_both_extracted(tmp_path: Path) -> None:
+    path = _write_py(tmp_path, '''
+        from dataclasses import dataclass
+
+        @dataclass
+        class Session:
+            x: int = 0
+
+        def session():
+            return Session()
+    ''')
+    ids = _labels_to_ids(extract_python(path))
+    assert "Session" in ids and "session()" in ids, f"a declaration was dropped: {sorted(ids)}"
+    assert ids["Session"] != ids["session()"]

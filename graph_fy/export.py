@@ -211,7 +211,7 @@ def _git_head(cwd: "str | Path | None" = None) -> str | None:
     try:
         r = _sp.run(
             ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=3,
-            cwd=str(cwd) if cwd is not None else None,
+            stdin=_sp.DEVNULL, cwd=str(cwd) if cwd is not None else None,
         )
         return r.stdout.strip() if r.returncode == 0 else None
     except Exception:

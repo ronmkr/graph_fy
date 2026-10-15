@@ -265,7 +265,7 @@ def _git_head(cwd: Path | str | None = None) -> str | None:
     try:
         r = _sp.run(
             ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=3,
-            cwd=str(cwd) if cwd is not None else None,
+            stdin=_sp.DEVNULL, cwd=str(cwd) if cwd is not None else None,
         )
         return r.stdout.strip() if r.returncode == 0 else None
     except Exception:
@@ -2137,6 +2137,20 @@ def _rebuild_code(
                 pass
 
         (out / ".graph_fy_root").write_text(str(watch_path), encoding="utf-8")
+
+        try:
+            delta_path = out / ".graph_fy_delta.json"
+            delta_info = {
+                "timestamp": time.time(),
+                "built_at_commit": commit,
+                "nodes_count": G.number_of_nodes(),
+                "edges_count": G.number_of_edges(),
+                "changed_files": [str(p) for p in (changed_paths or [])],
+                "same_graph": same_graph,
+            }
+            delta_path.write_text(json.dumps(delta_info, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
         try:
             from graph_fy.detect import save_manifest

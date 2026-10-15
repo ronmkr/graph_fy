@@ -90,3 +90,19 @@ def test_weighted_columns_and_phrase_query(tmp_path: Path):
     phrase_results = query('"multi-tenant authentication"', graph=G, db_path=db_path, limit=5, hops=0)
     assert len(phrase_results) == 1
     assert phrase_results[0]["node_id"] == "misc_doc"
+
+
+def test_clean_fts_query_reserved_operators(tmp_path: Path):
+    """Verify that reserved FTS5 operators (AND, OR, NOT) inside NEAR() do not cause syntax errors."""
+    q = _clean_fts_query("what does NOT work in system")
+    assert 'NEAR(what does "NOT" work in system, 10)' in q
+
+    # Ensure executing against FTS5 does not raise sqlite3.OperationalError
+    G = nx.Graph()
+    G.add_node("n1", label="system", file_type="code", text="how the system operates")
+    db = tmp_path / "fts_test.db"
+    build_index(G, db)
+
+    # Should execute cleanly without raising sqlite3.OperationalError: fts5: syntax error near "NOT"
+    res = query("what does NOT work in system", graph=G, db_path=db, limit=5)
+    assert isinstance(res, list)

@@ -1823,25 +1823,27 @@ def dispatch_command(cmd: str) -> None:
                 f"{c['corrected']} corrected) -> {out_path}"
             )
     elif cmd in ("path", "trace"):
-        if len(sys.argv) < 4:
-            print(
-                f'Usage: graph_fy {cmd} "<source>" "<target>" [--graph path] '
-                "[--directed|--undirected]",
-                file=sys.stderr,
-            )
-            sys.exit(1)
         from graph_fy.serve import _pick_scored_endpoint, _score_nodes
         from networkx.readwrite import json_graph
         import networkx as _nx
 
-        source_label = sys.argv[2]
-        target_label = sys.argv[3]
+        raw_args = sys.argv[2:]
+        positional = []
         graph_path = _default_graph_path()
-        args = sys.argv[4:]
         direction_flag = None
-        for i, a in enumerate(args):
-            if a == "--graph" and i + 1 < len(args):
-                graph_path = args[i + 1]
+        weighted = True
+        i = 0
+        while i < len(raw_args):
+            a = raw_args[i]
+            if a == "--graph" and i + 1 < len(raw_args):
+                graph_path = raw_args[i + 1]
+                i += 2
+            elif a.startswith("--graph="):
+                graph_path = a.split("=", 1)[1]
+                i += 1
+            elif a == "--unweighted":
+                weighted = False
+                i += 1
             elif a == "--directed":
                 if direction_flag == "undirected":
                     print(
@@ -1850,6 +1852,7 @@ def dispatch_command(cmd: str) -> None:
                     )
                     sys.exit(1)
                 direction_flag = "directed"
+                i += 1
             elif a == "--undirected":
                 if direction_flag == "directed":
                     print(
@@ -1858,9 +1861,22 @@ def dispatch_command(cmd: str) -> None:
                     )
                     sys.exit(1)
                 direction_flag = "undirected"
-        # Directed by default (#2487): direction truth exists in every
-        # graph.json (arc order on post-#563 files, _src/_tgt markers on legacy
-        # canonicalized files), so respect it unless the caller opts out.
+                i += 1
+            elif not a.startswith("--"):
+                positional.append(a)
+                i += 1
+            else:
+                i += 1
+
+        if len(positional) < 2:
+            print(
+                f'Usage: graph_fy {cmd} "<source>" "<target>" [--graph path] '
+                "[--directed|--undirected] [--unweighted]",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        source_label = positional[0]
+        target_label = positional[1]
         undirected = direction_flag == "undirected"
         gp = Path(graph_path).resolve()
         if not gp.exists():
@@ -1921,22 +1937,10 @@ def dispatch_command(cmd: str) -> None:
         # process. Build a sorted, materialized graph so neighbor order — and
         # thus the chosen path — is canonical for a given graph.json.
         try:
-            if undirected:
-                _und = _nx.Graph()
-                _und.add_nodes_from(sorted(G.nodes))
-                _und.add_edges_from(sorted((min(u, v), max(u, v)) for u, v in G.edges()))
-                path_nodes = _nx.shortest_path(_und, src_nid, tgt_nid)
-            else:
-                # Directed by default (#2487). True direction is NOT raw arc
-                # order: legacy canonicalized files persist a flipped arc with
-                # _src/_tgt markers (#2309), so build the digraph from _src/_tgt
-                # (falling back to the loaded arc) rather than to_directed().
-                _dg = _nx.DiGraph()
-                _dg.add_nodes_from(sorted(G.nodes))
-                _dg.add_edges_from(sorted(
-                    (d.get("_src", u), d.get("_tgt", v)) for u, v, d in G.edges(data=True)
-                ))
-                path_nodes = _nx.shortest_path(_dg, src_nid, tgt_nid)
+            from graph_fy.retrieval import get_canonical_search_graph
+            view = get_canonical_search_graph(G, undirected=undirected, weighted=weighted)
+            weight_attr = "weight" if weighted else None
+            path_nodes = _nx.shortest_path(view, src_nid, tgt_nid, weight=weight_attr)
         except (_nx.NetworkXNoPath, _nx.NodeNotFound):
             if undirected:
                 print(f"No path found between '{source_label}' and '{target_label}'.")
@@ -1983,28 +1987,42 @@ def dispatch_command(cmd: str) -> None:
         from graph_fy import querylog
         querylog.log_query(
             kind="path",
-            question=f"{sys.argv[2]} -> {sys.argv[3]}",
+            question=f"{source_label} -> {target_label}",
             corpus=str(gp),
             nodes_returned=hops,
         )
         _touch_query_stamp(gp)
 
     elif cmd == "explain":
-        if len(sys.argv) < 3:
+        raw_args = sys.argv[2:]
+        positional = []
+        graph_path = _default_graph_path()
+        terse = False
+        i = 0
+        while i < len(raw_args):
+            a = raw_args[i]
+            if a == "--graph" and i + 1 < len(raw_args):
+                graph_path = raw_args[i + 1]
+                i += 2
+            elif a.startswith("--graph="):
+                graph_path = a.split("=", 1)[1]
+                i += 1
+            elif a in ("--terse", "--caveman"):
+                terse = True
+                i += 1
+            elif not a.startswith("--"):
+                positional.append(a)
+                i += 1
+            else:
+                i += 1
+
+        if not positional:
             print('Usage: graph_fy explain "<node>" [--graph path] [--terse] [--caveman]', file=sys.stderr)
             sys.exit(1)
         from graph_fy.serve import _find_node, find_node_ambiguity
         from networkx.readwrite import json_graph
 
-        label = sys.argv[2]
-        graph_path = _default_graph_path()
-        terse = "--terse" in sys.argv or "--caveman" in sys.argv
-        args = sys.argv[3:]
-        for i, a in enumerate(args):
-            if a == "--graph" and i + 1 < len(args):
-                graph_path = args[i + 1]
-            elif a in ("--terse", "--caveman"):
-                terse = True
+        label = positional[0]
         gp = Path(graph_path).resolve()
         if not gp.exists():
             print(f"error: graph file not found: {gp}", file=sys.stderr)
@@ -5198,3 +5216,8 @@ def dispatch_command(cmd: str) -> None:
         print(f"error: unknown command '{cmd}'", file=sys.stderr)
         print("Run 'graph_fy --help' for usage.", file=sys.stderr)
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    _reenter_main()
+
