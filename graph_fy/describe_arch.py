@@ -704,16 +704,17 @@ Options:
 
 def cli_describe(argv: list[str]) -> None:
     """CLI dispatcher for `graph_fy describe`."""
-    if not argv or argv[0] in ("-h", "--help"):
+    if argv and argv[0] in ("-h", "--help"):
         print(_DESCRIBE_USAGE)
         return
 
-    subcmd = argv[0]
-    if subcmd not in ("arch", "architecture"):
-        print(f"Unknown describe subcommand '{subcmd}'. Available: 'graph_fy describe arch'", file=sys.stderr)
-        sys.exit(1)
+    # Allow bare `graph_fy describe [options]` as well as `graph_fy describe arch [options]`
+    if argv and argv[0] in ("arch", "architecture"):
+        remaining = argv[1:]
+    else:
+        remaining = argv
 
-    parser = argparse.ArgumentParser(prog="graph_fy describe arch", add_help=False)
+    parser = argparse.ArgumentParser(prog="graph_fy describe", add_help=False)
     parser.add_argument("target", nargs="?", default=None)
     parser.add_argument("--graph", default=None)
     parser.add_argument("--labels", default=None)
@@ -724,7 +725,7 @@ def cli_describe(argv: list[str]) -> None:
     parser.add_argument("--open", action="store_true")
     parser.add_argument("-h", "--help", action="store_true")
 
-    args, unknown = parser.parse_known_args(argv[1:])
+    args, unknown = parser.parse_known_args(remaining)
     if args.help:
         print(_DESCRIBE_USAGE)
         return

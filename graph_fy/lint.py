@@ -391,12 +391,17 @@ def check_dead_code(
 
         # Skip test files and test functions
         source_file = str(n.get("source_file", "")).replace("\\", "/")
-        file_name = Path(source_file).name.lower()
+        p = Path(source_file)
+        file_name = p.name.lower()
+        parts = {part.lower() for part in p.parts}
         if (
             file_name.startswith("test_")
             or file_name.endswith("_test.py")
-            or "/tests/" in source_file
-            or "/test/" in source_file
+            or "tests" in parts
+            or "test" in parts
+            or "fixtures" in parts
+            or "scripts" in parts
+            or "tools" in parts
             or raw_label.startswith("test_")
         ):
             continue
@@ -588,12 +593,16 @@ def add_explicit_backlink_edges(
 
 def run_lint(
     graph_or_extraction: nx.Graph | dict[str, Any],
+    check_actions: bool = True,
+    check_drift: bool = True,
+    check_secrets: bool = True,
     check_orphans: bool = True,
+    check_rtk: bool = True,
     check_dead: bool = True,
     check_cycles: bool = True,
     check_layers: bool = True,
 ) -> dict[str, Any]:
-    """Execute all deterministic lint and drift rules against a graph or extraction dict.
+    """Execute deterministic lint and drift rules against a graph or extraction dict.
 
     Returns structured findings and a summary with error/warning counts.
     """
@@ -607,25 +616,29 @@ def run_lint(
         ]
     else:
         nodes = graph_or_extraction.get("nodes", [])
-        edges = graph_or_extraction.get("edges", [])
+        edges = graph_or_extraction.get("edges") or graph_or_extraction.get("links", [])
 
     findings: list[dict[str, Any]] = []
 
     # 1. Unpinned GitHub Actions
-    findings.extend(check_unpinned_actions(nodes, edges))
+    if check_actions:
+        findings.extend(check_unpinned_actions(nodes, edges))
 
     # 2. Environment Drift
-    findings.extend(check_environment_drift(nodes))
+    if check_drift:
+        findings.extend(check_environment_drift(nodes))
 
     # 3. Missing Secrets and Envs
-    findings.extend(check_missing_secrets_and_envs(nodes, edges))
+    if check_secrets:
+        findings.extend(check_missing_secrets_and_envs(nodes, edges))
 
     # 4. Dangling edges & orphan nodes
     if check_orphans:
         findings.extend(check_dangling_and_orphans(nodes, edges))
 
     # 5. Redux Toolkit & RTK Query cache tag consistency
-    findings.extend(check_rtk_cache_and_state(nodes, edges))
+    if check_rtk:
+        findings.extend(check_rtk_cache_and_state(nodes, edges))
 
     # 6. Dead Code / Unreferenced Symbols
     if check_dead:

@@ -293,3 +293,62 @@ def test_check_layer_violations():
     assert findings[0]["outer_layer"] == "cli"
     assert "core/service.py" in findings[0]["message"]
     assert "cli/main.py" in findings[0]["message"]
+
+
+def test_run_lint_supports_networkx_links_key():
+    graph_data = {
+        "nodes": [
+            {"id": "a", "label": "a.py", "source_file": "src/a.py"},
+            {"id": "b", "label": "b.py", "source_file": "src/b.py"},
+        ],
+        "links": [
+            {"source": "a", "target": "b", "relation": "imports"},
+            {"source": "b", "target": "a", "relation": "imports"},
+        ],
+    }
+    # Run with links key instead of edges
+    report = run_lint(graph_data, check_orphans=False, check_dead=False)
+    findings = [f for f in report["findings"] if f["rule"] == "cyclic_dependency"]
+    assert len(findings) == 1
+    assert findings[0]["cycle_length"] == 2
+
+
+def test_run_lint_selective_flags():
+    graph_data = {
+        "nodes": [
+            {"id": "core", "label": "Core", "source_file": "core/c.py"},
+            {"id": "cli", "label": "CLI", "source_file": "cli/c.py"},
+        ],
+        "edges": [
+            {"source": "core", "target": "cli", "relation": "imports"},
+        ],
+    }
+    # Only check cycles (should be 0)
+    report_cycles = run_lint(
+        graph_data,
+        check_actions=False,
+        check_drift=False,
+        check_secrets=False,
+        check_orphans=False,
+        check_rtk=False,
+        check_dead=False,
+        check_cycles=True,
+        check_layers=False,
+    )
+    assert len(report_cycles["findings"]) == 0
+
+    # Only check layers (should find 1 violation)
+    report_layers = run_lint(
+        graph_data,
+        check_actions=False,
+        check_drift=False,
+        check_secrets=False,
+        check_orphans=False,
+        check_rtk=False,
+        check_dead=False,
+        check_cycles=False,
+        check_layers=True,
+    )
+    assert len(report_layers["findings"]) == 1
+    assert report_layers["findings"][0]["rule"] == "architectural_layer_violation"
+

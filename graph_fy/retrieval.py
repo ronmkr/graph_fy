@@ -1647,13 +1647,16 @@ def diff_context(
             if r_score > risk_score:
                 risk_score = r_score
                 risk_tier = str(imp.get("risk_tier", "LOW"))
-            downstream_impact_count += int(imp.get("downstream_count", 0))
             for at in imp.get("affected_tests", []):
-                if at not in affected_tests:
-                    affected_tests.append(at)
+                t_lbl = str(at.get("label", at.get("node", at))) if isinstance(at, dict) else str(at)
+                t_node = str(at.get("node", t_lbl)) if isinstance(at, dict) else str(at)
+                if t_node not in seen_tests:
+                    seen_tests.add(t_node)
+                    affected_tests.append(t_lbl)
             for ap in imp.get("affected_apis", []):
-                if ap not in endpoints:
-                    endpoints.append(ap)
+                ap_lbl = str(ap.get("label", ap.get("node", ap))) if isinstance(ap, dict) else str(ap)
+                if ap_lbl not in endpoints:
+                    endpoints.append(ap_lbl)
     except Exception:
         pass
 
@@ -1976,9 +1979,11 @@ def task_context(
                         risk_tier = str(imp.get("risk_tier", "LOW"))
                     downstream_impact_count += int(imp.get("downstream_count", 0))
                     for at in imp.get("affected_tests", []):
-                        if at not in seen_tests:
-                            seen_tests.add(at)
-                            affected_tests.append(at)
+                        t_lbl = str(at.get("label", at.get("node", at))) if isinstance(at, dict) else str(at)
+                        t_node = str(at.get("node", t_lbl)) if isinstance(at, dict) else str(at)
+                        if t_node not in seen_tests:
+                            seen_tests.add(t_node)
+                            affected_tests.append(t_lbl)
         except Exception:
             pass
 

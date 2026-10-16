@@ -2185,6 +2185,15 @@ def dispatch_command(cmd: str) -> None:
         json_output = False
         target_path: Path | None = None
 
+        flag_cycles = False
+        flag_layers = False
+        flag_dead = False
+        flag_orphans = False
+        flag_actions = False
+        flag_drift = False
+        flag_secrets = False
+        flag_all = False
+
         i = 2
         while i < len(sys.argv):
             arg = sys.argv[i]
@@ -2194,6 +2203,22 @@ def dispatch_command(cmd: str) -> None:
                     graph_path = Path(sys.argv[i])
             elif arg == "--json":
                 json_output = True
+            elif arg in ("--cycles", "--cycle"):
+                flag_cycles = True
+            elif arg in ("--layers", "--layer"):
+                flag_layers = True
+            elif arg in ("--dead", "--dead-code"):
+                flag_dead = True
+            elif arg in ("--orphans", "--orphan"):
+                flag_orphans = True
+            elif arg in ("--actions", "--action"):
+                flag_actions = True
+            elif arg == "--drift":
+                flag_drift = True
+            elif arg in ("--secrets", "--secret"):
+                flag_secrets = True
+            elif arg == "--all":
+                flag_all = True
             elif not arg.startswith("-") and target_path is None:
                 target_path = Path(arg)
             i += 1
@@ -2212,7 +2237,43 @@ def dispatch_command(cmd: str) -> None:
             print(f"error: failed to read {graph_path}: {exc}", file=sys.stderr)
             sys.exit(1)
 
-        result = run_lint(data)
+        has_specific = any([flag_cycles, flag_layers, flag_dead, flag_orphans, flag_actions, flag_drift, flag_secrets])
+        if flag_all:
+            result = run_lint(
+                data,
+                check_actions=True,
+                check_drift=True,
+                check_secrets=True,
+                check_orphans=True,
+                check_rtk=True,
+                check_dead=True,
+                check_cycles=True,
+                check_layers=True,
+            )
+        elif has_specific:
+            result = run_lint(
+                data,
+                check_actions=flag_actions,
+                check_drift=flag_drift,
+                check_secrets=flag_secrets,
+                check_orphans=flag_orphans,
+                check_rtk=False,
+                check_dead=flag_dead,
+                check_cycles=flag_cycles,
+                check_layers=flag_layers,
+            )
+        else:
+            result = run_lint(
+                data,
+                check_actions=True,
+                check_drift=True,
+                check_secrets=True,
+                check_orphans=True,
+                check_rtk=True,
+                check_dead=False,
+                check_cycles=True,
+                check_layers=True,
+            )
         if json_output:
             print(json.dumps(result, indent=2))
         else:
@@ -3190,11 +3251,12 @@ def dispatch_command(cmd: str) -> None:
 
     elif cmd == "export":
         subcmd = sys.argv[2] if len(sys.argv) > 2 else ""
-        if subcmd not in ("html", "callflow-html", "obsidian", "wiki", "svg", "graphml", "neo4j", "falkordb"):
+        if subcmd not in ("html", "callflow-html", "tree-html", "tree", "obsidian", "wiki", "svg", "graphml", "neo4j", "falkordb"):
             print("Usage: graph_fy export <format>", file=sys.stderr)
             print("  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]", file=sys.stderr)
             print("  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]", file=sys.stderr)
             print("            [--lang auto|zh-CN|en] [--max-sections N] [--diagram-scale N]", file=sys.stderr)
+            print("  tree-html [--graph PATH] [--output HTML]", file=sys.stderr)
             print("  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]", file=sys.stderr)
             print("  wiki      [--graph PATH] [--labels PATH]", file=sys.stderr)
             print("  svg       [--graph PATH] [--labels PATH]", file=sys.stderr)
@@ -3499,6 +3561,17 @@ def dispatch_command(cmd: str) -> None:
                       f"FalkorDB's GRAPH.QUERY runs one statement at a time (no bulk script "
                       f"import), so load a graph with: graph_fy export falkordb --push "
                       f"falkordb://localhost:6379")
+
+        elif subcmd in ("tree-html", "tree"):
+            from graph_fy.tree_html import write_tree_html, DEFAULT_MAX_CHILDREN
+            out_file = callflow_output or (graph_path.parent / "GRAPH_TREE.html")
+            write_tree_html(
+                graph_path=graph_path,
+                output_path=out_file,
+                max_children=DEFAULT_MAX_CHILDREN,
+            )
+            print(f"wrote {out_file}")
+            sys.exit(0)
 
     elif cmd == "benchmark":
         from graph_fy.benchmark import run_benchmark, print_benchmark
