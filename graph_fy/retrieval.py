@@ -1542,8 +1542,8 @@ def diff_context(
             gp = Path(graph_path)
         elif (root_path / "graph_fy_out" / "graph.json").exists():
             gp = root_path / "graph_fy_out" / "graph.json"
-        elif (root_path / "graph_fy_out" / "graph.json").exists():
-            gp = root_path / "graph_fy_out" / "graph.json"
+        elif (root_path / "graph.json").exists():
+            gp = root_path / "graph.json"
         else:
             gp = out_path("graph.json")
         if not gp.exists():
@@ -1876,13 +1876,13 @@ def task_context(
     if graph_path is None:
         if (root_path / "graph_fy_out" / "graph.json").exists():
             graph_path = root_path / "graph_fy_out" / "graph.json"
-        elif (root_path / "graph_fy_out" / "graph.json").exists():
-            graph_path = root_path / "graph_fy_out" / "graph.json"
+        elif (root_path / "graph.json").exists():
+            graph_path = root_path / "graph.json"
     if db_path is None:
         if (root_path / "graph_fy_out" / "index.db").exists():
             db_path = root_path / "graph_fy_out" / "index.db"
-        elif (root_path / "graph_fy_out" / "index.db").exists():
-            db_path = root_path / "graph_fy_out" / "index.db"
+        elif (root_path / "index.db").exists():
+            db_path = root_path / "index.db"
 
     if graph is None and graph_path is not None and Path(graph_path).exists():
         try:
@@ -2028,32 +2028,42 @@ def task_context(
     for c in candidates[:6]:
         nid = str(c.get("node_id", ""))
         lbl = str(c.get("label") or nid)
-        safe_nid = re.sub(r"[^A-Za-z0-9_]", "_", nid)
+        node_key = re.sub(r"[^A-Za-z0-9_]", "_", lbl).strip("_")
+        if not node_key:
+            node_key = re.sub(r"[^A-Za-z0-9_]", "_", nid).strip("_") or f"node_{abs(hash(nid)) % 10000}"
         safe_lbl = lbl.replace('"', "'")
-        diagram_nodes[safe_nid] = safe_lbl
+        diagram_nodes[node_key] = safe_lbl
 
         callers = c.get("callers", [])
         for clr in callers[:3]:
-            safe_c = re.sub(r"[^A-Za-z0-9_]", "_", clr)
-            diagram_nodes[safe_c] = clr.replace('"', "'")
-            edge_tuples.append((safe_c, safe_nid, "calls"))
+            clr_key = re.sub(r"[^A-Za-z0-9_]", "_", clr).strip("_") or f"node_{abs(hash(clr)) % 10000}"
+            diagram_nodes[clr_key] = clr.replace('"', "'")
+            edge_tuples.append((clr_key, node_key, "calls"))
 
         callees = c.get("callees", [])
         for clee in callees[:3]:
-            safe_e = re.sub(r"[^A-Za-z0-9_]", "_", clee)
-            diagram_nodes[safe_e] = clee.replace('"', "'")
-            edge_tuples.append((safe_nid, safe_e, "calls"))
-
-    for snid, slbl in sorted(diagram_nodes.items())[:12]:
-        diagram_lines.append(f'    {snid}["{slbl}"]')
+            clee_key = re.sub(r"[^A-Za-z0-9_]", "_", clee).strip("_") or f"node_{abs(hash(clee)) % 10000}"
+            diagram_nodes[clee_key] = clee.replace('"', "'")
+            edge_tuples.append((node_key, clee_key, "calls"))
 
     seen_edges: set[tuple[str, str]] = set()
-    for u, v, rel in sorted(edge_tuples)[:16]:
-        if (u, v) not in seen_edges and u in diagram_nodes and v in diagram_nodes:
+    selected_edges: list[tuple[str, str]] = []
+    for u, v, rel in edge_tuples:
+        if u != v and (u, v) not in seen_edges and u in diagram_nodes and v in diagram_nodes:
             seen_edges.add((u, v))
-            diagram_lines.append(f"    {u} --> {v}")
+            selected_edges.append((u, v))
+            if len(selected_edges) >= 16:
+                break
 
-    mermaid_diagram = "\n".join(diagram_lines) if len(edge_tuples) > 0 else ""
+    used_nodes: set[str] = {u for u, v in selected_edges} | {v for u, v in selected_edges}
+    for snid in sorted(used_nodes):
+        if snid in diagram_nodes:
+            diagram_lines.append(f'    {snid}["{diagram_nodes[snid]}"]')
+
+    for u, v in selected_edges:
+        diagram_lines.append(f"    {u} --> {v}")
+
+    mermaid_diagram = "\n".join(diagram_lines) if len(selected_edges) > 0 else ""
 
     # 7. Token Economy Estimation
     total_raw_chars = 0

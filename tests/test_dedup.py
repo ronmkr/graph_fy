@@ -601,6 +601,18 @@ def test_same_file_relabel_is_noted(capsys):
     assert "WARNING" not in captured.err
 
 
+def test_real_identifier_beats_anonymous_underscore_collision():
+    """A real file or symbol label must always survive an anonymous '_' label collision."""
+    nodes = [
+        {"id": "crates_lib_bindings", "label": "_", "file_type": "code", "source_file": "crates/lib/bindings.rs"},
+        {"id": "crates_lib_bindings", "label": "bindings.rs", "file_type": "code", "source_file": "crates/lib/bindings.rs"},
+    ]
+    result_nodes, _ = deduplicate_entities(nodes, [], communities={})
+    assert len(result_nodes) == 1
+    assert result_nodes[0]["label"] == "bindings.rs"
+
+
+
 @pytest.mark.parametrize("nodes", [
     [
         {"id": "src_auth_login", "label": "login", "file_type": "code",
@@ -1457,3 +1469,14 @@ def test_extract_deduplicates_nodes_and_edges(tmp_path):
 
     edge_keys = [(e["source"], e["target"], e.get("relation")) for e in edges]
     assert len(edge_keys) == len(set(edge_keys))
+
+
+def test_real_identifier_beats_non_alphanumeric_punctuation_collision():
+    from graph_fy.dedup import _collision_rank
+
+    file_node = {"id": "lib", "label": "lib.rs", "source_file": "src/lib.rs"}
+    unit_node = {"id": "lib", "label": "()", "source_file": "src/lib.rs"}
+    dollar_node = {"id": "lib", "label": "$", "source_file": "src/lib.rs"}
+
+    assert _collision_rank(file_node) < _collision_rank(unit_node)
+    assert _collision_rank(file_node) < _collision_rank(dollar_node)

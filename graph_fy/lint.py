@@ -457,7 +457,26 @@ def check_cyclic_dependencies(
         return findings
 
     try:
-        cycles = list(nx.simple_cycles(file_graph))
+        # Use progressive length-bounded cycle search to prevent exponential hang on monorepos
+        cycles = []
+        for bound in (2, 3, 4, 6, 8):
+            bound_cycles = []
+            try:
+                for c in nx.simple_cycles(file_graph, length_bound=bound):
+                    bound_cycles.append(c)
+                    if len(bound_cycles) >= max_cycles * 5:
+                        break
+            except TypeError:
+                for c in nx.simple_cycles(file_graph):
+                    bound_cycles.append(c)
+                    if len(bound_cycles) >= max_cycles * 5:
+                        break
+                cycles = bound_cycles
+                break
+            if bound_cycles:
+                cycles = bound_cycles
+                if len(cycles) >= max_cycles:
+                    break
     except Exception:
         cycles = []
 

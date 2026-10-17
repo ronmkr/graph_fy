@@ -352,3 +352,40 @@ def test_run_lint_selective_flags():
     assert len(report_layers["findings"]) == 1
     assert report_layers["findings"][0]["rule"] == "architectural_layer_violation"
 
+
+def test_cyclic_dependencies_dense_graph():
+    """Verify that a densely connected cyclic component executes instantly without exponential explosion."""
+    nodes = [{"id": f"m_{i}", "label": f"m_{i}", "source_file": f"pkg/m_{i}.py"} for i in range(12)]
+    edges = []
+    # Fully connect all 12 modules in both directions
+    for i in range(12):
+        for j in range(12):
+            if i != j:
+                edges.append({"source": f"m_{i}", "target": f"m_{j}", "relation": "imports"})
+
+    import time
+    t0 = time.time()
+    findings = check_cyclic_dependencies(nodes, edges, max_cycles=10)
+    elapsed = time.time() - t0
+
+    assert elapsed < 1.0  # Must finish within 1 second, not hang
+    assert len(findings) <= 10
+    assert all(f["rule"] == "cyclic_dependency" for f in findings)
+
+
+def test_find_graph_path_for_target_resolution(tmp_path):
+    from graph_fy.cli import _find_graph_path_for_target
+
+    # 1. Direct json file
+    jf = tmp_path / "custom.json"
+    jf.write_text("{}", encoding="utf-8")
+    assert _find_graph_path_for_target(jf) == jf
+
+    # 2. Directory with graph_fy_out/graph.json
+    sub = tmp_path / "subproject"
+    sub_out = sub / "graph_fy_out"
+    sub_out.mkdir(parents=True)
+    gj = sub_out / "graph.json"
+    gj.write_text("{}", encoding="utf-8")
+    assert _find_graph_path_for_target(sub) == gj
+

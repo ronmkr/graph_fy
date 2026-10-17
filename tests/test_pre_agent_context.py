@@ -166,3 +166,38 @@ def test_mcp_get_agent_context(sample_task_graph):
     assert isinstance(res, dict)
     assert "prompt_context" in res
     assert "### graph_fy Pre-Agent Architectural Briefing" in res["prompt_context"]
+
+
+def test_cli_task_context_with_root_flag(sample_task_graph, monkeypatch, capsys):
+    G, db_path, root = sample_task_graph
+    import graph_fy.__main__ as mainmod
+    import sys
+
+    monkeypatch.setattr(mainmod, "_check_skill_version", lambda _: None)
+    monkeypatch.setattr(mainmod.sys, "argv", ["graph_fy", "context", "router dispatch", "--root", str(root)])
+    try:
+        mainmod.main()
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert "### graph_fy Pre-Agent Architectural Briefing" in out
+    assert "Router" in out
+
+
+def test_task_context_mermaid_diagram_declarations(sample_task_graph):
+    G, db_path, root = sample_task_graph
+    res = task_context(
+        "router request dispatch handling",
+        graph=G,
+        db_path=db_path,
+        root_dir=root,
+        token_budget=1000,
+        include_diagram=True,
+    )
+    diag = res.get("architecture_diagram", "")
+    assert "flowchart TD" in diag
+    # Ensure all connected nodes are declared with quoted labels and no unformatted node IDs
+    assert 'route["route()"]' in diag or 'route' in diag
+    assert "router.Router.route" not in diag
+
+

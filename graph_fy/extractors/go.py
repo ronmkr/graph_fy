@@ -243,6 +243,8 @@ def extract_go(path: Path) -> dict:
         if not name_node:
             return None
         name = _read_text(name_node, source)
+        if not name or not name.strip("_. "):
+            return None
         if node.type == "method_declaration":
             receiver_type = _receiver_type_of(node)
             base = _make_id(pkg_scope, receiver_type) if receiver_type else stem
@@ -276,6 +278,8 @@ def extract_go(path: Path) -> dict:
             name_node = node.child_by_field_name("name")
             if name_node:
                 func_name = _read_text(name_node, source)
+                if not func_name or not func_name.strip("_. "):
+                    return
                 line = node.start_point[0] + 1
                 func_nid = symbol_nid(_make_id(stem, func_name), func_name)
                 add_node(func_nid, f"{func_name}()", line)
@@ -300,6 +304,8 @@ def extract_go(path: Path) -> dict:
             if not name_node:
                 return
             method_name = _read_text(name_node, source)
+            if not method_name or not method_name.strip("_. "):
+                return
             line = node.start_point[0] + 1
 
             if receiver_type:
@@ -327,6 +333,8 @@ def extract_go(path: Path) -> dict:
                 if not name_node:
                     continue
                 type_name = _read_text(name_node, source)
+                if not type_name or not type_name.strip("_. "):
+                    continue
                 line = child.start_point[0] + 1
                 type_nid = _make_id(pkg_scope, type_name)
                 add_node(type_nid, type_name, line)

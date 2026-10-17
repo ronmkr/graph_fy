@@ -329,3 +329,61 @@ def test_resolve_cross_boundary_api_routes():
     assert ("frontend_user_profile", "backend_get_users", "routes_to") in route_edges
     assert ("frontend_edit_profile", "backend_get_users", "routes_to") in route_edges
 
+
+def test_cross_boundary_full_stack_monorepo_route_resolution(tmp_path):
+    """Test full-stack monorepo route resolution between Python backend and TS frontend client."""
+    from graph_fy.cross_resolve import resolve_cross_boundary_api_routes
+
+    # 1. Backend Python router file
+    py_code = """\
+from fastapi import APIRouter
+
+router = APIRouter(tags=["auth"])
+
+@router.post("/login/access-token")
+def login_access_token(form_data):
+    return {"token": "xyz"}
+"""
+    py_file = _write(tmp_path, "backend/app/api/routes/login.py", py_code)
+
+    # 2. Frontend TypeScript SDK file
+    ts_code = """\
+export class LoginService {
+    public static loginAccessToken(options) {
+        return client.post({
+            url: '/api/v1/login/access-token',
+            ...options,
+        });
+    }
+}
+"""
+    ts_file = _write(tmp_path, "frontend/src/client/sdk.gen.ts", ts_code)
+
+    nodes = [
+        {
+            "id": "backend_login_access_token",
+            "label": "login_access_token()",
+            "_callable": True,
+            "source_file": str(py_file),
+            "source_location": "L6",
+        },
+        {
+            "id": "frontend_login_service_login_access_token",
+            "label": ".loginAccessToken()",
+            "_callable": True,
+            "source_file": str(ts_file),
+            "source_location": "L2",
+        },
+    ]
+    edges = []
+
+    new_edges = resolve_cross_boundary_api_routes(nodes, edges)
+    route_edges = [
+        (e["source"], e["target"], e["relation"])
+        for e in edges
+        if e.get("relation") == "routes_to"
+    ]
+
+    assert ("frontend_login_service_login_access_token", "backend_login_access_token", "routes_to") in route_edges
+
+

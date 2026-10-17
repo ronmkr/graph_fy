@@ -167,6 +167,8 @@ def extract_rust(path: Path) -> dict:
             name_node = node.child_by_field_name("name")
             if name_node:
                 func_name = _read_text(name_node, source)
+                if not func_name or not any(c.isalnum() for c in func_name):
+                    return
                 line = node.start_point[0] + 1
                 if parent_impl_nid:
                     func_nid = _make_id(parent_impl_nid, func_name)
@@ -191,6 +193,8 @@ def extract_rust(path: Path) -> dict:
             name_node = node.child_by_field_name("name")
             if name_node:
                 func_name = _read_text(name_node, source)
+                if not func_name or not any(c.isalnum() for c in func_name):
+                    return
                 line = node.start_point[0] + 1
                 if parent_impl_nid:
                     func_nid = _make_id(parent_impl_nid, func_name)
@@ -207,6 +211,8 @@ def extract_rust(path: Path) -> dict:
             name_node = node.child_by_field_name("name")
             if name_node:
                 item_name = _read_text(name_node, source)
+                if not item_name or not any(c.isalnum() for c in item_name):
+                    return
                 line = node.start_point[0] + 1
                 item_nid = _make_id(stem, item_name)
                 add_node(item_nid, item_name, line)
@@ -333,6 +339,8 @@ def extract_rust(path: Path) -> dict:
             name_node = node.child_by_field_name("name")
             if name_node:
                 item_name = _read_text(name_node, source)
+                if not item_name or not any(c.isalnum() for c in item_name):
+                    return
                 line = node.start_point[0] + 1
                 if parent_impl_nid:
                     item_nid = _make_id(parent_impl_nid, item_name)
@@ -360,6 +368,8 @@ def extract_rust(path: Path) -> dict:
             impl_nid: str | None = None
             if type_node:
                 type_name = _read_text(type_node, source).strip()
+                if not any(c.isalnum() for c in type_name):
+                    return
                 impl_nid = _make_id(stem, type_name)
                 add_node(impl_nid, type_name, node.start_point[0] + 1)
             if trait_node is not None and impl_nid is not None:

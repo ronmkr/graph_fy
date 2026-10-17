@@ -485,21 +485,38 @@ def extract_markdown(path: Path, source_text: str | None = None) -> dict:
     # Track heading stack for nesting: [(level, nid), ...]
     heading_stack: list[tuple[int, str]] = []
     in_code_block = False
+    current_fence: tuple[str, int] | None = None
     current_nid = file_nid
     section_lines: dict[str, list[str]] = {file_nid: []}
 
     for line_num_0, line_text in enumerate(lines):
         line_num = line_num_0 + 1
 
-        # Skip over fenced code blocks so their contents are not parsed as
+        # Skip over fenced code blocks (``` or ~~~) so their contents are not parsed as
         # headings, but do not emit nodes/edges for them (#1077).
         stripped = line_text.strip()
-        if stripped.startswith("```"):
-            in_code_block = not in_code_block
-            section_lines.setdefault(current_nid, []).append(line_text)
-            continue
-
-        if in_code_block:
+        if not in_code_block:
+            fence_match = re.match(r"^(`{3,}|~{3,})", stripped)
+            if fence_match:
+                fc = fence_match.group(1)[0]
+                fl = len(fence_match.group(1))
+                rest = stripped[fl:]
+                if rest.rstrip().endswith(fc * fl):
+                    # Single-line closed fence: e.g. ```python foo() ```
+                    section_lines.setdefault(current_nid, []).append(line_text)
+                    continue
+                current_fence = (fc, fl)
+                in_code_block = True
+                section_lines.setdefault(current_nid, []).append(line_text)
+                continue
+        else:
+            if current_fence is not None:
+                fc, fl = current_fence
+                if stripped.startswith(fc * fl) and not stripped.strip(fc):
+                    in_code_block = False
+                    current_fence = None
+                    section_lines.setdefault(current_nid, []).append(line_text)
+                    continue
             section_lines.setdefault(current_nid, []).append(line_text)
             continue
 
@@ -533,6 +550,8 @@ def extract_markdown(path: Path, source_text: str | None = None) -> dict:
         if heading_match:
             level = len(heading_match.group(1))
             title = heading_match.group(2).strip()
+            if not title or not any(c.isalnum() for c in title):
+                continue
             h_nid = _make_id(stem, title)
             # Avoid duplicate heading IDs by appending line number
             if h_nid in seen_ids:
