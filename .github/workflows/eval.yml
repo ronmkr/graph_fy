@@ -42,7 +42,7 @@ jobs:
 
       - name: Build Knowledge Graph
         run: |
-          uv run python -m graph_fy.cli . --no-viz
+          uv run python -m graph_fy.cli . --code-only --no-viz
 
       - name: Execute 106 Real-World Scenario Evaluation Suite
         run: |
@@ -51,5 +51,7 @@ jobs:
       - name: Generate PR Blast Radius Analysis
         if: github.event_name == 'pull_request'
         run: |
-          uv run python -m graph_fy.cli diff --github-pr origin/${{ github.base_ref }} > pr_blast_radius.md
+          BASE_REF="${{ github.base_ref }}"
+          git fetch origin "${BASE_REF}" || true
+          uv run python -m graph_fy.cli diff --github-pr "origin/${BASE_REF}" > pr_blast_radius.md || uv run python -m graph_fy.cli diff --github-pr "${BASE_REF}" > pr_blast_radius.md
           cat pr_blast_radius.md
