@@ -50,18 +50,20 @@ def compute_pagerank(
     x = dict(p)
     dangling_weights = dict(p)
     out_degree = {n: G.degree(n) if not G.is_directed() else G.out_degree(n) for n in nodes}
+    dangling_nodes = [n for n in nodes if out_degree[n] == 0]
+    is_directed = G.is_directed()
+    adj = {n: list(G.successors(n) if is_directed else G.neighbors(n)) for n in nodes}
+    deg_items = [(n, out_degree[n], adj[n]) for n in nodes if out_degree[n] > 0]
 
     for _ in range(max_iter):
         xlast = x
         x = {n: 0.0 for n in nodes}
-        danglesum = alpha * sum(xlast[n] for n in nodes if out_degree[n] == 0)
+        danglesum = alpha * sum(xlast[n] for n in dangling_nodes)
 
-        for n in nodes:
-            deg = out_degree[n]
-            if deg > 0:
-                share = alpha * xlast[n] / deg
-                for nbr in (G.neighbors(n) if not G.is_directed() else G.successors(n)):
-                    x[nbr] += share
+        for n, deg, nbrs in deg_items:
+            share = alpha * xlast[n] / deg
+            for nbr in nbrs:
+                x[nbr] += share
 
         for n in nodes:
             x[n] += danglesum * dangling_weights[n] + (1.0 - alpha) * p[n]
@@ -432,7 +434,7 @@ def build_index(
         except OSError:
             pass
 
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), timeout=30.0)
     try:
         cur = conn.cursor()
         cur.execute("PRAGMA synchronous = OFF;")
@@ -598,6 +600,7 @@ def query(
     caveman: bool = False,
     skeleton: bool = False,
     boundary_pruning: bool = True,
+    root: Path | str | None = None,
 ) -> list[dict[str, Any]] | str:
     """Execute 4-step GraphRAG retrieval over the SQLite FTS5 index and graph.
 
@@ -610,33 +613,52 @@ def query(
     if not query_text or not query_text.strip():
         return []
 
-    # Resolve database path
-    idx_path = Path(db_path) if db_path is not None else get_default_index_path()
+    # Resolve database path relative to root
+    eff_root = Path(root) if root is not None else Path(".")
+    if db_path is not None:
+        idx_path = Path(db_path)
+    elif (eff_root / "graph_fy_out" / "index.db").exists():
+        idx_path = eff_root / "graph_fy_out" / "index.db"
+    elif (eff_root / "index.db").exists():
+        idx_path = eff_root / "index.db"
+    else:
+        idx_path = get_default_index_path()
 
     if synonyms is None:
         try:
             from graph_fy.labeling import load_aliases_config
-            root_cand = idx_path.parent.parent if idx_path.parent.name in ("graph_fy_out", "graph_fy_out") else Path(".")
+            root_cand = idx_path.parent.parent if idx_path.parent.name in ("graph_fy_out", "graph_fy_out") else eff_root
             synonyms = load_aliases_config(root_cand)
         except Exception:
             synonyms = None
 
     # Load graph if not provided
     if graph is None:
-        gp = Path(graph_path) if graph_path is not None else out_path("graph.json")
-        if not gp.exists():
-            return []
-        try:
-            from graph_fy.paths import load_node_link_graph
-            graph = load_node_link_graph(gp)
-        except Exception:
-            return []
+        if graph_path is not None:
+            gp = Path(graph_path)
+        elif (eff_root / "graph_fy_out" / "graph.json").exists():
+            gp = eff_root / "graph_fy_out" / "graph.json"
+        elif (eff_root / "graph.json").exists():
+            gp = eff_root / "graph.json"
+        else:
+            gp = out_path("graph.json")
+
+        if gp.exists():
+            try:
+                from graph_fy.paths import load_node_link_graph
+                graph = load_node_link_graph(gp)
+            except Exception:
+                graph = nx.Graph()
+        else:
+            graph = nx.Graph()
 
     # If FTS index does not exist, build it now
     if not idx_path.exists():
+        if len(graph) == 0:
+            return []
         build_index(graph, idx_path)
 
-    conn = sqlite3.connect(str(idx_path))
+    conn = sqlite3.connect(str(idx_path), timeout=30.0)
     try:
         cur = conn.cursor()
         seed_limit = max(limit * 2, 20)
@@ -756,7 +778,8 @@ def query(
         if hops > 0 and len(graph) > 0:
             queue = [(seed_id, 0) for seed_id in list(seed_scores.keys()) if seed_id in graph]
             idx = 0
-            while idx < len(queue):
+            max_candidates = max(limit * 30, 250)
+            while idx < len(queue) and len(visited) < max_candidates:
                 curr, dist = queue[idx]
                 idx += 1
                 if dist >= hops:
@@ -766,6 +789,8 @@ def query(
                 curr_path = visited[curr]["path"]
 
                 for neighbor in graph.neighbors(curr):
+                    if len(visited) >= max_candidates:
+                        break
                     n_str = str(neighbor)
                     new_dist = dist + 1
 
@@ -866,6 +891,15 @@ def query(
             centrality_bonus = pr * 5.0
 
             final_score = direct_bm25 + proximity_score + ppr_bonus + centrality_bonus
+            # Code definition bonus: Real nodes with source_path and source_location
+            # represent actual AST symbol definitions rather than unresolved stubs.
+            if src_path and src_loc:
+                final_score *= 1.5
+                # Code preference: prioritize executable source code over documentation
+                if str(src_path).lower().endswith((".py", ".ts", ".js", ".tsx", ".jsx", ".rs", ".go", ".cpp", ".c", ".h", ".hpp", ".java", ".kt", ".rb", ".cs", ".swift")):
+                    final_score *= 2.0
+            else:
+                final_score *= 0.2
 
             # Content preview (up to 300 characters)
             preview = content.strip()
@@ -892,12 +926,15 @@ def query(
                 spath = item.get("source_path")
                 sloc = item.get("source_location")
                 nid = item.get("node_id")
-                if spath and sloc and Path(spath).is_file():
-                    line_m = re.search(r"L?(\d+)", str(sloc))
-                    line_num = int(line_m.group(1)) if line_m else 1
-                    skel_code = get_symbol_code_from_file(spath, line_num, skeletonize=True, compact_docstrings=True)
-                    if skel_code:
-                        item["skeleton"] = skel_code
+                if spath and sloc:
+                    p = Path(spath)
+                    eff_file = p if p.is_absolute() else (eff_root / p)
+                    if eff_file.is_file():
+                        line_m = re.search(r"L?(\d+)", str(sloc))
+                        line_num = int(line_m.group(1)) if line_m else 1
+                        skel_code = get_symbol_code_from_file(eff_file, line_num, skeletonize=True, compact_docstrings=True)
+                        if skel_code:
+                            item["skeleton"] = skel_code
 
                 # Bidirectional execution slicing: callers and callees
                 if graph is not None and nid and nid in graph:
@@ -924,16 +961,19 @@ def query(
                             succ_data = graph.nodes[succ]
                             succ_file = succ_data.get("source_file") or succ_data.get("definition_file")
                             succ_loc = succ_data.get("source_location") or succ_data.get("definition_location")
-                            if succ_file and Path(succ_file).is_file():
-                                lm = re.search(r"L?(\d+)", str(succ_loc or ""))
-                                lnum = int(lm.group(1)) if lm else 1
-                                t_skel = get_symbol_code_from_file(succ_file, lnum, skeletonize=True, compact_docstrings=True)
-                                if t_skel:
-                                    type_skels.append({
-                                        "node_id": succ,
-                                        "relation": rel,
-                                        "skeleton": t_skel,
-                                    })
+                            if succ_file:
+                                sp = Path(succ_file)
+                                eff_succ = sp if sp.is_absolute() else (eff_root / sp)
+                                if eff_succ.is_file():
+                                    lm = re.search(r"L?(\d+)", str(succ_loc or ""))
+                                    lnum = int(lm.group(1)) if lm else 1
+                                    t_skel = get_symbol_code_from_file(eff_succ, lnum, skeletonize=True, compact_docstrings=True)
+                                    if t_skel:
+                                        type_skels.append({
+                                            "node_id": succ,
+                                            "relation": rel,
+                                            "skeleton": t_skel,
+                                        })
                     if type_skels:
                         item["related_types"] = type_skels
 
@@ -1923,8 +1963,23 @@ def task_context(
         graph_path=graph_path,
         skeleton=True,
         boundary_pruning=True,
+        root=root_path,
     )
     candidates: list[dict[str, Any]] = res if isinstance(res, list) else []
+
+    # Grounded Anti-Hallucination Filter:
+    # Ensure candidates match at least one significant user query term to reject false-positive stem hits
+    significant_terms = [
+        t.lower() for t in raw_terms
+        if len(t) >= 3 and t.lower() not in _KEYWORDS_AND_BUILTINS and t.lower() not in ("service", "class", "method", "function", "impl", "type", "test", "helper", "manage", "manager", "data")
+    ]
+    if significant_terms:
+        grounded_candidates = []
+        for c in candidates:
+            c_text = f"{c.get('node_id', '')} {c.get('label', '')} {c.get('source_path', '')}".lower()
+            if any(term in c_text for term in significant_terms):
+                grounded_candidates.append(c)
+        candidates = grounded_candidates
 
     if not candidates:
         return {
@@ -1933,17 +1988,31 @@ def task_context(
             "symbols": [],
             "risk_tier": "LOW",
             "risk_score": 0.0,
+            "downstream_impact_count": 0,
             "affected_tests": [],
             "historically_co_changed": [],
             "architecture_diagram": "",
-            "tokens_saved": 0,
-            "prompt_context": f"### graph_fy Pre-Agent Architectural Briefing\n**Task**: {task}\n*No relevant symbols found in knowledge graph.*",
+            "raw_tokens": 0,
+            "briefing_tokens": 0,
+            "compression_ratio": 1.0,
+            "prompt_context": (
+                f"### graph_fy Pre-Agent Architectural Briefing\n"
+                f"**Task**: {task}\n\n"
+                f"> [!WARNING]\n"
+                f"> Target Symbol Not Found: No symbols matching '{task}' exist in the knowledge graph.\n"
+                f"> Grounded AST Invariant: Do NOT hallucinate non-existent APIs, classes, methods, or imports. Verify the exact identifier."
+            ),
         }
 
     # 3. Subsystem / Community Detection
     subsystems_map: Counter[str] = Counter()
     candidate_node_ids = [c["node_id"] for c in candidates if "node_id" in c]
     candidate_files: set[str] = set()
+
+    for c in candidates:
+        cf = c.get("source_path") or c.get("source_file")
+        if cf:
+            candidate_files.add(Path(cf).as_posix())
 
     if graph is not None:
         for nid in candidate_node_ids:
@@ -1972,7 +2041,7 @@ def task_context(
             from graph_fy.impact import compute_impact
             for nid in candidate_node_ids[:3]:
                 if nid in graph:
-                    imp = compute_impact(graph, nid, max_depth=3)
+                    imp = compute_impact(graph, nid, max_depth=3, root=root_path)
                     r_score = float(imp.get("risk_score", 0.0))
                     if r_score > risk_score:
                         risk_score = r_score
@@ -2079,6 +2148,8 @@ def task_context(
     # 8. Assemble Prompt Context
     lines: list[str] = [
         "### graph_fy Pre-Agent Architectural Briefing",
+        "> [!IMPORTANT]",
+        "> Grounded AST Invariant: All symbols, signatures, and dependencies below are extracted directly from the verified AST. Do NOT hallucinate non-existent methods, APIs, or imports. If a symbol or parameter is not present here, inspect the indicated source file before making assumptions.",
         f"**Task**: {task}",
         f"**Target Subsystem**: {subsystem_str}",
         f"**Blast Radius Risk**: {risk_tier} (Risk Score: {risk_score:.2f}, {downstream_impact_count} downstream dependents)",

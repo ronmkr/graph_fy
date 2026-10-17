@@ -902,10 +902,18 @@ def _cached_source_key(source_file: str, root_str: str, _cwd: str) -> str:
         return str(source_path)
 
 
+_PROCESS_CWD: str = ""
+
+def _get_process_cwd() -> str:
+    global _PROCESS_CWD
+    if not _PROCESS_CWD:
+        _PROCESS_CWD = os.getcwd()
+    return _PROCESS_CWD
+
 def _source_key(source_file: str, root: Path) -> str:
     if not source_file:
         return ""
-    return _cached_source_key(source_file, str(root), os.getcwd())
+    return _cached_source_key(source_file, str(root), _get_process_cwd())
 
 def _node_disambiguation_source_key(node: dict, root: Path) -> str:
     source_file = str(node.get("source_file", ""))
@@ -1084,7 +1092,7 @@ def _resolve_cached(path: "Path | str") -> Path:
     ``Path.resolve()`` — callers keep their own try/except — and an
     exception is never cached.
     """
-    return _cached_realpath(str(path), os.getcwd())
+    return _cached_realpath(str(path), _get_process_cwd())
 
 
 def _js_source_path(source_file: str, root: Path) -> Path | None:

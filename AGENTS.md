@@ -14,6 +14,7 @@ This project has a graph_fy knowledge graph at graph_fy_out/ with community stru
 - Before answering architecture or codebase questions, read graph_fy_out/GRAPH_REPORT.md for god nodes and community structure
 - If graph_fy_out/wiki/index.md exists, navigate it instead of reading raw files
 - Token-Efficient RAG Queries: Use `graph_fy query "<concept>" --skeleton` or `--rag-prompt` to retrieve AST skeletons and PPR-ranked ego networks without whole-file reads
+- **Zero-Hallucination AST Invariant**: Ground code edits strictly in verified AST definitions from `graph_fy context`. If a symbol, method, or API is not present in the graph briefing, do NOT hallucinate or guess — verify against the indicated source file first!
 - After modifying code files in this session, run `graph_fy update .` to keep the graph current (AST-only, no API cost)
 
 ### Ponytail: Anti-Overengineering ("The best code is the code you never wrote")

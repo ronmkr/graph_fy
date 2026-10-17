@@ -17,6 +17,7 @@ This repository uses graph_fy for codebase indexing, structural AST navigation, 
 - **Graph-First Query**: Query `graph_fy query "<concept>"` or read `graph_fy_out/GRAPH_REPORT.md` before reading raw files.
 - **Diff-Scoped Code Review**: Run `graph_fy diff [base_ref]` (or MCP `get_diff_context`) to review touched symbols, 1-hop callers, and blast radius before submitting edits.
 - **Iterative Feedback Querying**: Use `graph_fy refine --code "<draft>"` (or MCP `refine_context`) to resolve incomplete identifiers and missing types from draft code.
+- **Zero-Hallucination AST Invariant**: Ground code edits strictly in verified AST definitions from `graph_fy context`. If a symbol, method, or API is not present in the graph briefing, do NOT hallucinate or guess — verify against the indicated source file first!
 - **Incremental Graph Update**: Run `graph_fy update .` locally after editing code to keep the knowledge graph in sync (fast AST-only update, zero API cost).
 
 ### Ponytail: Anti-Overengineering ("The best code is the code you never wrote")

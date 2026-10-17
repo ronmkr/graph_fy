@@ -201,3 +201,32 @@ def test_task_context_mermaid_diagram_declarations(sample_task_graph):
     assert "router.Router.route" not in diag
 
 
+def test_task_context_anti_hallucination_guard(sample_task_graph):
+    G, db_path, root = sample_task_graph
+    # Query for a completely non-existent symbol
+    res = task_context(
+        "FakeNonExistentService doMagicQuantumCrypto",
+        graph=G,
+        db_path=db_path,
+        root_dir=root,
+    )
+    # Must reject false-positive stem hits and return zero candidates
+    assert len(res["symbols"]) == 0
+    assert "Target Symbol Not Found" in res["prompt_context"]
+    assert "Do NOT hallucinate non-existent APIs" in res["prompt_context"]
+
+
+def test_task_context_sqlite_fallback_when_graph_none(sample_task_graph):
+    G, db_path, root = sample_task_graph
+    # Call task_context without in-memory graph (graph=None)
+    res = task_context(
+        "router route",
+        graph=None,
+        db_path=db_path,
+        root_dir=root,
+    )
+    assert len(res["symbols"]) > 0
+    assert "Grounded AST Invariant" in res["prompt_context"]
+    assert "Router" in res["prompt_context"]
+
+
