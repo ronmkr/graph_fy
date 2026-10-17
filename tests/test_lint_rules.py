@@ -18,6 +18,8 @@ from graph_fy.lint import (
     check_dead_code,
     check_cyclic_dependencies,
     check_layer_violations,
+    check_context_manager_lifetimes,
+    check_ast_signature_drift,
     add_explicit_backlink_edges,
 )
 
@@ -388,4 +390,76 @@ def test_find_graph_path_for_target_resolution(tmp_path):
     gj = sub_out / "graph.json"
     gj.write_text("{}", encoding="utf-8")
     assert _find_graph_path_for_target(sub) == gj
+
+
+def test_check_context_manager_lifetimes():
+    nodes = [
+        {"id": "cls_sync_bad", "label": "LeakySession", "type": "class", "source_file": "db.py"},
+        {"id": "cls_sync_good", "label": "SafeSession", "type": "class", "source_file": "db.py"},
+        {"id": "cls_async_bad", "label": "AsyncLeakyConn", "type": "class", "source_file": "conn.py"},
+        {"id": "cls_async_good", "label": "AsyncSafeConn", "type": "class", "source_file": "conn.py"},
+    ]
+    edges = [
+        # LeakySession: __enter__ only
+        {"source": "cls_sync_bad", "target": "m1", "relation": "defines", "target_label": "__enter__"},
+        # SafeSession: __enter__ and __exit__
+        {"source": "cls_sync_good", "target": "m2", "relation": "defines", "target_label": "__enter__"},
+        {"source": "cls_sync_good", "target": "m3", "relation": "defines", "target_label": "__exit__"},
+        # AsyncLeakyConn: __aenter__ only
+        {"source": "cls_async_bad", "target": "m4", "relation": "defines", "target_label": "__aenter__"},
+        # AsyncSafeConn: __aenter__ and __aexit__
+        {"source": "cls_async_good", "target": "m5", "relation": "defines", "target_label": "__aenter__"},
+        {"source": "cls_async_good", "target": "m6", "relation": "defines", "target_label": "__aexit__"},
+    ]
+
+    findings = check_context_manager_lifetimes(nodes, edges)
+    rules = [f["rule"] for f in findings]
+    assert "missing_context_manager_exit" in rules
+    assert "missing_async_context_manager_exit" in rules
+    assert len(findings) == 2
+
+    # Test via run_lint
+    graph_data = {"nodes": nodes, "edges": edges}
+    report = run_lint(graph_data, check_actions=False, check_drift=False, check_secrets=False,
+                      check_orphans=False, check_rtk=False, check_dead=False, check_cycles=False,
+                      check_layers=False, check_context_managers=True)
+    assert report["status"] == "failed"
+    assert report["summary"]["errors"] == 2
+
+
+def test_check_ast_signature_drift():
+    base_nodes = [
+        {"id": "f_fetch", "label": "fetch(url, timeout=30)", "type": "function", "source_file": "client.py"},
+        {"id": "f_legacy", "label": "legacy_handler(request)", "type": "function", "source_file": "handler.py"},
+        {"id": "c_server", "label": "Server.start(port=8080)", "type": "method", "source_file": "server.py"},
+    ]
+
+    # Current nodes:
+    # 1. f_fetch added a required param 'auth_token' without default
+    # 2. f_legacy removed completely
+    # 3. c_server unchanged
+    curr_nodes = [
+        {"id": "f_fetch", "label": "fetch(url, auth_token, timeout=30)", "type": "function", "source_file": "client.py"},
+        {"id": "c_server", "label": "Server.start(port=8080)", "type": "method", "source_file": "server.py"},
+    ]
+
+    findings = check_ast_signature_drift(curr_nodes, base_nodes)
+    rules = [f["rule"] for f in findings]
+    assert "breaking_api_removal" in rules
+    assert "breaking_signature_change" in rules
+
+    removal = next(f for f in findings if f["rule"] == "breaking_api_removal")
+    assert removal["symbol"] == "legacy_handler"
+
+    sig_change = next(f for f in findings if f["rule"] == "breaking_signature_change")
+    assert sig_change["symbol"] == "fetch"
+
+    # Test integrated into run_lint
+    report = run_lint({"nodes": curr_nodes, "edges": []},
+                      check_actions=False, check_drift=False, check_secrets=False,
+                      check_orphans=False, check_rtk=False, check_dead=False, check_cycles=False,
+                      check_layers=False, check_context_managers=False,
+                      base_graph={"nodes": base_nodes, "edges": []})
+    assert len(report["findings"]) == 2
+
 

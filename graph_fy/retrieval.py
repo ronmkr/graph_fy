@@ -617,6 +617,8 @@ def query(
     eff_root = Path(root) if root is not None else Path(".")
     if db_path is not None:
         idx_path = Path(db_path)
+    elif graph_path is not None and (Path(graph_path).parent / "index.db").exists():
+        idx_path = Path(graph_path).parent / "index.db"
     elif (eff_root / "graph_fy_out" / "index.db").exists():
         idx_path = eff_root / "graph_fy_out" / "index.db"
     elif (eff_root / "index.db").exists():
@@ -1520,6 +1522,7 @@ def diff_context(
     root_dir: str | Path = ".",
     token_budget: int = 2000,
     graph_path: Path | str | None = None,
+    format: str = "default",
 ) -> dict[str, Any]:
     """Retrieve git diff-scoped ego-network context for code review / PR analysis.
 
@@ -1780,6 +1783,79 @@ def diff_context(
                             current_chars += len(block)
                             break
 
+    if format == "github-pr":
+        risk_emoji = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨"}.get(risk_tier, "⚪")
+        pr_lines: list[str] = [
+            "## 🔍 graph_fy AST Blast Radius Review",
+            "",
+            "| Metric | Blast Radius Analysis |",
+            "| :--- | :--- |",
+            f"| **Risk Tier** | {risk_emoji} **{risk_tier}** (Score: `{risk_score:.2f}`, `{downstream_impact_count}` downstream dependents) |",
+            f"| **Modified Files** | `{len(file_changes)}` file(s) (`{', '.join(sorted(file_changes.keys())) or 'none'}`) |",
+            f"| **Directly Touched Symbols** | `{len(changed_nodes)}` symbol(s) |",
+            f"| **Impacted Callers (1-Hop)** | `{len(callers)}` caller(s) |",
+            f"| **Affected Test Targets** | `{len(affected_tests)}` test suite(s) |",
+            "",
+        ]
+
+        if changed_nodes:
+            pr_lines.extend([
+                f"<details><summary><b>Touched AST Symbols & Skeletons ({len(changed_nodes)})</b></summary>",
+                "",
+                "```python",
+            ])
+            for cn in changed_nodes[:8]:
+                c_data = graph.nodes[cn]
+                spath = c_data.get("source_file") or c_data.get("source_path")
+                sloc = c_data.get("source_location")
+                lbl = c_data.get("label", cn)
+                if spath:
+                    res_path = Path(spath) if Path(spath).is_absolute() else (root_path / spath)
+                    if res_path.is_file():
+                        lm = re.search(r"L?(\d+)", str(sloc or ""))
+                        lnum = int(lm.group(1)) if lm else 1
+                        skel = get_symbol_code_from_file(res_path, lnum, skeletonize=True, compact_docstrings=True)
+                        if skel:
+                            pr_lines.append(f"// Symbol: {lbl} ({spath}:{sloc})\n{skel}")
+            pr_lines.extend(["```", "", "</details>", ""])
+
+        if callers:
+            caller_items = "\n".join(f"- `{c}`" for c in callers[:15])
+            pr_lines.extend([
+                f"<details><summary><b>Impacted Callers ({len(callers)})</b></summary>",
+                "",
+                caller_items,
+                "",
+                "</details>",
+                "",
+            ])
+
+        if affected_tests:
+            test_items = "\n".join(f"- `{t}`" for t in affected_tests[:10])
+            pr_lines.extend([
+                f"<details><summary><b>Recommended Test Verification Targets ({len(affected_tests)})</b></summary>",
+                "",
+                test_items,
+                "",
+                "</details>",
+                "",
+            ])
+
+        if co_changed_files:
+            co_items = "\n".join(f"- `{f}` ({int(freq*100)}% co-change)" for f, freq in co_changed_files)
+            pr_lines.extend([
+                f"<details><summary><b>Historically Co-Changed Files (Git)</b></summary>",
+                "",
+                co_items,
+                "",
+                "</details>",
+                "",
+            ])
+
+        prompt_context = "\n".join(pr_lines)
+    else:
+        prompt_context = "\n".join(lines)
+
     return {
         "base_ref": base_ref,
         "risk_tier": risk_tier,
@@ -1791,7 +1867,7 @@ def diff_context(
         "affected_tests": affected_tests,
         "endpoints": endpoints,
         "historically_co_changed": co_changed_files,
-        "prompt_context": "\n".join(lines),
+        "prompt_context": prompt_context,
     }
 
 
@@ -1890,6 +1966,58 @@ def refine_query(
     }
 
 
+def suggest_close_symbols(
+    query_terms: list[str],
+    graph: nx.Graph | None = None,
+    db_path: Path | str | None = None,
+    *,
+    limit: int = 3,
+    cutoff: float = 0.65,
+) -> list[str]:
+    """Find close verified AST symbol names using standard difflib matching."""
+    import difflib
+    labels: set[str] = set()
+    if graph is not None:
+        for nid, d in graph.nodes(data=True):
+            lbl = d.get("label") or (nid.split("::")[-1] if isinstance(nid, str) else "")
+            if lbl:
+                labels.add(str(lbl))
+    elif db_path is not None and Path(db_path).exists():
+        try:
+            conn = sqlite3.connect(str(db_path), timeout=5.0)
+            cur = conn.cursor()
+            for row in cur.execute("SELECT DISTINCT title FROM nodes_fts LIMIT 5000"):
+                if row[0]:
+                    labels.add(str(row[0]))
+            conn.close()
+        except Exception:
+            pass
+
+    if not labels:
+        return []
+
+    lower_map: dict[str, str] = {}
+    for s in labels:
+        clean = s.strip("().").strip()
+        if clean:
+            lower_map[clean.lower()] = clean
+
+    stop_words = _KEYWORDS_AND_BUILTINS.union({
+        "find", "get", "set", "fix", "check", "run", "test", "issue", "bug",
+        "implement", "update", "create", "delete", "remove", "add", "call", "show", "view"
+    })
+    candidates_found: list[str] = []
+    for term in query_terms:
+        term_clean = term.strip("().").strip().lower()
+        if len(term_clean) < 3 or term_clean in stop_words:
+            continue
+        close_keys = difflib.get_close_matches(term_clean, lower_map.keys(), n=limit, cutoff=cutoff)
+        for k in close_keys:
+            candidates_found.append(lower_map[k])
+
+    return list(dict.fromkeys(candidates_found))[: limit * 2]
+
+
 def task_context(
     task: str,
     graph: nx.Graph | None = None,
@@ -1919,9 +2047,11 @@ def task_context(
         elif (root_path / "graph.json").exists():
             graph_path = root_path / "graph.json"
     if db_path is None:
-        if (root_path / "graph_fy_out" / "index.db").exists():
+        if graph_path is not None and (Path(graph_path).parent / "index.db").exists():
+            db_path = Path(graph_path).parent / "index.db"
+        elif graph is None and (root_path / "graph_fy_out" / "index.db").exists():
             db_path = root_path / "graph_fy_out" / "index.db"
-        elif (root_path / "index.db").exists():
+        elif graph is None and (root_path / "index.db").exists():
             db_path = root_path / "index.db"
 
     if graph is None and graph_path is not None and Path(graph_path).exists():
@@ -1936,6 +2066,7 @@ def task_context(
             "task": task,
             "subsystems": [],
             "symbols": [],
+            "did_you_mean": [],
             "risk_tier": "LOW",
             "risk_score": 0.0,
             "affected_tests": [],
@@ -1968,24 +2099,43 @@ def task_context(
     candidates: list[dict[str, Any]] = res if isinstance(res, list) else []
 
     # Grounded Anti-Hallucination Filter:
-    # Ensure candidates match at least one significant user query term to reject false-positive stem hits
+    # Ensure candidates match at least one significant user query term to reject false-positive stem hits.
+    # If explicit code identifiers (e.g. foo_bar, MyClass) are present, require grounding on code identifiers.
+    code_identifiers = [
+        t.lower() for t in raw_terms
+        if ("_" in t or any(c.isupper() for c in t[1:]))
+        and len(t) >= 4
+        and t.lower() not in _KEYWORDS_AND_BUILTINS
+    ]
+
     significant_terms = [
         t.lower() for t in raw_terms
-        if len(t) >= 3 and t.lower() not in _KEYWORDS_AND_BUILTINS and t.lower() not in ("service", "class", "method", "function", "impl", "type", "test", "helper", "manage", "manager", "data")
+        if len(t) >= 3 and t.lower() not in _KEYWORDS_AND_BUILTINS and t.lower() not in (
+            "service", "class", "method", "function", "impl", "type", "test", "helper",
+            "manage", "manager", "data", "inspect", "search", "find", "check", "call", "show",
+            "trace", "audit", "across", "usage", "generation"
+        )
     ]
-    if significant_terms:
+    filter_terms = code_identifiers if code_identifiers else significant_terms
+    if filter_terms:
         grounded_candidates = []
         for c in candidates:
             c_text = f"{c.get('node_id', '')} {c.get('label', '')} {c.get('source_path', '')}".lower()
-            if any(term in c_text for term in significant_terms):
+            if any(term in c_text for term in filter_terms):
                 grounded_candidates.append(c)
         candidates = grounded_candidates
 
     if not candidates:
+        did_you_mean = suggest_close_symbols(significant_terms or raw_terms, graph=graph, db_path=db_path)
+        did_you_mean_msg = ""
+        if did_you_mean:
+            did_you_mean_msg = f"\n> Did you mean: {', '.join(f'`{s}`' for s in did_you_mean)}?"
+
         return {
             "task": task,
             "subsystems": [],
             "symbols": [],
+            "did_you_mean": did_you_mean,
             "risk_tier": "LOW",
             "risk_score": 0.0,
             "downstream_impact_count": 0,
@@ -1999,7 +2149,7 @@ def task_context(
                 f"### graph_fy Pre-Agent Architectural Briefing\n"
                 f"**Task**: {task}\n\n"
                 f"> [!WARNING]\n"
-                f"> Target Symbol Not Found: No symbols matching '{task}' exist in the knowledge graph.\n"
+                f"> Target Symbol Not Found: No symbols matching '{task}' exist in the knowledge graph.{did_you_mean_msg}\n"
                 f"> Grounded AST Invariant: Do NOT hallucinate non-existent APIs, classes, methods, or imports. Verify the exact identifier."
             ),
         }
@@ -2145,15 +2295,44 @@ def task_context(
                 pass
     raw_tokens = max(1, total_raw_chars // 4)
 
+    # Detect explicit code-like targets mentioned in prompt that are absent from verified AST
+    missing_explicit_symbols: list[str] = []
+    explicit_targets = set()
+    for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]{2,})\s*\(", task):
+        explicit_targets.add(m.group(1))
+    for m in re.finditer(r"\b([A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*)\b", task):
+        explicit_targets.add(m.group(1))
+    for m in re.finditer(r"(?:[A-Za-z_][A-Za-z0-9_]*\.)+([A-Za-z_][A-Za-z0-9_]{2,})\b", task):
+        explicit_targets.add(m.group(1))
+
+    stop_targets = {"get", "set", "def", "class", "True", "False", "None", "self", "args", "kwargs", "test", "Flask", "SQLAlchemy", "Alembic", "Click", "Jinja2", "Python", "HTTP", "REST", "API", "JSON", "CORS"}
+    explicit_targets = {t for t in explicit_targets if t not in stop_targets and len(t) > 3}
+
+    if explicit_targets:
+        cand_text = " ".join(f"{c.get('node_id', '')} {c.get('label', '')}".lower() for c in candidates)
+        for target in explicit_targets:
+            t_low = target.lower()
+            if t_low not in cand_text:
+                if graph is None or target not in graph:
+                    missing_explicit_symbols.append(target)
+
     # 8. Assemble Prompt Context
     lines: list[str] = [
         "### graph_fy Pre-Agent Architectural Briefing",
         "> [!IMPORTANT]",
         "> Grounded AST Invariant: All symbols, signatures, and dependencies below are extracted directly from the verified AST. Do NOT hallucinate non-existent methods, APIs, or imports. If a symbol or parameter is not present here, inspect the indicated source file before making assumptions.",
+    ]
+    if missing_explicit_symbols:
+        lines.extend([
+            "> [!WARNING]",
+            f"> Target Symbol Not Found: The following symbol(s) mentioned in the task do not exist in the verified AST: {', '.join(sorted(missing_explicit_symbols))}.",
+            "> Grounded AST Invariant: Do NOT hallucinate implementations or APIs for these non-existent symbols. Verify source code before proceeding.",
+        ])
+    lines.extend([
         f"**Task**: {task}",
         f"**Target Subsystem**: {subsystem_str}",
         f"**Blast Radius Risk**: {risk_tier} (Risk Score: {risk_score:.2f}, {downstream_impact_count} downstream dependents)",
-    ]
+    ])
     if affected_tests:
         lines.append(f"**Verification Targets (Tests)**: {', '.join(sorted(affected_tests)[:6])}")
     if co_changed_files:
@@ -2221,6 +2400,7 @@ def task_context(
         "task": task,
         "subsystems": subsystems,
         "symbols": candidates,
+        "did_you_mean": [],
         "risk_tier": risk_tier,
         "risk_score": round(risk_score, 2),
         "downstream_impact_count": downstream_impact_count,

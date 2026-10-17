@@ -35,15 +35,16 @@ def _infer_decision_badge(step: dict[str, Any]) -> tuple[str, str]:
 
 def generate_architecture_svg(stages: list[dict[str, Any]]) -> str:
     """Render an interactive, hardware-animated SVG architecture flow following the jev.ai design language."""
-    stage_width = 330
+    stage_width = 340
     stage_gap = 56
     margin_x = 44
     margin_y = 70
     step_height = 104
     step_gap = 22
+    header_height = 80
 
     max_steps = max((len(s["steps"]) for s in stages), default=1)
-    svg_height = margin_y * 2 + 50 + max_steps * (step_height + step_gap) + 60
+    svg_height = margin_y * 2 + header_height + max_steps * (step_height + step_gap) + 60
     svg_width = margin_x * 2 + len(stages) * stage_width + (len(stages) - 1) * stage_gap
     total_symbols = sum(s.get("symbols_count", 0) for s in stages)
 
@@ -120,10 +121,29 @@ def generate_architecture_svg(stages: list[dict[str, Any]]) -> str:
     for s_idx, stage in enumerate(stages):
         stage_x = margin_x + s_idx * (stage_width + stage_gap)
         stage_y = margin_y
-        col_height = 54 + len(stage["steps"]) * (step_height + step_gap) + 16
+        col_height = header_height + len(stage["steps"]) * (step_height + step_gap) + 16
 
         # Stage Column Registration Ticks
         stage_ticks = _render_corner_ticks(stage_x, stage_y, stage_width, col_height, size=5, color=stage["color"], opacity=0.55)
+
+        # Deconstruct stage title and subsystem for clean, collision-free multi-line layout
+        full_name = str(stage.get("name", "")).strip()
+        subsystem = str(stage.get("subsystem", "")).strip()
+
+        if " — " in full_name:
+            main_title, sub_part = full_name.split(" — ", 1)
+            main_title = main_title.strip()
+            if not subsystem:
+                subsystem = sub_part.strip()
+        elif " (" in full_name and full_name.endswith(")"):
+            main_title = full_name[:full_name.rfind(" (")].strip()
+            if not subsystem:
+                subsystem = full_name[full_name.rfind(" (") + 2:-1].strip()
+        else:
+            main_title = full_name
+
+        display_title = main_title if len(main_title) <= 28 else main_title[:27] + "…"
+        sub_display = subsystem if len(subsystem) <= 32 else subsystem[:31] + "…"
 
         # Stage background container
         svg_elements.append(f"""
@@ -136,24 +156,35 @@ def generate_architecture_svg(stages: list[dict[str, Any]]) -> str:
                 stroke="{stage['color']}" stroke-width="2.5" opacity="0.9" />
           {stage_ticks}
 
-          <!-- Stage Monospace Tag -->
+          <!-- Row 1 Left: Stage Monospace Tag -->
           <text x="{stage_x + 16}" y="{stage_y + 22}" fill="#64748b" font-size="9.5" font-weight="700" font-family="ui-monospace, monospace" letter-spacing="0.08em">
             STAGE 0{s_idx + 1} // {_html.escape(stage['id'].upper())}
           </text>
-          <!-- Stage Title -->
-          <text x="{stage_x + 16}" y="{stage_y + 40}" fill="#f8fafc" font-size="13.5" font-weight="700" font-family="system-ui, sans-serif">
-            {stage['icon']} {_html.escape(stage['name'])}
-          </text>
-          <!-- Stage Steps Badge -->
-          <text x="{stage_x + stage_width - 16}" y="{stage_y + 40}" fill="{stage['color']}" font-size="10.5" font-weight="700" text-anchor="end" font-family="ui-monospace, monospace">
+          <!-- Row 1 Right: Stage Steps Pill Badge (Row 1 - Never Collides With Stage Title) -->
+          <rect x="{stage_x + stage_width - 78}" y="{stage_y + 10}" width="62" height="18" rx="4"
+                fill="rgba(255, 255, 255, 0.05)" stroke="{stage['color']}" stroke-width="0.8" opacity="0.9" />
+          <text x="{stage_x + stage_width - 47}" y="{stage_y + 22.5}" fill="{stage['color']}" font-size="8.5" font-weight="700" text-anchor="middle" font-family="ui-monospace, monospace">
             {len(stage['steps'])} STEPS
           </text>
+
+          <!-- Row 2: Full-Width Stage Title -->
+          <text x="{stage_x + 16}" y="{stage_y + 44}" fill="#f8fafc" font-size="13" font-weight="700" font-family="system-ui, sans-serif">
+            {stage['icon']} {_html.escape(display_title)}
+          </text>
         """)
+
+        if sub_display:
+            svg_elements.append(f"""
+          <!-- Row 3: Subsystem / Dominant Hub -->
+          <text x="{stage_x + 16}" y="{stage_y + 62}" fill="{stage['color']}" font-size="9.5" font-weight="600" font-family="ui-monospace, monospace" opacity="0.85">
+            λ {_html.escape(sub_display)}
+          </text>
+            """)
 
         # Render Steps inside this stage
         for st_idx, step in enumerate(stage["steps"]):
             step_x = stage_x + 16
-            step_y = stage_y + 54 + st_idx * (step_height + step_gap)
+            step_y = stage_y + header_height + st_idx * (step_height + step_gap)
             node_w = stage_width - 32
 
             center_x = step_x + node_w / 2
@@ -180,6 +211,14 @@ def generate_architecture_svg(stages: list[dict[str, Any]]) -> str:
             in_type = step.get("input_type", "Any")
             out_type = step.get("output_type", "Any")
 
+            clean_step_name = step_name if len(step_name) <= 28 else step_name[:27] + "…"
+            clean_sym_label = sym_label if len(sym_label) <= 24 else sym_label[:23] + "…"
+
+            in_words = in_type.strip().split()
+            out_words = out_type.strip().split()
+            clean_in = in_words[0] if in_words else "Any"
+            clean_out = out_words[0] if out_words else "Any"
+
             # Card ticks
             card_ticks = _render_corner_ticks(step_x, step_y, node_w, step_height, size=3.5, color="#38bdf8", opacity=0.35)
 
@@ -191,11 +230,11 @@ def generate_architecture_svg(stages: list[dict[str, Any]]) -> str:
               {card_ticks}
 
               <!-- Top Row: Category Pill & Step Sequence -->
-              <rect x="{step_x + 10}" y="{step_y + 10}" width="56" height="17" rx="4" fill="rgba(56, 189, 248, 0.12)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1" />
-              <text x="{step_x + 38}" y="{step_y + 22}" fill="#38bdf8" font-size="9" font-weight="700" text-anchor="middle" font-family="ui-monospace, monospace">
-                {_html.escape(cat_tag.upper()[:8])}
+              <rect x="{step_x + 10}" y="{step_y + 10}" width="68" height="17" rx="4" fill="rgba(56, 189, 248, 0.12)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1" />
+              <text x="{step_x + 44}" y="{step_y + 22}" fill="#38bdf8" font-size="9" font-weight="700" text-anchor="middle" font-family="ui-monospace, monospace">
+                {_html.escape(cat_tag.upper()[:10])}
               </text>
-              <text x="{step_x + 72}" y="{step_y + 22}" fill="#64748b" font-size="10.5" font-family="ui-monospace, monospace">
+              <text x="{step_x + 84}" y="{step_y + 22}" fill="#64748b" font-size="10.5" font-family="ui-monospace, monospace">
                 #{step_num}
               </text>
 
@@ -207,17 +246,17 @@ def generate_architecture_svg(stages: list[dict[str, Any]]) -> str:
 
               <!-- Step Action Title -->
               <text x="{step_x + 12}" y="{step_y + 45}" fill="#f1f5f9" font-size="12.5" font-weight="700" font-family="system-ui, sans-serif">
-                {_html.escape(step_name[:32])}
+                {_html.escape(clean_step_name)}
               </text>
 
               <!-- AST Symbol Identifier Preview -->
               <text x="{step_x + 12}" y="{step_y + 65}" fill="#38bdf8" font-size="11" font-family="ui-monospace, monospace">
-                λ {_html.escape(sym_label[:26])} <tspan fill="#64748b" font-size="9">({sym_kind})</tspan>
+                λ {_html.escape(clean_sym_label)} <tspan fill="#64748b" font-size="9">({sym_kind})</tspan>
               </text>
 
               <!-- Contract Flow Footprint -->
               <text x="{step_x + 12}" y="{step_y + 85}" fill="#64748b" font-size="9.5" font-family="ui-monospace, monospace">
-                in: <tspan fill="#94a3b8">{_html.escape(in_type[:10])}</tspan> ➔ out: <tspan fill="#94a3b8">{_html.escape(out_type[:10])}</tspan>
+                in: <tspan fill="#94a3b8">{_html.escape(clean_in[:12])}</tspan> ➔ out: <tspan fill="#94a3b8">{_html.escape(clean_out[:12])}</tspan>
               </text>
 
               <!-- Hardware Ports (Ingress, Egress, Bus) -->
@@ -341,9 +380,10 @@ def _sanitize_mermaid_label(text: str) -> str:
     return _html.escape(" ".join(text.split()), quote=False)
 
 
-def generate_architecture_mermaid(stages: list[dict[str, Any]]) -> str:
+def generate_architecture_mermaid(stages: list[dict[str, Any]], direction: str = "LR") -> str:
     """Generate Mermaid flowchart syntax representing the lifecycle stages and steps."""
-    lines = ["flowchart LR"]
+    dir_mode = "TD" if direction.upper() == "TD" else "LR"
+    lines = [f"flowchart {dir_mode}"]
 
     for s_idx, stage in enumerate(stages):
         safe_stage_id = f"stage_{_slug(stage['id'])}"
@@ -392,7 +432,9 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
     stats = arch_data["stats"]
     stages = arch_data["stages"]
     svg_diagram = generate_architecture_svg(stages)
-    mermaid_code = generate_architecture_mermaid(stages)
+    mermaid_code_lr = generate_architecture_mermaid(stages, direction="LR")
+    mermaid_code_td = generate_architecture_mermaid(stages, direction="TD")
+    mermaid_code = mermaid_code_td  # Default rendered in HTML is TD for clean document flow
 
     # Encode JSON data for client-side search and inspector drawer
     data_json = json.dumps(arch_data, ensure_ascii=False)
@@ -516,7 +558,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <style>
     :root {{
       --md-primary: #0b57d0;
@@ -548,6 +590,61 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       --error: #c5221f;
       --error-bg: #fce8e6;
     }}
+    [data-theme="dark"] {{
+      --md-primary: #8ab4f8;
+      --md-surface: #1e1e1e;
+      --md-surface-dim: #121212;
+      --md-surface-container: #282828;
+      --md-on-surface: #e8eaed;
+      --md-on-surface-variant: #bdc1c6;
+      --md-border: #333333;
+
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --card: #1e1e1e;
+      --card-hover: #252525;
+      --border: #333333;
+      --border-accent: #8ab4f8;
+      --text: #e8eaed;
+      --text-sub: #bdc1c6;
+      --muted: #9aa0a6;
+      --accent: #8ab4f8;
+      --accent-subtle: #1f2b3e;
+      --success: #81c995;
+      --success-bg: #133820;
+      --warning: #fdd663;
+      --warning-bg: #382d00;
+      --error: #f28b82;
+      --error-bg: #3e1614;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root:not([data-theme="light"]) {{
+        --md-surface: #1e1e1e;
+        --md-surface-dim: #121212;
+        --md-surface-container: #282828;
+        --md-on-surface: #e8eaed;
+        --md-on-surface-variant: #bdc1c6;
+        --md-border: #333333;
+
+        --bg: #121212;
+        --surface: #1e1e1e;
+        --card: #1e1e1e;
+        --card-hover: #252525;
+        --border: #333333;
+        --border-accent: #8ab4f8;
+        --text: #e8eaed;
+        --text-sub: #bdc1c6;
+        --muted: #9aa0a6;
+        --accent: #8ab4f8;
+        --accent-subtle: #1f2b3e;
+        --success: #81c995;
+        --success-bg: #133820;
+        --warning: #fdd663;
+        --warning-bg: #382d00;
+        --error: #f28b82;
+        --error-bg: #3e1614;
+      }}
+    }}
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
       font-family: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -565,7 +662,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       position: sticky;
       top: 0;
       z-index: 50;
-      background: #ffffff;
+      background: var(--surface);
       border-bottom: 1px solid var(--border);
       box-shadow: 0 1px 2px 0 rgba(60,64,67,0.1), 0 2px 6px 2px rgba(60,64,67,0.05);
       padding: 10px 24px;
@@ -670,7 +767,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
 
     /* Material Hero Statement & Stat Strip */
     .hero-studio {{
-      background: #ffffff;
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 24px 28px;
@@ -683,8 +780,8 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       gap: 6px;
       padding: 3px 10px;
       border-radius: 4px;
-      background: #e8f0fe;
-      color: #1967d2;
+      background: var(--accent-subtle);
+      color: var(--accent);
       font-size: 11px;
       font-weight: 600;
       letter-spacing: 0.05em;
@@ -696,7 +793,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: #1a73e8;
+      background: var(--accent);
       display: inline-block;
     }}
     .hero-title {{
@@ -724,7 +821,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       .stat-strip {{ grid-template-columns: repeat(2, 1fr); }}
     }}
     .stat-cell {{
-      background: #f8f9fa;
+      background: var(--card);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 14px 18px;
@@ -750,26 +847,28 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       display: flex;
       gap: 8px;
       overflow-x: auto;
-      padding-bottom: 16px;
+      padding-bottom: 10px;
       margin-bottom: 24px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
     }}
     .stage-pill {{
-      flex: 1;
-      min-width: 190px;
-      background: #ffffff;
+      flex: 1 1 0px;
+      min-width: 145px;
+      background: var(--card);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 10px 14px;
+      padding: 10px 12px;
       cursor: pointer;
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
       transition: all 0.15s;
       box-shadow: 0 1px 2px rgba(60,64,67,0.04);
     }}
     .stage-pill:hover {{
-      background: #f1f3f4;
+      background: var(--card-hover);
       border-color: #c4c7c5;
     }}
     .stage-pill.active {{
@@ -795,8 +894,8 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
     .stage-pill-badge {{
       font-size: 11px;
       font-weight: 500;
-      color: #1967d2;
-      background: #e8f0fe;
+      color: var(--accent);
+      background: var(--accent-subtle);
       padding: 2px 6px;
       border-radius: 4px;
       font-family: "Roboto Mono", monospace;
@@ -809,7 +908,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
 
     /* Stage Deep-Dive Section (Material Container) */
     .stage-section {{
-      background: #ffffff;
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 24px;
@@ -847,7 +946,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       gap: 14px;
     }}
     .step-card {{
-      background: #ffffff;
+      background: var(--card);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 18px 20px;
@@ -943,7 +1042,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
 
     /* Material Action Buttons */
     .pill-btn {{
-      background: #ffffff;
+      background: var(--card);
       border: 1px solid var(--md-outline);
       color: var(--md-primary);
       padding: 7px 18px;
@@ -954,7 +1053,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       transition: all 0.15s;
     }}
     .pill-btn:hover {{
-      background: #f1f3f4;
+      background: var(--card-hover);
     }}
     .pill-btn-primary {{
       background: var(--md-primary);
@@ -975,7 +1074,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
 
     /* SVG Canvas Container */
     .svg-viewport-wrap {{
-      background: #ffffff;
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 24px;
@@ -983,6 +1082,33 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       position: relative;
       min-height: 640px;
       box-shadow: 0 1px 2px rgba(60,64,67,0.06);
+    }}
+    /* Mermaid Diagram Viewport */
+    .mermaid-viewport {{
+      overflow: auto;
+      background: #08080d;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      min-height: 480px;
+      max-height: 800px;
+      position: relative;
+      cursor: grab;
+      touch-action: none;
+    }}
+    .mermaid-viewport.is-dragging {{
+      cursor: grabbing;
+    }}
+    .mermaid-viewport svg {{
+      max-width: none !important;
+      height: auto !important;
+      transform-origin: 50% 0;
+      transition: transform 120ms ease;
+    }}
+    .pill-btn-toggle.active {{
+      background: var(--md-primary) !important;
+      color: #ffffff !important;
+      border-color: var(--md-primary) !important;
     }}
     .svg-controls {{
       position: absolute;
@@ -992,10 +1118,10 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       display: flex;
       align-items: center;
       gap: 4px;
-      background: #ffffff;
+      padding: 4px;
+      background: var(--card);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 4px;
       box-shadow: 0 1px 3px rgba(60,64,67,0.15);
     }}
     .svg-btn {{
@@ -1091,7 +1217,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       width: 100%;
       max-width: 620px;
       height: 100vh;
-      background: #ffffff;
+      background: var(--surface);
       border-left: 1px solid var(--border);
       box-shadow: -2px 0 16px rgba(60,64,67,0.15);
       z-index: 100;
@@ -1108,7 +1234,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       display: flex;
       align-items: center;
       justify-content: space-between;
-      background: #ffffff;
+      background: var(--surface);
     }}
     .drawer-body {{
       flex: 1;
@@ -1190,6 +1316,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
         <button class="view-tab-btn" data-view="diagram">Architecture Map</button>
         <button class="view-tab-btn" data-view="mermaid">Mermaid Diagram</button>
         <button class="view-tab-btn" data-view="matrix">Execution Matrix</button>
+        <button id="themeToggle" class="view-tab-btn" onclick="toggleTheme()" title="Toggle dark/light mode">🌓</button>
       </div>
     </div>
   </header>
@@ -1284,20 +1411,31 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
             <h3 style="font-size: 1.25rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em;">Mermaid Architectural Flowchart</h3>
             <p style="font-size: 0.9rem; color: var(--muted); margin-top: 4px;">Directly pasteable into GitHub markdown, PR reviews, Obsidian, and documentation.</p>
           </div>
-          <div style="display: flex; gap: 8px;">
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <div style="display: inline-flex; background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 2px;">
+              <button id="mermaid-dir-td" class="pill-btn pill-btn-toggle active" style="border: none; border-radius: 16px; font-size: 12px; padding: 5px 12px;">↕ Vertical (TD)</button>
+              <button id="mermaid-dir-lr" class="pill-btn pill-btn-toggle" style="border: none; border-radius: 16px; font-size: 12px; padding: 5px 12px;">↔ Horizontal (LR)</button>
+            </div>
+            <div style="display: inline-flex; gap: 4px;">
+              <button id="mermaid-zoom-in" class="pill-btn" title="Zoom In" style="padding: 5px 10px;">＋</button>
+              <button id="mermaid-zoom-out" class="pill-btn" title="Zoom Out" style="padding: 5px 10px;">－</button>
+              <button id="mermaid-zoom-reset" class="pill-btn" title="Reset Zoom" style="padding: 5px 10px;">1:1</button>
+            </div>
             <button id="toggle-mermaid-raw" class="pill-btn">Toggle Raw Syntax</button>
             <button id="copy-mermaid-btn" class="pill-btn-primary">Copy Mermaid 📋</button>
           </div>
         </div>
 
-        <div id="mermaid-rendered-wrap" style="overflow-x: auto; background: #08080d; border: 1px solid var(--border); border-radius: 16px; padding: 28px; min-height: 280px; display: flex; justify-content: center; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);">
-          <pre class="mermaid" id="mermaid-target" style="background: transparent; border: none; font-size: 14px;">
-{mermaid_code}
-          </pre>
+        <div id="mermaid-rendered-wrap" class="mermaid-viewport">
+          <div id="mermaid-pan-zoom-container" style="display: flex; justify-content: center; transform-origin: 50% 0; transition: transform 120ms ease;">
+            <pre class="mermaid" id="mermaid-target" style="background: transparent; border: none; font-size: 14px; margin: 0;">
+{mermaid_code_td}
+            </pre>
+          </div>
         </div>
 
         <div id="mermaid-raw-wrap" style="display: none; margin-top: 16px;">
-          <pre class="code-block" id="raw-mermaid-pre" style="max-height: 500px; overflow-y: auto;">{_html.escape(mermaid_code)}</pre>
+          <pre class="code-block" id="raw-mermaid-pre" style="max-height: 500px; overflow-y: auto;">{_html.escape(mermaid_code_td)}</pre>
         </div>
       </div>
     </div>
@@ -1357,9 +1495,15 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
     let mermaidRendered = false;
 
     function renderMermaidIfNeeded() {{
-      if (mermaidRendered || typeof mermaid === 'undefined') return;
+      if (mermaidRendered) return;
+      const target = document.getElementById('mermaid-target');
+      if (!target) return;
+      if (typeof mermaid === 'undefined') {{
+        setTimeout(renderMermaidIfNeeded, 100);
+        return;
+      }}
       try {{
-        mermaid.run({{ nodes: [document.getElementById('mermaid-target')] }});
+        mermaid.run({{ nodes: [target] }});
         mermaidRendered = true;
       }} catch (e) {{
         console.warn('Mermaid render warning:', e);
@@ -1368,6 +1512,7 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
 
     tabBtns.forEach(btn => {{
       btn.addEventListener('click', () => {{
+        if (!btn.dataset.view) return;
         tabBtns.forEach(b => b.classList.remove('active'));
         viewPanes.forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
@@ -1377,6 +1522,13 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
         if (btn.dataset.view === 'mermaid') {{
           renderMermaidIfNeeded();
         }}
+        try {{
+          if (history.replaceState) {{
+            const url = new URL(window.location);
+            url.searchParams.set('view', btn.dataset.view);
+            history.replaceState(null, '', url);
+          }}
+        }} catch(e) {{}}
       }});
     }});
 
@@ -1399,12 +1551,21 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       }});
     }});
 
-    // Search Filtering
+    // Search Filtering & URL Sync
     const searchInput = document.getElementById('arch-search');
     searchInput.addEventListener('input', (e) => {{
       const query = e.target.value.toLowerCase().trim();
       const stepCards = document.querySelectorAll('.step-card');
       const stageSections = document.querySelectorAll('.stage-section');
+
+      try {{
+        if (history.replaceState) {{
+          const url = new URL(window.location);
+          if (query) url.searchParams.set('search', query);
+          else url.searchParams.delete('search');
+          history.replaceState(null, '', url);
+        }}
+      }} catch(e) {{}}
 
       if (!query) {{
         stepCards.forEach(c => c.style.display = 'block');
@@ -1427,6 +1588,23 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
         sec.style.display = hasMatch ? 'block' : 'none';
       }});
     }});
+
+    // Initialize from URL deep link
+    (function() {{
+      try {{
+        const params = new URLSearchParams(window.location.search);
+        const q = params.get('search') || params.get('q') || (window.location.hash ? decodeURIComponent(window.location.hash.slice(1)) : '');
+        const view = params.get('view');
+        if (view) {{
+          const btn = document.querySelector(`.view-tab-btn[data-view="${{view}}"]`);
+          if (btn) btn.click();
+        }}
+        if (q && searchInput) {{
+          searchInput.value = q;
+          searchInput.dispatchEvent(new Event('input'));
+        }}
+      }} catch(e) {{}}
+    }})();
 
     // Keyboard shortcut to search
     window.addEventListener('keydown', (e) => {{
@@ -1595,15 +1773,94 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }}
 
-    // Mermaid Copy & Toggle
+    // Mermaid Controls: Orientation Toggle, Zoom, Pan & Copy
     const copyMermaidBtn = document.getElementById('copy-mermaid-btn');
     const toggleMermaidRaw = document.getElementById('toggle-mermaid-raw');
     const mermaidRawWrap = document.getElementById('mermaid-raw-wrap');
-    const mermaidCodeText = {json.dumps(mermaid_code)};
+    const rawMermaidPre = document.getElementById('raw-mermaid-pre');
+    const mermaidDirTdBtn = document.getElementById('mermaid-dir-td');
+    const mermaidDirLrBtn = document.getElementById('mermaid-dir-lr');
+    const mermaidTarget = document.getElementById('mermaid-target');
+    const mermaidPzContainer = document.getElementById('mermaid-pan-zoom-container');
+    const mermaidRenderedWrap = document.getElementById('mermaid-rendered-wrap');
+
+    const mermaidCodeTD = {json.dumps(mermaid_code_td)};
+    const mermaidCodeLR = {json.dumps(mermaid_code_lr)};
+    let currentMermaidDir = 'TD';
+    let mermaidScale = 1.0;
+
+    function applyMermaidScale() {{
+      if (mermaidPzContainer) {{
+        mermaidPzContainer.style.transform = 'scale(' + mermaidScale + ')';
+      }}
+    }}
+
+    const mZoomIn = document.getElementById('mermaid-zoom-in');
+    const mZoomOut = document.getElementById('mermaid-zoom-out');
+    const mZoomReset = document.getElementById('mermaid-zoom-reset');
+
+    if (mZoomIn) {{
+      mZoomIn.addEventListener('click', () => {{
+        mermaidScale = Math.min(2.5, mermaidScale + 0.15);
+        applyMermaidScale();
+      }});
+    }}
+    if (mZoomOut) {{
+      mZoomOut.addEventListener('click', () => {{
+        mermaidScale = Math.max(0.3, mermaidScale - 0.15);
+        applyMermaidScale();
+      }});
+    }}
+    if (mZoomReset) {{
+      mZoomReset.addEventListener('click', () => {{
+        mermaidScale = 1.0;
+        applyMermaidScale();
+      }});
+    }}
+
+    // Direction Toggle
+    function setMermaidDirection(dir) {{
+      if (currentMermaidDir === dir) return;
+      currentMermaidDir = dir;
+      if (dir === 'TD') {{
+        if (mermaidDirTdBtn) mermaidDirTdBtn.classList.add('active');
+        if (mermaidDirLrBtn) mermaidDirLrBtn.classList.remove('active');
+        if (mermaidTarget) {{
+          mermaidTarget.removeAttribute('data-processed');
+          mermaidTarget.innerHTML = escapeHtml(mermaidCodeTD);
+        }}
+        if (rawMermaidPre) rawMermaidPre.textContent = mermaidCodeTD;
+      }} else {{
+        if (mermaidDirLrBtn) mermaidDirLrBtn.classList.add('active');
+        if (mermaidDirTdBtn) mermaidDirTdBtn.classList.remove('active');
+        if (mermaidTarget) {{
+          mermaidTarget.removeAttribute('data-processed');
+          mermaidTarget.innerHTML = escapeHtml(mermaidCodeLR);
+        }}
+        if (rawMermaidPre) rawMermaidPre.textContent = mermaidCodeLR;
+      }}
+      mermaidScale = 1.0;
+      applyMermaidScale();
+      if (typeof mermaid !== 'undefined' && mermaidTarget) {{
+        try {{
+          mermaid.run({{ nodes: [mermaidTarget] }});
+        }} catch(e) {{
+          console.warn('Mermaid re-render error:', e);
+        }}
+      }}
+    }}
+
+    if (mermaidDirTdBtn) {{
+      mermaidDirTdBtn.addEventListener('click', () => setMermaidDirection('TD'));
+    }}
+    if (mermaidDirLrBtn) {{
+      mermaidDirLrBtn.addEventListener('click', () => setMermaidDirection('LR'));
+    }}
 
     if (copyMermaidBtn) {{
       copyMermaidBtn.addEventListener('click', () => {{
-        navigator.clipboard.writeText(mermaidCodeText).then(() => {{
+        const textToCopy = currentMermaidDir === 'TD' ? mermaidCodeTD : mermaidCodeLR;
+        navigator.clipboard.writeText(textToCopy).then(() => {{
           copyMermaidBtn.textContent = 'Copied! ✓';
           setTimeout(() => {{ copyMermaidBtn.textContent = 'Copy Mermaid 📋'; }}, 2000);
         }});
@@ -1624,14 +1881,28 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
       try {{
         mermaid.initialize({{
           startOnLoad: false,
-          theme: 'neutral',
+          theme: 'dark',
           securityLevel: 'loose',
-          flowchart: {{ htmlLabels: true, useMaxWidth: true }}
+          flowchart: {{ htmlLabels: true, useMaxWidth: false }}
         }});
       }} catch (e) {{
         console.warn('Mermaid initialization warning:', e);
       }}
     }}
+  </script>
+  <script>
+    function toggleTheme() {{
+      const current = document.documentElement.getAttribute('data-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try {{ localStorage.setItem('graph_fy_theme', next); }} catch(e){{}}
+    }}
+    (function() {{
+      try {{
+        const saved = localStorage.getItem('graph_fy_theme');
+        if (saved) document.documentElement.setAttribute('data-theme', saved);
+      }} catch(e){{}}
+    }})();
   </script>
 </body>
 </html>"""

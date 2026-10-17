@@ -902,13 +902,8 @@ def _cached_source_key(source_file: str, root_str: str, _cwd: str) -> str:
         return str(source_path)
 
 
-_PROCESS_CWD: str = ""
-
 def _get_process_cwd() -> str:
-    global _PROCESS_CWD
-    if not _PROCESS_CWD:
-        _PROCESS_CWD = os.getcwd()
-    return _PROCESS_CWD
+    return os.getcwd()
 
 def _source_key(source_file: str, root: Path) -> str:
     if not source_file:
@@ -2226,6 +2221,27 @@ def _probe_python_module_candidate(candidate: Path) -> Path | None:
     return None
 
 
+_PYTHON_WORKSPACE_ROOTS_CACHE: dict[str, list[Path]] = {}
+
+
+def _python_workspace_package_roots(root: Path) -> list[Path]:
+    key = str(root)
+    if key in _PYTHON_WORKSPACE_ROOTS_CACHE:
+        return _PYTHON_WORKSPACE_ROOTS_CACHE[key]
+    roots = []
+    try:
+        for child in root.iterdir():
+            if child.is_dir() and not child.name.startswith((".", "_")) and child.name not in ("node_modules", "dist", "build", "venv", ".venv", "graph_fy_out"):
+                roots.append(child)
+                src = child / "src"
+                if src.is_dir():
+                    roots.append(src)
+    except Exception:
+        pass
+    _PYTHON_WORKSPACE_ROOTS_CACHE[key] = roots
+    return roots
+
+
 def _resolve_python_module_path(module_name: str, current_path: Path, root: Path, level: int) -> Path | None:
     if level > 0:
         base = current_path.parent
@@ -2260,6 +2276,12 @@ def _resolve_python_module_path(module_name: str, current_path: Path, root: Path
         if (anc / "__init__.py").is_file():
             continue
         cand = _probe_python_module_candidate(anc / rel)
+        if cand is not None:
+            return cand
+
+    # Sibling multi-repo / workspace discovery under scan root
+    for sub in _python_workspace_package_roots(root):
+        cand = _probe_python_module_candidate(sub / rel)
         if cand is not None:
             return cand
     return None

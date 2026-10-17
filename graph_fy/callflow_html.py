@@ -52,6 +52,66 @@ CSS = """:root {
   --err: #c5221f;
   --ok: #137333;
 }
+[data-theme="dark"] {
+  --bg: #121212;
+  --surface: #1e1e1e;
+  --card: #1e1e1e;
+  --border: #333333;
+  --border-accent: #8ab4f8;
+  --text: #e8eaed;
+  --text-sub: #bdc1c6;
+  --muted: #9aa0a6;
+  --accent: #8ab4f8;
+  --accent-subtle: #1f2b3e;
+  --warn: #fdd663;
+  --err: #f28b82;
+  --ok: #81c995;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121212;
+    --surface: #1e1e1e;
+    --card: #1e1e1e;
+    --border: #333333;
+    --border-accent: #8ab4f8;
+    --text: #e8eaed;
+    --text-sub: #bdc1c6;
+    --muted: #9aa0a6;
+    --accent: #8ab4f8;
+    --accent-subtle: #1f2b3e;
+    --warn: #fdd663;
+    --err: #f28b82;
+    --ok: #81c995;
+  }
+}
+[data-theme="dark"] .edgeLabel,
+[data-theme="dark"] .edgeLabel rect,
+[data-theme="dark"] .edgeLabel span,
+[data-theme="dark"] .labelBBox,
+[data-theme="dark"] .labelBkg {
+  background-color: #2a2a2a !important;
+  fill: #2a2a2a !important;
+  color: #e8eaed !important;
+  border-color: #444444 !important;
+}
+.theme-toggle {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+  box-shadow: 0 1px 2px rgba(60,64,67,0.08);
+}
+.theme-toggle:hover {
+  border-color: var(--accent);
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -98,6 +158,29 @@ p { margin: 8px 0; color: var(--muted); }
   position: relative;
   box-shadow: 0 1px 2px rgba(60,64,67,0.06);
 }
+.edgeLabel {
+  background-color: var(--surface) !important;
+  color: var(--text) !important;
+  font-weight: 500 !important;
+  padding: 3px 8px !important;
+  border-radius: 4px !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 1px 2px rgba(60,64,67,0.08) !important;
+}
+.edgeLabel rect, .edgeLabel span, .labelBBox, .labelBkg {
+  fill: var(--surface) !important;
+  background-color: var(--surface) !important;
+  color: var(--text) !important;
+  opacity: 1 !important;
+}
+.node .label {
+  padding: 8px 16px !important;
+  font-weight: 500 !important;
+}
+.node rect, .node polygon {
+  rx: 6px !important;
+  ry: 6px !important;
+}
 .mermaid.is-enhanced { padding: 0; overflow: hidden; min-height: 260px; }
 .mermaid-viewport { padding: 54px 24px 24px; overflow: hidden; cursor: grab; touch-action: none; min-height: 260px; }
 .mermaid-viewport.is-dragging { cursor: grabbing; }
@@ -111,7 +194,7 @@ p { margin: 8px 0; color: var(--muted); }
   align-items: center;
   gap: 4px;
   padding: 4px;
-  background: #ffffff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(60,64,67,0.15);
@@ -122,7 +205,7 @@ p { margin: 8px 0; color: var(--muted); }
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
-  color: var(--text-sub);
+  color: var(--text);
   font: 500 0.82rem "Roboto Mono", monospace;
   display: inline-flex;
   align-items: center;
@@ -130,8 +213,8 @@ p { margin: 8px 0; color: var(--muted); }
   transition: all 0.15s;
 }
 .mermaid-toolbar button { cursor: pointer; }
-.mermaid-toolbar button:hover { background: #f1f3f4; color: var(--accent); }
-.mermaid-toolbar .zoom-level { min-width: 52px; color: var(--muted); }
+.mermaid-toolbar button:hover { background: var(--card-hover); color: var(--accent); }
+.mermaid-toolbar .zoom-level { min-width: 52px; color: var(--text); }
 .call-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.9rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; box-shadow: 0 1px 2px rgba(60,64,67,0.04); }
 .call-table th { background: #f8f9fa; color: var(--muted); text-align: left; padding: 10px 14px; border-bottom: 2px solid var(--border); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 .call-table td { padding: 10px 14px; border-bottom: 1px solid #e0e0e0; vertical-align: top; font-family: "Roboto Mono", monospace; font-size: 0.86rem; color: var(--text); }
@@ -177,7 +260,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
 .nav {
   position: sticky;
   top: 0;
-  background: #ffffff;
+  background: var(--surface);
   z-index: 10;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
@@ -188,8 +271,8 @@ hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
   font-size: 0.88rem;
   font-family: "Google Sans", Roboto, sans-serif;
 }
-.nav a { color: var(--muted); padding: 5px 12px; border-radius: 8px; transition: all 0.15s; font-weight: 500; }
-.nav a:hover { color: var(--accent); background: #f1f3f4; text-decoration: none; }
+.nav a { color: var(--text-sub); padding: 5px 12px; border-radius: 8px; transition: all 0.15s; font-weight: 500; }
+.nav a:hover { color: var(--accent); background: var(--accent-subtle); text-decoration: none; }
 @media (max-width: 768px) { .container { padding: 16px; } h1 { font-size: 1.8rem; } }
 """
 
@@ -739,15 +822,15 @@ def mermaid_init(scale: float, direction: str = "LR") -> str:
 def mermaid_class_defs() -> list:
     """Shared Mermaid-native styles for readable diagrams."""
     return [
-        "    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;",
-        "    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;",
-        "    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;",
-        "    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;",
-        "    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;",
-        "    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;",
-        "    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;",
-        "    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;",
-        "    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;",
+        "    classDef entry fill:#fef7e0,stroke:#f9ab00,color:#202124,stroke-width:1.5px;",
+        "    classDef api fill:#fce8e6,stroke:#ea4335,color:#202124,stroke-width:1.5px;",
+        "    classDef async fill:#f3e8fd,stroke:#9334e6,color:#202124,stroke-width:1.5px;",
+        "    classDef klass fill:#e6f4ea,stroke:#1e8e3e,color:#202124,stroke-width:1.5px;",
+        "    classDef ui fill:#fce4ec,stroke:#e91e63,color:#202124,stroke-width:1.5px;",
+        "    classDef module fill:#e8f0fe,stroke:#1a73e8,color:#202124,stroke-width:1.5px;",
+        "    classDef test fill:#f1f3f4,stroke:#5f6368,color:#202124,stroke-width:1.5px;",
+        "    classDef concept fill:#ffffff,stroke:#dadce0,color:#5f6368,stroke-dasharray:4 3;",
+        "    classDef function fill:#e8f0fe,stroke:#1a73e8,color:#202124,stroke-width:1.5px;",
     ]
 
 
@@ -1207,7 +1290,7 @@ def generate_overview_graph(sections: list, section_nodes_map: dict,
         sid = mermaid_section_id(sec["id"])
         node_count = len(section_nodes_map.get(sec["id"], []))
         label = (
-            f"{safe_mermaid_text(sec.get('name', sec['id']))}"
+            f"&nbsp;&nbsp;{safe_mermaid_text(sec.get('name', sec['id']))}&nbsp;&nbsp;"
             f"<br/><small>{node_count} {safe_mermaid_text('nodes')}</small>"
         )
         lines.append(f'    {sid}("{label}")')
@@ -1490,8 +1573,13 @@ def generate_header(sections: list, meta: dict, lang: str) -> str:
             f"Commit: {commit}"
         )
 
-    return f"""<h1>{escape(title)}</h1>
-<p class="subtitle">{escape(subtitle)}</p>
+    return f"""<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">
+  <div>
+    <h1>{escape(title)}</h1>
+    <p class="subtitle">{escape(subtitle)}</p>
+  </div>
+  <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">🌓 Theme</button>
+</div>
 
 {generate_nav(sections)}
 """
@@ -1954,17 +2042,22 @@ def write_callflow_html(
 (function () {
   const mermaidConfig = {
     startOnLoad: false,
-    theme: 'dark',
+    theme: 'base',
     securityLevel: 'loose',
     flowchart: { htmlLabels: true, useMaxWidth: true },
     themeVariables: {
-      primaryColor: '#1e293b',
-      primaryTextColor: '#e2e8f0',
-      primaryBorderColor: '#38bdf8',
-      secondaryColor: '#0f172a',
-      tertiaryColor: '#334155',
-      lineColor: '#64748b',
-      textColor: '#e2e8f0',
+      primaryColor: '#e8f0fe',
+      primaryTextColor: '#0b57d0',
+      primaryBorderColor: '#1a73e8',
+      secondaryColor: '#f8f9fa',
+      tertiaryColor: '#ffffff',
+      lineColor: '#5f6368',
+      textColor: '#202124',
+      edgeLabelBackground: '#ffffff',
+      nodeBorder: '#1a73e8',
+      clusterBkg: '#f8f9fa',
+      clusterBorder: '#dadce0',
+      fontFamily: 'Google Sans, Roboto, sans-serif'
     }
   };
 
@@ -2099,6 +2192,19 @@ def write_callflow_html(
   } else {
     renderMermaid();
   }
+})();
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('graph_fy_theme', next); } catch(e){}
+}
+(function() {
+  try {
+    const saved = localStorage.getItem('graph_fy_theme');
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+  } catch(e){}
 })();
 </script>
 

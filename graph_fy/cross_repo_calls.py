@@ -43,6 +43,9 @@ _LANG_SUFFIXES: dict[str, frozenset[str]] = {
     "csharp": frozenset({".cs"}),
     "java": frozenset({".java"}),
     "swift": frozenset({".swift"}),
+    "python": frozenset({".py"}),
+    "typescript": frozenset({".ts", ".tsx", ".mts", ".cts"}),
+    "javascript": frozenset({".js", ".jsx", ".mjs", ".cjs"}),
 }
 
 # A declaration owns its members through a `method` edge, except in C++, where an

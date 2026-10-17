@@ -12,6 +12,7 @@ from graph_fy.describe_arch import (
     describe_architecture,
     generate_architecture_html,
     generate_architecture_svg,
+    generate_architecture_mermaid,
 )
 
 PYTHON = sys.executable
@@ -515,3 +516,54 @@ def test_describe_missing_graph_exits_1(tmp_path):
     )
     assert res.returncode == 1
     assert "error: graph.json not found" in res.stderr
+
+
+def test_generate_architecture_mermaid_orientations():
+    stages = [
+        {
+            "id": "initiation",
+            "name": "Stage 1: Intake",
+            "icon": "⚡",
+            "steps": [{"id": "s1", "step_number": "1.1", "name": "Context", "symbols": []}],
+        }
+    ]
+    mm_lr = generate_architecture_mermaid(stages, direction="LR")
+    assert mm_lr.startswith("flowchart LR")
+
+    mm_td = generate_architecture_mermaid(stages, direction="TD")
+    assert mm_td.startswith("flowchart TD")
+
+
+def test_architecture_svg_stage_header_subsystem_layout():
+    stages = [
+        {
+            "id": "gateway",
+            "name": "Stage 4: Integrations & Remote Clients — werkzeug/http.py",
+            "icon": "🌐",
+            "color": "#c084fc",
+            "bg_color": "rgba(192, 132, 252, 0.12)",
+            "border_color": "rgba(192, 132, 252, 0.35)",
+            "symbols_count": 10,
+            "subsystem": "werkzeug/http.py",
+            "steps": [
+                {
+                    "id": "step-4-1",
+                    "step_number": "4.1",
+                    "name": "Dispatch Remote",
+                    "category_tag": "GATEWAY",
+                    "symbols": [{"id": "s41", "label": "remote_call()", "kind": "func"}],
+                }
+            ],
+        }
+    ]
+    svg = generate_architecture_svg(stages)
+    # 1. Monospace stage tag and steps pill on Row 1
+    assert "STAGE 01 // GATEWAY" in svg
+    assert "1 STEPS" in svg
+    # 2. Cleaned stage title on Row 2
+    assert "Stage 4: Integrations" in svg
+    # 3. Subsystem on Row 3
+    assert "λ werkzeug/http.py" in svg
+    # 4. Step card with 10-char category tag
+    assert "GATEWAY" in svg
+
