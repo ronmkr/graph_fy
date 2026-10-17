@@ -88,7 +88,12 @@ CSS = """:root {
 [data-theme="dark"] .edgeLabel rect,
 [data-theme="dark"] .edgeLabel span,
 [data-theme="dark"] .labelBBox,
-[data-theme="dark"] .labelBkg {
+[data-theme="dark"] .labelBkg,
+:root:not([data-theme="light"]) .edgeLabel,
+:root:not([data-theme="light"]) .edgeLabel rect,
+:root:not([data-theme="light"]) .edgeLabel span,
+:root:not([data-theme="light"]) .labelBBox,
+:root:not([data-theme="light"]) .labelBkg {
   background-color: #2a2a2a !important;
   fill: #2a2a2a !important;
   color: #e8eaed !important;
@@ -127,6 +132,9 @@ h1 {
   color: var(--text);
   margin-bottom: 8px;
   letter-spacing: -0.01em;
+}
+h2, h3, h4, [id] {
+  scroll-margin-top: 80px;
 }
 h2 {
   font-size: 1.5rem;
@@ -181,10 +189,10 @@ p { margin: 8px 0; color: var(--muted); }
   rx: 6px !important;
   ry: 6px !important;
 }
-.mermaid.is-enhanced { padding: 0; overflow: hidden; min-height: 260px; }
-.mermaid-viewport { padding: 54px 24px 24px; overflow: hidden; cursor: grab; touch-action: none; min-height: 260px; }
+.mermaid.is-enhanced { padding: 0; overflow: hidden; min-height: 260px; position: relative; }
+.mermaid-viewport { padding: 50px 20px 20px; overflow: hidden; cursor: grab; touch-action: none; min-height: 260px; display: flex; justify-content: center; align-items: flex-start; }
 .mermaid-viewport.is-dragging { cursor: grabbing; }
-.mermaid-viewport svg { max-width: none !important; height: auto; transform-origin: 0 0; transition: transform 120ms ease; }
+.mermaid-viewport svg { max-width: 100% !important; height: auto; transform-origin: center top; transition: transform 120ms ease; display: block; }
 .mermaid-toolbar {
   position: absolute;
   top: 10px;
@@ -830,6 +838,7 @@ def mermaid_class_defs() -> list:
         "    classDef module fill:#e8f0fe,stroke:#1a73e8,color:#202124,stroke-width:1.5px;",
         "    classDef test fill:#f1f3f4,stroke:#5f6368,color:#202124,stroke-width:1.5px;",
         "    classDef concept fill:#ffffff,stroke:#dadce0,color:#5f6368,stroke-dasharray:4 3;",
+        "    classDef fnNode fill:#e8f0fe,stroke:#1a73e8,color:#202124,stroke-width:1.5px;",
         "    classDef function fill:#e8f0fe,stroke:#1a73e8,color:#202124,stroke-width:1.5px;",
     ]
 
@@ -1283,7 +1292,7 @@ def generate_overview_graph(sections: list, section_nodes_map: dict,
                              classified_edges: dict, labels: dict, lang: str,
                              diagram_scale: float) -> str:
     """Generate a readable section-level architecture overview."""
-    lines = [mermaid_init(diagram_scale, "LR")]
+    lines = [mermaid_init(diagram_scale, "TD")]
     section_defs = [sec for sec in sections if sec["id"] != "overview"]
 
     for sec in section_defs:
@@ -1352,7 +1361,8 @@ def generate_section_flowchart(section_id: str, section_name: str,
         for node in group:
             mid = node_mermaid_id(node)
             lines.append(f'{indent}{mid}("{node_label(node)}")')
-            class_lines.append(f"    class {mid} {node_kind(node)};")
+            kind = "fnNode" if node_kind(node) == "function" else node_kind(node)
+            class_lines.append(f"    class {mid} {kind};")
         if len(groups) > 1 and len(group) > 1:
             lines.append("    end")
 
@@ -2101,7 +2111,7 @@ def write_callflow_html(
       }
 
       function zoomBy(delta) {
-        state.scale = clamp(state.scale + delta, 0.25, 3);
+        state.scale = clamp(Math.round((state.scale + delta) * 100) / 100, 0.4, 3);
         applyTransform();
       }
 
@@ -2113,17 +2123,7 @@ def write_callflow_html(
       }
 
       function fitWidth() {
-        const rawWidth = svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width
-          ? svg.viewBox.baseVal.width
-          : svg.getBoundingClientRect().width / state.scale;
-        if (!rawWidth) {
-          reset();
-          return;
-        }
-        state.scale = clamp((viewport.clientWidth - 48) / rawWidth, 0.25, 1.4);
-        state.x = 0;
-        state.y = 0;
-        applyTransform();
+        reset();
       }
 
       toolbar.addEventListener('click', (event) => {

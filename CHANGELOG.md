@@ -4,6 +4,17 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 ## 0.2.0 (2026-10-17)
 
+- Feature: Comparative Evaluation Suite & 106 Real-World Scenarios (`graph_fy/comparative_eval.py` & `evals/`):
+  - Head-to-head benchmark harness comparing With Skill (`graph_fy`) vs Without Skill (Raw LLM baseline).
+  - 106 real-world scenarios across 11 technical categories (CVE blast radius, distributed tracing, context manager leaks, circular imports, gRPC contract drift, ReDoS, memory leaks, typo-tolerance, and adversarial phantom APIs).
+  - Demonstrates 98.6% token reduction (31.5k vs 2.25M tokens), 80.8% fewer tool turns (1.0 vs 5.2 turns), 123.3x latency speedup (147.7ms vs 16.6s), and 100% anti-hallucination rate.
+  - Automated report generation (`graph_fy eval --comparative --report <path>`) and CI workflow integration (`.github/workflows/eval.yml`).
+- Feature: Unified Multi-View Architecture Dashboard (`graph_fy export dashboard` -> `dashboard.html`):
+  - Stitches together Architecture Map, Force Graph, Execution Callflow, and Symbol Tree into a unified dashboard.
+  - Supports single-tab navigation, 2x2 split-screen grid view, and standalone iframe embedding.
+- Feature: Architecture Visualizer Overhaul & Collision-Free SVG Headers (`graph_fy/describe_arch_html.py`):
+  - Dual-direction Mermaid flowchart rendering (`↕ Vertical TD` default, `↔ Horizontal LR` toggle) with zoom/pan controls, solving the compound graph hairline collapse bug.
+  - Decoupled 3-row SVG stage headers (Row 1: ID & Step Badge, Row 2: Stage Title, Row 3: Subsystem category pill), eliminating text overlap across all pipeline stages.
 - Feature: Typo-Tolerant AST Symbol Search & Did-You-Mean Resolution (`graph_fy/retrieval.py`):
   - Standard-library `difflib` identifier matching suggesting closest verified AST symbols when near-miss or misspelled queries return empty.
   - Injected suggestions directly into pre-agent architectural briefings (`Did you mean: ...?`).

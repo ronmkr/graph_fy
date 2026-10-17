@@ -3484,12 +3484,13 @@ def dispatch_command(cmd: str) -> None:
 
     elif cmd == "export":
         subcmd = sys.argv[2] if len(sys.argv) > 2 else ""
-        if subcmd not in ("html", "callflow-html", "tree-html", "tree", "obsidian", "wiki", "svg", "graphml", "neo4j", "falkordb"):
+        if subcmd not in ("html", "callflow-html", "tree-html", "tree", "dashboard", "dashboard-html", "obsidian", "wiki", "svg", "graphml", "neo4j", "falkordb"):
             print("Usage: graph_fy export <format>", file=sys.stderr)
             print("  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]", file=sys.stderr)
             print("  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]", file=sys.stderr)
             print("            [--lang auto|zh-CN|en] [--max-sections N] [--diagram-scale N]", file=sys.stderr)
             print("  tree-html [--graph PATH] [--output HTML]", file=sys.stderr)
+            print("  dashboard [--output HTML]", file=sys.stderr)
             print("  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]", file=sys.stderr)
             print("  wiki      [--graph PATH] [--labels PATH]", file=sys.stderr)
             print("  svg       [--graph PATH] [--labels PATH]", file=sys.stderr)
@@ -3815,6 +3816,283 @@ def dispatch_command(cmd: str) -> None:
                 output_path=out_file,
                 max_children=DEFAULT_MAX_CHILDREN,
             )
+            print(f"wrote {out_file}")
+            sys.exit(0)
+
+        elif subcmd in ("dashboard", "dashboard-html"):
+            out_file = callflow_output or (graph_path.parent / "dashboard.html")
+            proj_name = graph_path.parent.parent.name or "project"
+            callflow_file = "graph_fy-callflow.html"
+            for cand in [f"{proj_name}-callflow.html", "graph_fy-callflow.html", "callflow.html"]:
+                if (graph_path.parent / cand).exists():
+                    callflow_file = cand
+                    break
+
+            dash_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>graph_fy Unified Multi-View Architecture Dashboard</title>
+<style>
+  :root {{
+    --bg-base: #11111b;
+    --bg-surface: #181825;
+    --bg-card: #1e1e2e;
+    --border: #313244;
+    --text: #cdd6f4;
+    --text-muted: #a6adc8;
+    --primary: #89b4fa;
+    --accent: #a6e3a1;
+  }}
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg-base);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }}
+  header {{
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    z-index: 10;
+  }}
+  .brand {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--primary);
+    text-decoration: none;
+  }}
+  .brand-pill {{
+    background: rgba(137, 180, 250, 0.15);
+    border: 1px solid var(--primary);
+    color: var(--primary);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+  }}
+  .tabs {{
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }}
+  .tab-btn {{
+    background: var(--bg-card);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    padding: 7px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }}
+  .tab-btn:hover {{
+    background: #313244;
+    color: #fff;
+  }}
+  .tab-btn.active {{
+    background: var(--primary);
+    color: #11111b;
+    border-color: var(--primary);
+    font-weight: 600;
+  }}
+  .controls {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }}
+  .split-btn, .ext-link {{
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+  }}
+  .split-btn:hover, .ext-link:hover {{
+    background: #313244;
+    color: #fff;
+    text-decoration: none;
+  }}
+  .split-btn.active {{
+    background: rgba(166, 227, 161, 0.2);
+    border-color: var(--accent);
+    color: var(--accent);
+  }}
+  main {{
+    flex: 1;
+    position: relative;
+    background: var(--bg-base);
+    min-height: 0;
+    overflow: hidden;
+  }}
+  .view-container {{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: none;
+  }}
+  .view-container.active {{
+    display: block;
+  }}
+  iframe {{
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: var(--bg-base);
+    display: block;
+  }}
+  .grid-layout {{
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 4px;
+    background: var(--border);
+    height: 100%;
+  }}
+  .grid-layout .view-container {{
+    display: block !important;
+    position: relative;
+    inset: auto;
+  }}
+  .grid-badge {{
+    display: none;
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(17, 17, 27, 0.85);
+    border: 1px solid var(--border);
+    color: var(--primary);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    z-index: 5;
+    pointer-events: none;
+  }}
+  .grid-layout .grid-badge {{
+    display: block;
+  }}
+</style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="#">
+      <span>graph_fy</span>
+      <span class="brand-pill">Unified Multi-View</span>
+    </a>
+    <div class="tabs">
+      <button id="tab-arch" class="tab-btn active" onclick="switchTab('arch')">🗺️ Architecture Map</button>
+      <button id="tab-graph" class="tab-btn" onclick="switchTab('graph')">🌐 Force Graph</button>
+      <button id="tab-callflow" class="tab-btn" onclick="switchTab('callflow')">🔀 Execution Callflow</button>
+      <button id="tab-tree" class="tab-btn" onclick="switchTab('tree')">🌲 Symbol Tree</button>
+    </div>
+    <div class="controls">
+      <a id="extLink" class="ext-link" href="architecture.html" target="_blank" title="Open current view in new window/tab">↗ Open in New Tab</a>
+      <button id="splitBtn" class="split-btn" onclick="toggleSplit()">⊞ Split 2×2 View</button>
+    </div>
+  </header>
+  <main id="mainViewport">
+    <div id="view-arch" class="view-container active">
+      <span class="grid-badge">1. Architecture Map</span>
+      <iframe id="iframe-arch" src="architecture.html"></iframe>
+    </div>
+    <div id="view-graph" class="view-container">
+      <span class="grid-badge">2. Force Graph</span>
+      <iframe id="iframe-graph" data-src="graph.html"></iframe>
+    </div>
+    <div id="view-callflow" class="view-container">
+      <span class="grid-badge">3. Execution Callflow</span>
+      <iframe id="iframe-callflow" data-src="{callflow_file}"></iframe>
+    </div>
+    <div id="view-tree" class="view-container">
+      <span class="grid-badge">4. Symbol Tree</span>
+      <iframe id="iframe-tree" data-src="GRAPH_TREE.html"></iframe>
+    </div>
+  </main>
+  <script>
+    let isSplit = false;
+    const viewSrcs = {{
+      arch: 'architecture.html',
+      graph: 'graph.html',
+      callflow: '{callflow_file}',
+      tree: 'GRAPH_TREE.html'
+    }};
+
+    function loadIframe(viewId) {{
+      const container = document.getElementById('view-' + viewId);
+      if (!container) return;
+      const iframe = container.querySelector('iframe');
+      if (iframe && !iframe.getAttribute('src') && iframe.dataset.src) {{
+        iframe.setAttribute('src', iframe.dataset.src);
+      }}
+    }}
+
+    function switchTab(viewId) {{
+      if (isSplit) toggleSplit();
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.view-container').forEach(c => c.classList.remove('active'));
+      const activeBtn = document.getElementById('tab-' + viewId);
+      if (activeBtn) activeBtn.classList.add('active');
+      const target = document.getElementById('view-' + viewId);
+      if (target) {{
+        target.classList.add('active');
+        loadIframe(viewId);
+        const iframe = target.querySelector('iframe');
+        if (iframe && iframe.contentWindow) {{
+          try {{ iframe.contentWindow.dispatchEvent(new Event('resize')); }} catch(e){{}}
+        }}
+      }}
+      const extLink = document.getElementById('extLink');
+      if (extLink && viewSrcs[viewId]) {{
+        extLink.setAttribute('href', viewSrcs[viewId]);
+        extLink.setAttribute('title', 'Open ' + viewSrcs[viewId] + ' directly');
+      }}
+    }}
+
+    function toggleSplit() {{
+      isSplit = !isSplit;
+      const vp = document.getElementById('mainViewport');
+      const splitBtn = document.getElementById('splitBtn');
+      if (isSplit) {{
+        vp.classList.add('grid-layout');
+        splitBtn.classList.add('active');
+        splitBtn.innerText = '⊟ Single Tab View';
+        Object.keys(viewSrcs).forEach(loadIframe);
+      }} else {{
+        vp.classList.remove('grid-layout');
+        splitBtn.classList.remove('active');
+        splitBtn.innerText = '⊞ Split 2×2 View';
+        switchTab('arch');
+      }}
+    }}
+  </script>
+</body>
+</html>
+"""
+            out_file.write_text(dash_html, encoding="utf-8")
             print(f"wrote {out_file}")
             sys.exit(0)
 

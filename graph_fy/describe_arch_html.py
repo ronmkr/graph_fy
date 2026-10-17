@@ -940,6 +940,9 @@ def generate_architecture_html(arch_data: dict[str, Any], title: str | None = No
     }}
 
     /* Step Sequence Cards (Material Outlined Cards) */
+    .stage-section, .step-card, h1, h2, h3, [id] {{
+      scroll-margin-top: 70px;
+    }}
     .steps-timeline {{
       display: flex;
       flex-direction: column;
