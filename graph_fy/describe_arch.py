@@ -384,6 +384,7 @@ def build_architecture_model(
 
         top_comm = max(comm_counts, key=comm_counts.get) if comm_counts else None
         top_dir = max(dir_counts, key=dir_counts.get) if dir_counts else None
+        st_subsystem = top_comm or (top_dir if top_dir else "")
 
         if top_comm:
             st_name = f"{st_meta['default_name']} — {top_comm}"
@@ -533,6 +534,7 @@ def build_architecture_model(
             "id": st_id,
             "index": s_idx,
             "name": st_name,
+            "subsystem": st_subsystem,
             "category": st_id,
             "icon": st_meta["icon"],
             "color": st_meta["color"],

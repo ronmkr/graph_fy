@@ -2,6 +2,46 @@
 
 Full release notes with details on each version: [GitHub Releases](https://github.com/ronmkr/graph_fy/releases)
 
+## 0.2.0 (2026-10-17)
+
+- Feature: Typo-Tolerant AST Symbol Search & Did-You-Mean Resolution (`graph_fy/retrieval.py`):
+  - Standard-library `difflib` identifier matching suggesting closest verified AST symbols when near-miss or misspelled queries return empty.
+  - Injected suggestions directly into pre-agent architectural briefings (`Did you mean: ...?`).
+- Feature: Dynamic Dark/Light Theme Switching Across All HTML Visualizers (`CALLFLOW.html`, `ARCH.html`, `graph.html`, `GRAPH_TREE.html`):
+  - Re-architected stylesheets with CSS custom properties (`--bg`, `--surface`, `--border`, `--text`).
+  - Added auto `prefers-color-scheme` support and header toggle button with `localStorage` preference persistence.
+- Feature: Automated GitHub PR Blast Radius Markdown Formatter (`graph_fy diff --github-pr`):
+  - Emits formatted GitHub PR review comment tables with risk score, directly touched symbols, 1-hop callers, and collapsible AST skeleton drawers.
+- Feature: Polyrepo Cross-Graph Deep Linking (`graph_fy/exporters/html.py` & `graph_fy/multi_repo.py`):
+  - Added repository badge chips (`📦 <repo>`) and cross-repo neighbor jump tags in interactive node inspection panel.
+- Feature: Continuous Scenario Evaluation CI Workflow (`.github/workflows/eval.yml`):
+  - GitHub Actions CI workflow running 53 real-world scenarios on pull requests and commits to prevent retrieval regressions.
+- Feature: Multi-Repo & Multi-Graph Resolution (`graph_fy/multi_repo.py` & `graph_fy/cli.py`):
+  - Dynamic multi-graph composition across independent repositories via `--graph g1.json,g2.json` or `--multi-repo <dir>`.
+  - Disambiguates node identifiers with repo-prefixed namespaces and partitioned community offsets.
+  - Sibling multi-repo workspace package discovery in Python AST resolution (`_python_workspace_package_roots`), connecting cross-repo imports across monorepo packages.
+  - Polyglot cross-repo member call resolution supporting Python, TypeScript, and JavaScript alongside C++, C#, and Java.
+- Feature: Concurrent Parallel Query Execution (`graph_fy/multi_repo.py` & `graph_fy query --parallel`):
+  - Multi-threaded query engine executing batch queries across worker threads with wall-clock timing metrics.
+  - Supports command-line query lists and batch file processing (`--batch <file>`).
+- Feature: Whole-Entity Architectural Synthesis (`graph_fy arch-entities`):
+  - Generates induced subgraphs and interactive Mermaid architecture diagrams connecting sets of queried entities.
+  - Emits entity metadata tables, AST signature drawers, and pairwise entity interaction matrices.
+- Feature: Skill Evaluation Suite (`graph_fy/evals.py` & `graph_fy eval`):
+  - Automated evaluation harness testing anti-hallucination grounding rate, top-k retrieval precision, cross-repo traversal, token compression, and sub-second p50/p95 latency.
+  - Emits structured markdown scorecards and machine-readable JSON reports.
+- Feature: Anti-Hallucination Grounding Filter & Grounded AST Invariant (`graph_fy/retrieval.py`):
+  - Grounded query term filter rejecting weak FTS5 Porter stem matches on phantom symbols.
+  - Injected invariant header commanding models not to invent APIs or parameters.
+  - SQLite direct fallback enabling zero-RAM querying when `graph.json` exceeds size limits (>512MB).
+- Performance: $O(\text{deg}(n))$ Incident Edge Traversal (`graph_fy/impact.py`):
+  - Replaced $O(|E|)$ full-graph scans with incident edge lookups, reducing query latency on 430k-edge monorepos from >180s to 3.50s (51x speedup).
+  - Capped downstream BFS traversal at 2,000 entries and cached god-node sets.
+- Performance: AST Build Pruning Speedup (`graph_fy/build.py`):
+  - Replaced quadratic $O(N^2)$ suffix comparisons with $O(1)$ segment checks (1,000x build speedup on large corpora).
+- Fix: Resilient Export Labels Parsing (`graph_fy/cli.py`):
+  - Safely parses labels files containing non-integer keys or analysis JSON sidecars without crashing.
+
 ## 0.1.0 (2026-10-16)
 
 - Feature: Semantic Dijkstra Pathfinding & Routing Acceleration (`graph_fy/retrieval.py` & `graph_fy/serve.py`):

@@ -19,6 +19,7 @@ This repository uses graph_fy for codebase indexing, structural AST navigation, 
 - **Iterative Feedback Querying**: Use `graph_fy refine --code "<draft>"` (or MCP `refine_context`) to resolve incomplete identifiers and missing types from draft code.
 - **High-Density Code RAG**: Run `graph_fy query "<concept>" --skeleton` or `--rag-prompt --budget N` for token-capped prompt-ready context blocks with 1-hop interface bundling.
 - **Hierarchical Community Context**: Navigate `graph_fy_out/wiki/index.md` for high-level architectural context in large codebases to save context tokens.
+- **Zero-Hallucination AST Invariant**: Ground code edits strictly in verified AST definitions from `graph_fy context`. If a symbol, method, or API is not present in the graph briefing, do NOT hallucinate or guess — verify against the indicated source file first!
 - **Pre-Edit Safety**: Run `graph_fy blast <symbol>` before modifying code to inspect blast radius and downstream dependencies.
 - **Incremental Graph Update**: Run `graph_fy update .` locally after editing code to keep the knowledge graph in sync (fast AST-only update, zero API cost).
 

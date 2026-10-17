@@ -509,12 +509,12 @@ def _derive_prune_root(prune_sources: "list[str]", stored_sfs: "set[str]") -> "s
     match at all) returns None and the caller falls through to the zero-match
     warning.
     """
-    rel_sfs = [
+    rel_sfs_set = {
         sf.replace("\\", "/")
         for sf in stored_sfs
         if sf and isinstance(sf, str) and not _is_abs(sf.replace("\\", "/"))
-    ]
-    if not rel_sfs:
+    }
+    if not rel_sfs_set:
         return None
     roots: set[str] = set()
     for p in prune_sources:
@@ -523,7 +523,12 @@ def _derive_prune_root(prune_sources: "list[str]", stored_sfs: "set[str]") -> "s
         q = p.replace("\\", "/")
         if not _is_abs(q):
             continue
-        hits = {q[: -len(s) - 1] for s in rel_sfs if q.endswith("/" + s)}
+        parts = q.split("/")
+        hits: set[str] = set()
+        for i in range(1, len(parts)):
+            suf = "/".join(parts[i:])
+            if suf in rel_sfs_set:
+                hits.add("/".join(parts[:i]))
         if len(hits) > 1:
             return None  # one entry implies two different roots — ambiguous
         roots |= hits

@@ -457,7 +457,26 @@ def check_cyclic_dependencies(
         return findings
 
     try:
-        cycles = list(nx.simple_cycles(file_graph))
+        # Use progressive length-bounded cycle search to prevent exponential hang on monorepos
+        cycles = []
+        for bound in (2, 3, 4, 6, 8):
+            bound_cycles = []
+            try:
+                for c in nx.simple_cycles(file_graph, length_bound=bound):
+                    bound_cycles.append(c)
+                    if len(bound_cycles) >= max_cycles * 5:
+                        break
+            except TypeError:
+                for c in nx.simple_cycles(file_graph):
+                    bound_cycles.append(c)
+                    if len(bound_cycles) >= max_cycles * 5:
+                        break
+                cycles = bound_cycles
+                break
+            if bound_cycles:
+                cycles = bound_cycles
+                if len(cycles) >= max_cycles:
+                    break
     except Exception:
         cycles = []
 
@@ -591,6 +610,153 @@ def add_explicit_backlink_edges(
     return edges + backlinks
 
 
+def check_context_manager_lifetimes(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Flag classes that implement __enter__ without __exit__, or __aenter__ without __aexit__.
+
+    Prevents unhandled resource leaks (unclosed DB connections, lingering locks, or hanging streams).
+    """
+    findings: list[dict[str, Any]] = []
+    class_methods: dict[str, set[str]] = {}
+    class_nodes: dict[str, dict[str, Any]] = {}
+
+    for n in nodes:
+        ntype = n.get("type", "")
+        nid = str(n.get("id", ""))
+        label = str(n.get("label", ""))
+        if ntype == "class" or "class " in label.lower():
+            class_nodes[nid] = n
+            class_methods.setdefault(nid, set())
+
+    for e in edges:
+        rel = str(e.get("relation", ""))
+        src = str(e.get("source", ""))
+        tgt = str(e.get("target", ""))
+        if rel in ("method", "contains", "defines") and src in class_nodes:
+            tgt_lbl = str(e.get("target_label", tgt))
+            class_methods[src].add(tgt_lbl.lower())
+
+    for cid, methods in class_methods.items():
+        node = class_nodes[cid]
+        cname = node.get("label", cid)
+        sfile = node.get("source_file", "")
+        sloc = node.get("source_location", "L1")
+
+        has_enter = any("__enter__" in m for m in methods)
+        has_exit = any("__exit__" in m for m in methods)
+        has_aenter = any("__aenter__" in m for m in methods)
+        has_aexit = any("__aexit__" in m for m in methods)
+
+        if has_enter and not has_exit:
+            findings.append({
+                "rule": "missing_context_manager_exit",
+                "severity": "error",
+                "class": cname,
+                "source_file": sfile,
+                "source_location": sloc,
+                "message": (
+                    f"Class '{cname}' implements synchronous '__enter__' but is missing "
+                    f"'__exit__' teardown handler, risking unclosed resource leaks."
+                ),
+            })
+        if has_aenter and not has_aexit:
+            findings.append({
+                "rule": "missing_async_context_manager_exit",
+                "severity": "error",
+                "class": cname,
+                "source_file": sfile,
+                "source_location": sloc,
+                "message": (
+                    f"Class '{cname}' implements asynchronous '__aenter__' but is missing "
+                    f"'__aexit__' teardown handler, risking unclosed async connection leaks."
+                ),
+            })
+
+    return findings
+
+
+def check_ast_signature_drift(
+    current_nodes: list[dict[str, Any]],
+    base_nodes_or_graph: list[dict[str, Any]] | nx.Graph | dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Flag public API removals and breaking AST parameter signature mutations compared to a base graph."""
+    if not base_nodes_or_graph:
+        return []
+
+    findings: list[dict[str, Any]] = []
+
+    if isinstance(base_nodes_or_graph, nx.Graph):
+        base_nodes = [{"id": n, **attrs} for n, attrs in base_nodes_or_graph.nodes(data=True)]
+    elif isinstance(base_nodes_or_graph, dict):
+        base_nodes = base_nodes_or_graph.get("nodes", [])
+    else:
+        base_nodes = base_nodes_or_graph
+
+    # Index base public symbols: label -> node
+    base_symbols: dict[str, dict[str, Any]] = {}
+    for bn in base_nodes:
+        lbl = bn.get("label", "")
+        ntype = bn.get("type", "")
+        if ntype in ("function", "method", "class") or "(" in lbl:
+            clean_lbl = lbl.split("(")[0].strip()
+            if clean_lbl and not clean_lbl.startswith("_"):
+                base_symbols[clean_lbl] = bn
+
+    # Index current symbols
+    curr_symbols: dict[str, dict[str, Any]] = {}
+    for cn in current_nodes:
+        lbl = cn.get("label", "")
+        ntype = cn.get("type", "")
+        if ntype in ("function", "method", "class") or "(" in lbl:
+            clean_lbl = lbl.split("(")[0].strip()
+            if clean_lbl:
+                curr_symbols[clean_lbl] = cn
+
+    # 1. Detect removed public symbols
+    for sym, bnode in base_symbols.items():
+        if sym not in curr_symbols:
+            findings.append({
+                "rule": "breaking_api_removal",
+                "severity": "error",
+                "symbol": sym,
+                "source_file": bnode.get("source_file", ""),
+                "source_location": bnode.get("source_location", "L1"),
+                "message": (
+                    f"Public API symbol '{sym}' was removed from the codebase. "
+                    f"Downstream consumers will fail on import."
+                ),
+            })
+        else:
+            # 2. Check for signature changes
+            b_sig = str(bnode.get("signature") or bnode.get("label", ""))
+            c_sig = str(curr_symbols[sym].get("signature") or curr_symbols[sym].get("label", ""))
+            if "(" in b_sig and "(" in c_sig:
+                b_params = b_sig[b_sig.find("(") + 1 : b_sig.rfind(")")].split(",")
+                c_params = c_sig[c_sig.find("(") + 1 : c_sig.rfind(")")].split(",")
+                b_params = [p.strip() for p in b_params if p.strip()]
+                c_params = [p.strip() for p in c_params if p.strip()]
+
+                b_req = [p for p in b_params if "=" not in p and not p.startswith("*")]
+                c_req = [p for p in c_params if "=" not in p and not p.startswith("*")]
+                if len(c_req) > len(b_req):
+                    findings.append({
+                        "rule": "breaking_signature_change",
+                        "severity": "warning",
+                        "symbol": sym,
+                        "source_file": curr_symbols[sym].get("source_file", ""),
+                        "source_location": curr_symbols[sym].get("source_location", "L1"),
+                        "message": (
+                            f"Symbol '{sym}' added required parameters "
+                            f"({', '.join(c_req[len(b_req):])}) without default values, "
+                            f"breaking existing caller invocations."
+                        ),
+                    })
+
+    return findings
+
+
 def run_lint(
     graph_or_extraction: nx.Graph | dict[str, Any],
     check_actions: bool = True,
@@ -601,6 +767,8 @@ def run_lint(
     check_dead: bool = True,
     check_cycles: bool = True,
     check_layers: bool = True,
+    check_context_managers: bool = True,
+    base_graph: nx.Graph | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute deterministic lint and drift rules against a graph or extraction dict.
 
@@ -651,6 +819,14 @@ def run_lint(
     # 8. Architectural Layer Violations
     if check_layers:
         findings.extend(check_layer_violations(nodes, edges))
+
+    # 9. Context Manager Lifetimes
+    if check_context_managers:
+        findings.extend(check_context_manager_lifetimes(nodes, edges))
+
+    # 10. AST Signature Drift
+    if base_graph:
+        findings.extend(check_ast_signature_drift(nodes, base_graph))
 
     errors = sum(1 for f in findings if f.get("severity") == "error")
     warnings = sum(1 for f in findings if f.get("severity") == "warning")

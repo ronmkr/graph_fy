@@ -4687,3 +4687,43 @@ def test_3252_metadata_preservation(tmp_path):
     assert param_ref["source_location"] == "L2"
     assert node_by_id[param_ref["target"]]["label"] == "User"
     assert node_by_id[param_ref["target"]]["source_file"] == "models.py"
+
+
+def test_extract_rust_ignores_anonymous_items(tmp_path):
+    """Verify that Rust anonymous items (e.g. `const _: () = ...;`) do not become phantom nodes colliding with file nodes."""
+    from graph_fy.extractors.rust import extract_rust
+    rs_file = tmp_path / "lib.rs"
+    rs_file.write_text(
+        "pub struct Config { pub timeout: u32 }\n"
+        "const _: () = {\n"
+        "    let _ = 42;\n"
+        "};\n"
+        "pub fn run() {}\n",
+        encoding="utf-8",
+    )
+    res = extract_rust(rs_file)
+    labels = [n["label"] for n in res["nodes"]]
+    assert "_" not in labels
+    assert "Config" in labels
+    assert "run()" in labels
+
+
+def test_extract_go_ignores_anonymous_items(tmp_path):
+    from graph_fy.extractors.go import extract_go
+
+    go_file = tmp_path / "anon.go"
+    go_file.write_text(
+        "package main\n\n"
+        "type _ struct{}\n"
+        "func _() {}\n"
+        "type ValidService struct{}\n"
+        "func Start() {}\n",
+        encoding="utf-8",
+    )
+    res = extract_go(go_file)
+    labels = [n["label"] for n in res["nodes"]]
+    assert "_" not in labels
+    assert "_()" not in labels
+    assert "ValidService" in labels
+    assert "Start()" in labels
+

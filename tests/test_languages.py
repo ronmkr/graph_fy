@@ -2831,6 +2831,58 @@ def test_markdown_fenced_heading_not_parsed():
     assert not any("Not A Heading" in l for l in labels), \
         f"fenced '## Not A Heading' was incorrectly parsed as a node: {labels}"
 
+
+def test_markdown_tilde_fenced_heading_not_parsed(tmp_path):
+    """A '## heading' inside a tilde-fenced block (~ ~ ~) must not produce a heading node."""
+    f = tmp_path / "tilde.md"
+    f.write_text(
+        "# Real Heading\n\n"
+        "~~~bash\n"
+        "## Not A Heading\n"
+        "echo hello\n"
+        "~~~\n\n"
+        "## Another Real Heading\n",
+        encoding="utf-8",
+    )
+    r = extract_markdown(f)
+    labels = _labels(r)
+    assert any("Real Heading" in l for l in labels)
+    assert any("Another Real Heading" in l for l in labels)
+    assert not any("Not A Heading" in l for l in labels)
+
+
+def test_markdown_single_line_code_fence_does_not_swallow_subsequent_headings(tmp_path):
+    """A single-line code fence (` ` ` code ` ` `) must not trap subsequent headings in code mode."""
+    f = tmp_path / "single_line.md"
+    f.write_text(
+        "# Section 1\n\n"
+        "```python x = 1 ```\n\n"
+        "## Section 2\n"
+        "Content.\n",
+        encoding="utf-8",
+    )
+    r = extract_markdown(f)
+    labels = _labels(r)
+    assert any("Section 1" in l for l in labels)
+    assert any("Section 2" in l for l in labels)
+
+
+def test_markdown_non_alphanumeric_headings_ignored(tmp_path):
+    """Headings like '# ---' or '## _' without alphanumeric characters must be ignored."""
+    f = tmp_path / "non_alpha.md"
+    f.write_text(
+        "# ---\n"
+        "## _\n"
+        "### Valid Heading\n"
+        "Body content.\n",
+        encoding="utf-8",
+    )
+    r = extract_markdown(f)
+    labels = _labels(r)
+    assert "---" not in labels
+    assert "_" not in labels
+    assert any("Valid Heading" in l for l in labels)
+
 def test_markdown_no_dangling_edges():
     r = extract_markdown(FIXTURES / "deploy_guide.md")
     node_ids = {n["id"] for n in r["nodes"]}

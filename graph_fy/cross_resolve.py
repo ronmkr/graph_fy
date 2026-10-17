@@ -387,51 +387,126 @@ def resolve_cross_boundary_api_routes(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Connect frontend HTTP client calls (fetch, axios) to backend route endpoints.
+    """Connect frontend HTTP client calls (fetch, axios, sdk) to backend route endpoints.
 
     Discovers:
-    1. Backend routes: OpenAPI operations, FastAPI endpoints, Express/NestJS handlers.
+    1. Backend routes: OpenAPI operations, FastAPI/Flask/Express/NestJS decorated endpoints.
     2. Frontend client calls: fetch('/api/...'), axios.get('/api/...'), apiClient.post(...)
     When normalized paths match, adds `routes_to` edges with confidence `INFERRED`.
     """
     import re
+    from pathlib import Path
+
     seen_edges: set[tuple[str, str, str]] = {
         (str(e.get("source")), str(e.get("target")), str(e.get("relation")))
         for e in edges
     }
     new_edges: list[dict[str, Any]] = []
 
-    # 1. Collect backend route providers: (node, norm_path, method)
-    backend_routes: list[tuple[dict[str, Any], str, str]] = []
+    file_lines_cache: dict[str, list[str]] = {}
+
+    def _get_file_lines(sf: str) -> list[str]:
+        if sf not in file_lines_cache:
+            p = Path(sf)
+            if not p.is_file():
+                if Path("graph_fy_out/.graphify_root").exists():
+                    try:
+                        groot = Path("graph_fy_out/.graphify_root").read_text(encoding="utf-8").strip()
+                        if (Path(groot) / sf).is_file():
+                            p = Path(groot) / sf
+                    except Exception:
+                        pass
+            if p.is_file():
+                try:
+                    file_lines_cache[sf] = p.read_text(encoding="utf-8", errors="replace").splitlines()
+                except Exception:
+                    file_lines_cache[sf] = []
+            else:
+                file_lines_cache[sf] = []
+        return file_lines_cache[sf]
+
+    # 1. Collect backend route providers: (node, norm_path, method, file_stem)
+    backend_routes: list[tuple[dict[str, Any], str, str, str]] = []
     for n in nodes:
+        if n.get("file_type") == "rationale":
+            continue
         ntype = str(n.get("type", "")).lower()
         lbl = str(n.get("label", ""))
-        route_path = n.get("path") or n.get("route") or n.get("http_route") or n.get("http_path") or ""
-        method = str(n.get("http_method") or n.get("method") or "").upper()
+        meta = n.get("metadata") or {}
+        route_path = (
+            n.get("path")
+            or n.get("route")
+            or n.get("http_route")
+            or n.get("http_path")
+            or meta.get("http_route")
+            or meta.get("route")
+            or meta.get("path")
+            or ""
+        )
+        method = str(n.get("http_method") or n.get("method") or meta.get("http_method") or "").upper()
+        sf = n.get("source_file", "")
+        stem = Path(sf).stem if sf else ""
 
         if ntype in ("openapi_operation", "openapi_path") or lbl.startswith("OpenAPI:"):
             if not route_path and ":" in lbl:
                 route_path = lbl.split(":")[-1]
             if route_path:
-                backend_routes.append((n, _normalize_route_path(route_path), method or "GET"))
+                backend_routes.append((n, _normalize_route_path(route_path), method or "GET", stem))
         elif any(k in ntype for k in ("route", "endpoint", "api_handler", "rpc")):
             if route_path:
-                backend_routes.append((n, _normalize_route_path(route_path), method or "GET"))
+                backend_routes.append((n, _normalize_route_path(route_path), method or "GET", stem))
         elif any(lbl.startswith(prefix) for prefix in ("Route:", "Endpoint:", "API:")):
             if not route_path:
                 route_path = lbl.split(":", 1)[-1]
-            backend_routes.append((n, _normalize_route_path(route_path), method or "GET"))
+            backend_routes.append((n, _normalize_route_path(route_path), method or "GET", stem))
+        elif sf and (lbl.endswith("()") or n.get("_callable")):
+            # Inspect definition line for route decorator (FastAPI, Flask, NestJS, Express, etc.)
+            sloc = n.get("source_location", "")
+            if sloc.startswith("L"):
+                try:
+                    lineno = int(sloc[1:]) - 1
+                    lines = _get_file_lines(sf)
+                    if lines and 0 <= lineno < len(lines):
+                        start = max(0, lineno - 6)
+                        snippet = "\n".join(lines[start:lineno + 1])
+                        m = re.search(
+                            r"""@(?:router|api_router|app|blueprint|bp)\.(get|post|put|delete|patch|options|head|route|api_route)\s*\(\s*["']([^"']+)["']""",
+                            snippet,
+                            re.IGNORECASE,
+                        )
+                        if m:
+                            deco_meth = m.group(1).upper()
+                            if deco_meth in ("ROUTE", "API_ROUTE"):
+                                m_meth = re.search(r"""methods\s*=\s*\[\s*["'](GET|POST|PUT|DELETE|PATCH)["']""", snippet, re.IGNORECASE)
+                                deco_meth = m_meth.group(1).upper() if m_meth else "GET"
+                            backend_routes.append((n, _normalize_route_path(m.group(2)), method or deco_meth, stem))
+                except Exception:
+                    pass
 
     if not backend_routes:
         return new_edges
 
-    # 2. Discover client callers with route paths
+    # 2. Discover client callers with route paths: (node, client_path, method)
+    client_callers: list[tuple[dict[str, Any], str, str]] = []
     for n in nodes:
-        client_path = n.get("target_url") or n.get("http_path") or n.get("api_path") or ""
-        method = str(n.get("http_method") or n.get("method") or "GET").upper()
+        if n.get("file_type") == "rationale":
+            continue
+        meta = n.get("metadata") or {}
+        client_path = (
+            n.get("target_url")
+            or n.get("http_path")
+            or n.get("api_path")
+            or meta.get("target_url")
+            or meta.get("api_path")
+            or ""
+        )
+        method = str(n.get("http_method") or n.get("method") or meta.get("http_method") or "GET").upper()
         if not client_path:
             txt = str(n.get("text", "")) or str(n.get("label", ""))
-            fetch_match = re.search(r"""(?:fetch|axios(?:\.(?:get|post|put|delete|patch))?)\s*\(\s*["'`](\/[a-zA-Z0-9_\-\/{}:]+)["'`]""", txt)
+            fetch_match = re.search(
+                r"""(?:fetch|axios(?:\.(?:get|post|put|delete|patch))?)\s*\(\s*["'`](\/[a-zA-Z0-9_\-\/{}:]+)["'`]""",
+                txt,
+            )
             if fetch_match:
                 client_path = fetch_match.group(1)
                 if "axios." in txt:
@@ -439,25 +514,74 @@ def resolve_cross_boundary_api_routes(
                     if method_match:
                         method = method_match.group(1).upper()
 
+        sf = n.get("source_file", "")
+        lbl = n.get("label", "")
+        if not client_path and sf and lbl.endswith("()") and "types" not in Path(sf).name.lower():
+            sloc = n.get("source_location", "")
+            if sloc.startswith("L"):
+                try:
+                    lineno = int(sloc[1:]) - 1
+                    lines = _get_file_lines(sf)
+                    if lines and 0 <= lineno < len(lines):
+                        end = min(len(lines), lineno + 25)
+                        body = "\n".join(lines[lineno:end])
+                        m_url = re.search(r"""url:\s*['"`](\/[a-zA-Z0-9_\-\/{}:]+)['"`]""", body)
+                        if m_url:
+                            client_path = m_url.group(1)
+                            m_meth = re.search(r"""\.(get|post|put|delete|patch)\b""", body, re.IGNORECASE)
+                            if m_meth:
+                                method = m_meth.group(1).upper()
+                        elif "fetch" in body:
+                            m_fetch = re.search(r"""fetch\s*\(\s*['"`](\/[a-zA-Z0-9_\-\/{}:]+)['"`]""", body)
+                            if m_fetch:
+                                client_path = m_fetch.group(1)
+                                m_meth = re.search(r"""method:\s*['"`](GET|POST|PUT|DELETE|PATCH)['"`]""", body, re.IGNORECASE)
+                                method = m_meth.group(1).upper() if m_meth else "GET"
+                        elif "axios" in body:
+                            m_axios = re.search(r"""axios\.(get|post|put|delete|patch)\s*\(\s*['"`](\/[a-zA-Z0-9_\-\/{}:]+)['"`]""", body)
+                            if m_axios:
+                                method = m_axios.group(1).upper()
+                                client_path = m_axios.group(2)
+                except Exception:
+                    pass
+
         if client_path:
-            norm_client = _normalize_route_path(client_path)
-            for b_node, norm_b, b_method in backend_routes:
-                if norm_client == norm_b or (norm_client != "/" and norm_client.endswith(norm_b)) or (norm_b != "/" and norm_b.endswith(norm_client)):
-                    if not method or not b_method or method == b_method or method == "ALL" or b_method == "ALL":
-                        key = (n["id"], b_node["id"], "routes_to")
-                        if key not in seen_edges and n["id"] != b_node["id"]:
-                            seen_edges.add(key)
-                            edge = {
-                                "source": n["id"],
-                                "target": b_node["id"],
-                                "relation": "routes_to",
-                                "confidence": "INFERRED",
-                                "weight": 1.0,
-                                "source_file": n.get("source_file", ""),
-                                "source_location": n.get("source_location", "L1"),
-                            }
-                            edges.append(edge)
-                            new_edges.append(edge)
+            client_callers.append((n, client_path, method))
+
+    def _routes_match(c_path: str, b_path: str, b_stem: str) -> bool:
+        norm_c = _normalize_route_path(c_path)
+        norm_b = _normalize_route_path(b_path)
+        if norm_c == norm_b:
+            return True
+        non_param_b = [p for p in norm_b.split("/") if p and p != "{}"]
+        if norm_c.endswith(norm_b) and (non_param_b or (b_stem and b_stem in norm_c)):
+            return True
+        if norm_b.endswith(norm_c) and (non_param_b or (b_stem and b_stem in norm_b)):
+            return True
+        if b_stem:
+            norm_b_prefixed = _normalize_route_path(f"/{b_stem}{b_path}")
+            if norm_c == norm_b_prefixed or norm_c.endswith(norm_b_prefixed):
+                return True
+        return False
+
+    for n, client_path, method in client_callers:
+        for b_node, norm_b, b_method, b_stem in backend_routes:
+            if _routes_match(client_path, norm_b, b_stem):
+                if not method or not b_method or method == b_method or method == "ALL" or b_method == "ALL":
+                    key = (n["id"], b_node["id"], "routes_to")
+                    if key not in seen_edges and n["id"] != b_node["id"]:
+                        seen_edges.add(key)
+                        edge = {
+                            "source": n["id"],
+                            "target": b_node["id"],
+                            "relation": "routes_to",
+                            "confidence": "INFERRED",
+                            "weight": 1.0,
+                            "source_file": n.get("source_file", ""),
+                            "source_location": n.get("source_location", "L1"),
+                        }
+                        edges.append(edge)
+                        new_edges.append(edge)
 
     return new_edges
 

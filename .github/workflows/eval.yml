@@ -1,0 +1,57 @@
+name: Knowledge Graph & Skill Evaluation Benchmark
+
+on:
+  push:
+    branches: [main, master, perf/*, feat/*, fix/*]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchmark-and-eval:
+    name: Run Skill Benchmark & Blast Radius Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          uv sync --all-extras --dev
+
+      - name: Run Core Evaluation Tests
+        run: |
+          uv run pytest tests/test_evals.py tests/test_multi_repo.py tests/test_cli_diff_pr.py -v
+
+      - name: Build Knowledge Graph
+        run: |
+          uv run python -m graph_fy.cli . --code-only --no-viz
+
+      - name: Execute 106 Real-World Scenario Evaluation Suite
+        run: |
+          uv run python -m graph_fy.cli eval --comparative --scenarios evals/real_world_scenarios.json --report evals/comparative_benchmark_report.md
+
+      - name: Generate PR Blast Radius Analysis
+        if: github.event_name == 'pull_request'
+        run: |
+          BASE_REF="${{ github.base_ref }}"
+          git fetch origin "${BASE_REF}" || true
+          uv run python -m graph_fy.cli diff --github-pr "origin/${BASE_REF}" > pr_blast_radius.md || uv run python -m graph_fy.cli diff --github-pr "${BASE_REF}" > pr_blast_radius.md
+          cat pr_blast_radius.md

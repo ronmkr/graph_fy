@@ -834,3 +834,13 @@ def test_query_command_names_a_graph_outside_the_cwd(tmp_path):
     first_line = r.stdout.splitlines()[0]
     assert first_line.startswith("Graph: "), first_line
     assert "elsewhere" in first_line, first_line
+
+
+def test_export_resilient_to_non_integer_label_keys(tmp_path):
+    """export subcommands must safely handle labels files containing non-integer keys or analysis JSON."""
+    out = _make_graph(tmp_path)
+    analysis_file = out / ".graph_fy_analysis.json"
+    r = _run(["export", "wiki", "--graph", str(out / "graph.json"), "--labels", str(analysis_file)], tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert (out / "wiki" / "index.md").exists()
+

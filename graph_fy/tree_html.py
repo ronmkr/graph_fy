@@ -200,12 +200,44 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   <meta charset="UTF-8">
   <title>{title}</title>
   <style>
+    :root {{
+      --bg: #f8f9fa;
+      --surface: #ffffff;
+      --border: #dadce0;
+      --text: #202124;
+      --muted: #5f6368;
+      --accent: #0b57d0;
+      --accent-hover: #0842a0;
+      --accent-subtle: #e8f0fe;
+    }}
+    [data-theme="dark"] {{
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --border: #333333;
+      --text: #e8eaed;
+      --muted: #9aa0a6;
+      --accent: #8ab4f8;
+      --accent-hover: #aecbfa;
+      --accent-subtle: #1f2b3e;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root:not([data-theme="light"]) {{
+        --bg: #121212;
+        --surface: #1e1e1e;
+        --border: #333333;
+        --text: #e8eaed;
+        --muted: #9aa0a6;
+        --accent: #8ab4f8;
+        --accent-hover: #aecbfa;
+        --accent-subtle: #1f2b3e;
+      }}
+    }}
     body {{
       font-family: Roboto, "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       margin: 0;
       padding: 0;
-      background-color: #f8f9fa;
-      color: #202124;
+      background-color: var(--bg);
+      color: var(--text);
       overflow-x: hidden;
     }}
     .app-header {{
@@ -213,8 +245,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       align-items: center;
       justify-content: space-between;
       padding: 16px 24px;
-      background: #ffffff;
-      border-bottom: 1px solid #dadce0;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
       flex-wrap: wrap;
       gap: 16px;
       box-shadow: 0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);
@@ -240,7 +272,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       font-size: 1.25rem;
       font-weight: 500;
       font-family: Roboto, "Google Sans", sans-serif;
-      color: #202124;
+      color: var(--text);
       letter-spacing: -0.01em;
     }}
     .controls {{
@@ -250,9 +282,9 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     }}
     button {{
       padding: 8px 16px;
-      background: #ffffff;
-      color: #0b57d0;
-      border: 1px solid #dadce0;
+      background: var(--surface);
+      color: var(--accent);
+      border: 1px solid var(--border);
       border-radius: 8px;
       font-size: 0.85rem;
       font-weight: 500;
@@ -262,13 +294,13 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       box-shadow: 0 1px 2px rgba(60,64,67,0.08);
     }}
     button:hover {{
-      border-color: #0b57d0;
-      color: #0b57d0;
-      background: #f8fafd;
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--surface);
       box-shadow: 0 1px 3px rgba(60,64,67,0.15);
     }}
     button:active {{
-      background: #e8f0fe;
+      background: var(--accent-subtle);
       transform: translateY(1px);
     }}
     #tree-container {{
@@ -276,14 +308,14 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       height: 80vh;
       overflow: auto;
       border-radius: 12px;
-      background: #ffffff;
+      background: var(--surface);
       margin: 16px 24px 24px 24px;
       box-shadow: 0 1px 3px rgba(60,64,67,0.12), 0 1px 2px rgba(60,64,67,0.24);
-      border: 1px solid #dadce0;
+      border: 1px solid var(--border);
       position: relative;
     }}
     svg {{
-      background: #ffffff;
+      background: var(--surface);
       border-radius: 12px;
       display: block;
     }}
@@ -293,16 +325,16 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     }}
     .node text {{
       font: 12px Roboto, -apple-system, sans-serif;
-      fill: #202124;
+      fill: var(--text);
       paint-order: stroke fill;
-      stroke: #ffffff;
+      stroke: var(--surface);
       stroke-width: 3.5px;
       stroke-linejoin: round;
       stroke-opacity: 0.95;
     }}
     .link {{
       fill: none;
-      stroke: #bdc1c6;
+      stroke: var(--border);
       stroke-opacity: 0.7;
       stroke-width: 1.5px;
     }}
@@ -314,8 +346,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <span class="brand-badge">graph_fy // TREE</span>
       <h1>{header}</h1>
     </div>
+    <button id="themeToggle" onclick="toggleTheme()" title="Toggle dark/light mode" style="padding:6px 12px; font-size:0.9rem;">🌓 Theme</button>
   </div>
   <div class="controls">
+    <input id="tree-search" type="search" placeholder="Search tree (e.g. app, session)..." oninput="filterTree(this.value)" style="padding: 7px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 0.85rem; width: 260px; outline: none;" />
     <button onclick="expandAll()">Expand All</button>
     <button onclick="collapseAll()">Collapse All</button>
     <button onclick="resetView()">Reset View</button>
@@ -428,6 +462,49 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     window.collapseAll = () => {{ if (rootNode.children) {{ rootNode.children.forEach(collapseBranch); }} updateTree(rootNode); }};
     window.resetView = () => {{ if (rootNode.children) {{ rootNode.children.forEach(d_child => {{ if (d_child.children || d_child._children) {{ collapseBranch(d_child); }} }}); }} if (rootNode._children && !rootNode.children) {{ rootNode.children = rootNode._children; rootNode._children = null; }} updateTree(rootNode); }};
 
+    window.filterTree = (query) => {{
+      const q = (query || '').toLowerCase().trim();
+      try {{
+        if (history.replaceState) {{
+          const url = new URL(window.location);
+          if (q) url.searchParams.set('search', q);
+          else url.searchParams.delete('search');
+          history.replaceState(null, '', url);
+        }}
+      }} catch(e) {{}}
+      if (!q) {{
+        window.resetView();
+        return;
+      }}
+      function searchAndExpand(d) {{
+        let hasMatch = (d.data.name || '').toLowerCase().includes(q);
+        const children = d.children || d._children || [];
+        for (const child of children) {{
+          if (searchAndExpand(child)) hasMatch = true;
+        }}
+        if (hasMatch && d._children) {{
+          d.children = d._children;
+          d._children = null;
+        }}
+        return hasMatch;
+      }}
+      searchAndExpand(rootNode);
+      updateTree(rootNode);
+    }};
+
+    // Initialize from URL deep link
+    (function() {{
+      try {{
+        const params = new URLSearchParams(window.location.search);
+        const q = params.get('search') || params.get('q') || (window.location.hash ? decodeURIComponent(window.location.hash.slice(1)) : '');
+        const searchInput = document.getElementById('tree-search');
+        if (q && searchInput) {{
+          searchInput.value = q;
+          window.filterTree(q);
+        }}
+      }} catch(e) {{}}
+    }})();
+
     function updateTree(source) {{
       const treeLayoutData = treemap(rootNode);
       let nodes = treeLayoutData.descendants();
@@ -503,8 +580,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     function wrapText(textElements, maxWidth) {{
         const textPartColors = {{
-            name: '#202124',
-            count: '#0b57d0'
+            name: 'currentColor',
+            count: 'var(--accent)'
         }};
         const countRegex = /(\s\(Total Count: \d+\))$/;
 
@@ -588,6 +665,20 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         }});
     }}
   </script>
+  <script>
+    function toggleTheme() {{
+      const current = document.documentElement.getAttribute('data-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try {{ localStorage.setItem('graph_fy_theme', next); }} catch(e){{}}
+    }}
+    (function() {{
+      try {{
+        const saved = localStorage.getItem('graph_fy_theme');
+        if (saved) document.documentElement.setAttribute('data-theme', saved);
+      }} catch(e){{}}
+    }})();
+  </script>
 </body>
 </html>
 """
@@ -628,8 +719,18 @@ def write_tree_html(
     graph = json.loads(graph_path.read_text(encoding="utf-8"))
     tree = build_tree(graph, root=root, max_children=max_children,
                       project_label=project_label)
-    title = f"{tree['name']} — graph_fy tree viewer"
-    header = f"{tree['name']} — Knowledge Graph"
+    display_name = tree['name']
+    if display_name in (".", "", "/"):
+        if project_label:
+            display_name = project_label
+        elif root and Path(root).resolve().name:
+            display_name = Path(root).resolve().name
+        elif graph_path.parent.name == "graph_fy_out" and graph_path.parent.parent.name:
+            display_name = graph_path.parent.parent.name
+        else:
+            display_name = "Project"
+    title = f"{display_name} — graph_fy tree viewer"
+    header = f"{display_name} — Knowledge Graph"
     html = emit_html(tree, title=title, header=header)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")

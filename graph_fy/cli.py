@@ -86,6 +86,19 @@ def _default_graph_path() -> str:
     return default_graph_json()
 
 
+def _find_graph_path_for_target(target: str | Path | None = None) -> Path:
+    if target:
+        p = Path(target)
+        if p.is_file() and p.suffix == ".json":
+            return p
+        if p.is_dir():
+            for cand in (p / "graph_fy_out" / "graph.json", p / "graphify_out" / "graph.json", p / "graph.json"):
+                if cand.is_file():
+                    return cand
+            return p / "graph_fy_out" / "graph.json"
+    return Path(_default_graph_path())
+
+
 def _stamped_manifest_files(
     files_by_type: dict[str, list[str]],
     sem_result: dict,
@@ -1094,6 +1107,8 @@ def dispatch_command(cmd: str) -> None:
         base_ref = "HEAD"
         budget = 2000
         root_dir = "."
+        graph_path = None
+        fmt = "default"
         args = sys.argv[2:]
         i = 0
         while i < len(args):
@@ -1109,12 +1124,30 @@ def dispatch_command(cmd: str) -> None:
                 except ValueError:
                     pass
                 i += 1
+            elif args[i] in ("--root", "-r", "--dir", "-d") and i + 1 < len(args):
+                root_dir = args[i + 1]
+                i += 2
+            elif args[i].startswith("--root=") or args[i].startswith("--dir="):
+                root_dir = args[i].split("=", 1)[1]
+                i += 1
+            elif args[i] in ("--graph", "-g") and i + 1 < len(args):
+                graph_path = args[i + 1]
+                i += 2
+            elif args[i].startswith("--graph="):
+                graph_path = args[i].split("=", 1)[1]
+                i += 1
+            elif args[i] in ("--github-pr", "--pr"):
+                fmt = "github-pr"
+                i += 1
+            elif args[i].startswith("--format="):
+                fmt = args[i].split("=", 1)[1]
+                i += 1
             elif not args[i].startswith("-"):
                 base_ref = args[i]
                 i += 1
             else:
                 i += 1
-        res = diff_context(base_ref=base_ref, root_dir=root_dir, token_budget=budget)
+        res = diff_context(base_ref=base_ref, root_dir=root_dir, token_budget=budget, graph_path=graph_path, format=fmt)
         if "--json" in sys.argv:
             print(json.dumps(res, indent=2))
         else:
@@ -1172,6 +1205,9 @@ def dispatch_command(cmd: str) -> None:
         from graph_fy.retrieval import task_context
         task_str = ""
         budget = 1500
+        root_dir = "."
+        graph_paths = []
+        db_path = None
         include_diagram = "--no-diagram" not in sys.argv
         args = sys.argv[2:]
         i = 0
@@ -1187,6 +1223,37 @@ def dispatch_command(cmd: str) -> None:
                     budget = int(args[i].split("=", 1)[1])
                 except ValueError:
                     pass
+                i += 1
+            elif args[i] in ("--root", "-r", "--dir", "-d") and i + 1 < len(args):
+                root_dir = args[i + 1]
+                i += 2
+            elif args[i].startswith("--root=") or args[i].startswith("--dir="):
+                root_dir = args[i].split("=", 1)[1]
+                i += 1
+            elif args[i] in ("--graph", "-g") and i + 1 < len(args):
+                for p in args[i + 1].split(","):
+                    if p.strip():
+                        graph_paths.append(p.strip())
+                i += 2
+            elif args[i].startswith("--graph="):
+                for p in args[i].split("=", 1)[1].split(","):
+                    if p.strip():
+                        graph_paths.append(p.strip())
+                i += 1
+            elif args[i] in ("--multi-repo", "--workspace") and i + 1 < len(args):
+                from graph_fy.multi_repo import find_workspace_graphs
+                graph_paths.extend([str(p) for p in find_workspace_graphs(args[i + 1])])
+                i += 2
+            elif args[i].startswith("--multi-repo=") or args[i].startswith("--workspace="):
+                from graph_fy.multi_repo import find_workspace_graphs
+                m_dir = args[i].split("=", 1)[1]
+                graph_paths.extend([str(p) for p in find_workspace_graphs(m_dir)])
+                i += 1
+            elif args[i] in ("--db",) and i + 1 < len(args):
+                db_path = args[i + 1]
+                i += 2
+            elif args[i].startswith("--db="):
+                db_path = args[i].split("=", 1)[1]
                 i += 1
             elif args[i] in ("--task", "-t") and i + 1 < len(args):
                 task_str = args[i + 1]
@@ -1205,9 +1272,28 @@ def dispatch_command(cmd: str) -> None:
         if not task_str and not sys.stdin.isatty():
             task_str = sys.stdin.read().strip()
         if not task_str:
-            print("Usage: graph_fy context \"<task description>\" [--budget N] [--no-diagram] [--json]", file=sys.stderr)
+            print("Usage: graph_fy context \"<task description>\" [--root dir] [--graph file] [--budget N] [--no-diagram] [--json]", file=sys.stderr)
             sys.exit(1)
-        res = task_context(task=task_str, token_budget=budget, include_diagram=include_diagram)
+        if len(graph_paths) > 1:
+            from graph_fy.multi_repo import resolve_multi_graphs
+            G_multi = resolve_multi_graphs(graph_paths)
+            res = task_context(
+                task=task_str,
+                graph=G_multi,
+                root_dir=root_dir,
+                db_path=db_path,
+                token_budget=budget,
+                include_diagram=include_diagram,
+            )
+        else:
+            res = task_context(
+                task=task_str,
+                root_dir=root_dir,
+                graph_path=graph_paths[0] if graph_paths else None,
+                db_path=db_path,
+                token_budget=budget,
+                include_diagram=include_diagram,
+            )
         if "--json" in sys.argv:
             print(json.dumps(res, indent=2))
         else:
@@ -1228,12 +1314,16 @@ def dispatch_command(cmd: str) -> None:
         limit = 10
         hops = 2
         force_text = False
+        graph_paths = []
         graph_path = _default_graph_path()
         context_filters: list[str] = []
         terse = "--terse" in sys.argv or "--caveman" in sys.argv
         verbose = "--verbose" in sys.argv or "-v" in sys.argv
         use_skeleton = "--skeleton" in sys.argv
         as_rag_prompt = "--rag-prompt" in sys.argv
+        is_parallel = "--parallel" in sys.argv
+        batch_file = None
+        parallel_queries = []
         if as_rag_prompt:
             use_skeleton = True
         args = sys.argv[3:]
@@ -1251,6 +1341,17 @@ def dispatch_command(cmd: str) -> None:
                 i += 1
             elif args[i] in ("--verbose", "-v"):
                 verbose = True
+                i += 1
+            elif args[i] == "--parallel":
+                is_parallel = True
+                i += 1
+            elif args[i] == "--batch" and i + 1 < len(args):
+                is_parallel = True
+                batch_file = Path(args[i + 1])
+                i += 2
+            elif args[i].startswith("--batch="):
+                is_parallel = True
+                batch_file = Path(args[i].split("=", 1)[1])
                 i += 1
             elif args[i] == "--limit" and i + 1 < len(args):
                 try:
@@ -1303,55 +1404,121 @@ def dispatch_command(cmd: str) -> None:
             elif args[i].startswith("--context="):
                 context_filters.append(args[i].split("=", 1)[1])
                 i += 1
-            elif args[i] == "--graph" and i + 1 < len(args):
-                graph_path = args[i + 1]
+            elif args[i] in ("--graph", "-g") and i + 1 < len(args):
+                for p in args[i + 1].split(","):
+                    if p.strip():
+                        graph_paths.append(p.strip())
                 i += 2
+            elif args[i].startswith("--graph="):
+                for p in args[i].split("=", 1)[1].split(","):
+                    if p.strip():
+                        graph_paths.append(p.strip())
+                i += 1
+            elif args[i] in ("--multi-repo", "--workspace") and i + 1 < len(args):
+                from graph_fy.multi_repo import find_workspace_graphs
+                graph_paths.extend([str(p) for p in find_workspace_graphs(args[i + 1])])
+                i += 2
+            elif args[i].startswith("--multi-repo=") or args[i].startswith("--workspace="):
+                from graph_fy.multi_repo import find_workspace_graphs
+                m_dir = args[i].split("=", 1)[1]
+                graph_paths.extend([str(p) for p in find_workspace_graphs(m_dir)])
+                i += 1
+            elif args[i] in ("--root", "-r", "--dir", "-d") and i + 1 < len(args):
+                rdir = Path(args[i + 1])
+                graph_paths.append(str(rdir / "graph_fy_out" / "graph.json" if (rdir / "graph_fy_out" / "graph.json").exists() else rdir / "graph.json"))
+                i += 2
+            elif args[i].startswith("--root=") or args[i].startswith("--dir="):
+                rdir = Path(args[i].split("=", 1)[1])
+                graph_paths.append(str(rdir / "graph_fy_out" / "graph.json" if (rdir / "graph_fy_out" / "graph.json").exists() else rdir / "graph.json"))
+                i += 1
+            elif is_parallel and not args[i].startswith("-"):
+                parallel_queries.append(args[i])
+                i += 1
             else:
                 i += 1
-        gp = Path(graph_path).resolve()
-        if not gp.exists():
-            print(f"error: graph file not found: {gp}", file=sys.stderr)
-            sys.exit(1)
-        if not gp.suffix == ".json":
-            print(f"error: graph file must be a .json file", file=sys.stderr)
-            sys.exit(1)
-        _enforce_graph_size_cap_or_exit(gp)
-        try:
-            import json as _json
-            import networkx as _nx
 
-            _raw = _json.loads(gp.read_text(encoding="utf-8"))
-            if "links" not in _raw and "edges" in _raw:
-                _raw = dict(_raw, links=_raw["edges"])
-            _raw = dict(
-                _raw,
-                links=[
-                    {
-                        **link,
-                        "_src": link.get("_src", link.get("source")),
-                        "_tgt": link.get("_tgt", link.get("target")),
-                    }
-                    for link in _raw.get("links", [])
-                ],
+        if is_parallel:
+            if batch_file and batch_file.exists():
+                parallel_queries.extend([line.strip() for line in batch_file.read_text(encoding="utf-8").splitlines() if line.strip()])
+            if question and not question.startswith("-") and question != "--parallel":
+                parallel_queries.insert(0, question)
+            from graph_fy.multi_repo import query_parallel, resolve_multi_graphs
+            target_gps = graph_paths if graph_paths else [_default_graph_path()]
+            G_par = resolve_multi_graphs(target_gps) if len(target_gps) > 1 else None
+            first_gp = target_gps[0] if target_gps else None
+            par_res = query_parallel(
+                queries=parallel_queries,
+                graph=G_par,
+                graph_path=first_gp,
+                limit=limit,
+                hops=hops,
+                budget=budget,
+                use_skeleton=use_skeleton,
             )
+            if "--json" in sys.argv:
+                print(json.dumps(par_res, indent=2))
+            else:
+                print(f"Executed {par_res['count']} queries in parallel ({par_res['total_wall_time_s']}s wall clock, concurrency={par_res['concurrency']}):\n")
+                for item in par_res["queries"]:
+                    print(f"=== Query: \"{item['query']}\" ({item['elapsed_s']}s, {item['hits_count']} hits) ===")
+                    if item["hits"]:
+                        for h in item["hits"][:3]:
+                            print(f"  • {h.get('label', '')} ({h.get('source_path', '')}:{h.get('source_location', '')})")
+                    else:
+                        print("  (no hits)")
+                    print()
+            sys.exit(0)
+
+        import json as _json
+        if len(graph_paths) > 1:
+            from graph_fy.multi_repo import resolve_multi_graphs
+            G = resolve_multi_graphs(graph_paths)
+            gp = Path(graph_paths[0]).resolve()
+        else:
+            gp = Path(graph_paths[0] if graph_paths else graph_path).resolve()
+            if not gp.exists():
+                print(f"error: graph file not found: {gp}", file=sys.stderr)
+                sys.exit(1)
+            if not gp.suffix == ".json":
+                print(f"error: graph file must be a .json file", file=sys.stderr)
+                sys.exit(1)
+            _enforce_graph_size_cap_or_exit(gp)
             try:
-                G = json_graph.node_link_graph(_raw, edges="links")
-            except TypeError:
-                G = json_graph.node_link_graph(_raw)
-            try:
-                from graph_fy.build import graph_has_legacy_ids as _legacy
-                if _legacy(_raw.get("nodes", [])):
-                    print(
-                        "[graph_fy] note: this graph uses the pre-#1504 node-ID scheme; "
-                        "rebuild with `graph_fy extract --force` to get path-qualified IDs "
-                        "(fixes same-name-file collisions).",
-                        file=sys.stderr,
-                    )
-            except Exception:
-                pass
-        except Exception as exc:
-            print(f"error: could not load graph: {exc}", file=sys.stderr)
-            sys.exit(1)
+                import json as _json
+                import networkx as _nx
+
+                _raw = _json.loads(gp.read_text(encoding="utf-8"))
+                if "links" not in _raw and "edges" in _raw:
+                    _raw = dict(_raw, links=_raw["edges"])
+                _raw = dict(
+                    _raw,
+                    links=[
+                        {
+                            **link,
+                            "_src": link.get("_src", link.get("source")),
+                            "_tgt": link.get("_tgt", link.get("target")),
+                        }
+                        for link in _raw.get("links", [])
+                    ],
+                )
+                try:
+                    G = json_graph.node_link_graph(_raw, edges="links")
+                except TypeError:
+                    G = json_graph.node_link_graph(_raw)
+                try:
+                    from graph_fy.build import graph_has_legacy_ids as _legacy
+                    if _legacy(_raw.get("nodes", [])):
+                        print(
+                            "[graph_fy] note: this graph uses the pre-#1504 node-ID scheme; "
+                            "rebuild with `graph_fy extract --force` to get path-qualified IDs "
+                            "(fixes same-name-file collisions).",
+                            file=sys.stderr,
+                        )
+                except Exception:
+                    pass
+            except Exception as exc:
+                print(f"error: could not load graph: {exc}", file=sys.stderr)
+                sys.exit(1)
         import time as _time
         _t0 = _time.perf_counter()
 
@@ -1485,11 +1652,17 @@ def dispatch_command(cmd: str) -> None:
         args = sys.argv[3:]
         i = 0
         while i < len(args):
-            if args[i] == "--graph" and i + 1 < len(args):
+            if args[i] in ("--graph", "-g") and i + 1 < len(args):
                 graph_path = args[i + 1]
                 i += 2
             elif args[i].startswith("--graph="):
                 graph_path = args[i].split("=", 1)[1]
+                i += 1
+            elif args[i] in ("--root", "-r", "--dir", "-d") and i + 1 < len(args):
+                graph_path = str(_find_graph_path_for_target(args[i + 1]))
+                i += 2
+            elif args[i].startswith(("--root=", "--dir=")):
+                graph_path = str(_find_graph_path_for_target(args[i].split("=", 1)[1]))
                 i += 1
             elif args[i] == "--depth" and i + 1 < len(args):
                 try:
@@ -1555,11 +1728,17 @@ def dispatch_command(cmd: str) -> None:
         args = sys.argv[3:]
         i = 0
         while i < len(args):
-            if args[i] == "--graph" and i + 1 < len(args):
+            if args[i] in ("--graph", "-g") and i + 1 < len(args):
                 graph_path = args[i + 1]
                 i += 2
             elif args[i].startswith("--graph="):
                 graph_path = args[i].split("=", 1)[1]
+                i += 1
+            elif args[i] in ("--root", "-r", "--dir", "-d") and i + 1 < len(args):
+                graph_path = str(_find_graph_path_for_target(args[i + 1]))
+                i += 2
+            elif args[i].startswith(("--root=", "--dir=")):
+                graph_path = str(_find_graph_path_for_target(args[i].split("=", 1)[1]))
                 i += 1
             elif args[i] in ("--depth", "-d") and i + 1 < len(args):
                 try:
@@ -1625,11 +1804,17 @@ def dispatch_command(cmd: str) -> None:
             elif args[i] == "--json":
                 as_json = True
                 i += 1
-            elif args[i] == "--graph" and i + 1 < len(args):
+            elif args[i] in ("--graph", "-g") and i + 1 < len(args):
                 graph_path = args[i + 1]
                 i += 2
             elif args[i].startswith("--graph="):
                 graph_path = args[i].split("=", 1)[1]
+                i += 1
+            elif args[i] in ("--root", "-r", "--dir", "-d") and i + 1 < len(args):
+                graph_path = str(_find_graph_path_for_target(args[i + 1]))
+                i += 2
+            elif args[i].startswith(("--root=", "--dir=")):
+                graph_path = str(_find_graph_path_for_target(args[i].split("=", 1)[1]))
                 i += 1
             elif args[i] in ("--max-depth", "--depth") and i + 1 < len(args):
                 try:
@@ -1679,11 +1864,17 @@ def dispatch_command(cmd: str) -> None:
         args = sys.argv[2:]
         i = 0
         while i < len(args):
-            if args[i] == "--graph" and i + 1 < len(args):
+            if args[i] in ("--graph", "-g") and i + 1 < len(args):
                 graph_path = args[i + 1]
                 i += 2
             elif args[i].startswith("--graph="):
                 graph_path = args[i].split("=", 1)[1]
+                i += 1
+            elif args[i] in ("--root", "-r", "--dir", "-d") and i + 1 < len(args):
+                graph_path = str(_find_graph_path_for_target(args[i + 1]))
+                i += 2
+            elif args[i].startswith(("--root=", "--dir=")):
+                graph_path = str(_find_graph_path_for_target(args[i].split("=", 1)[1]))
                 i += 1
             elif args[i] == "--top" and i + 1 < len(args):
                 try:
@@ -1840,6 +2031,14 @@ def dispatch_command(cmd: str) -> None:
                 i += 2
             elif a.startswith("--graph="):
                 graph_path = a.split("=", 1)[1]
+                i += 1
+            elif a in ("--root", "-r", "--dir", "-d") and i + 1 < len(raw_args):
+                rdir = Path(raw_args[i + 1])
+                graph_path = str(rdir / "graph_fy_out" / "graph.json" if (rdir / "graph_fy_out" / "graph.json").exists() else rdir / "graph.json")
+                i += 2
+            elif a.startswith("--root=") or a.startswith("--dir="):
+                rdir = Path(a.split("=", 1)[1])
+                graph_path = str(rdir / "graph_fy_out" / "graph.json" if (rdir / "graph_fy_out" / "graph.json").exists() else rdir / "graph.json")
                 i += 1
             elif a == "--unweighted":
                 weighted = False
@@ -2006,6 +2205,14 @@ def dispatch_command(cmd: str) -> None:
                 i += 2
             elif a.startswith("--graph="):
                 graph_path = a.split("=", 1)[1]
+                i += 1
+            elif a in ("--root", "-r", "--dir", "-d") and i + 1 < len(raw_args):
+                rdir = Path(raw_args[i + 1])
+                graph_path = str(rdir / "graph_fy_out" / "graph.json" if (rdir / "graph_fy_out" / "graph.json").exists() else rdir / "graph.json")
+                i += 2
+            elif a.startswith("--root=") or a.startswith("--dir="):
+                rdir = Path(a.split("=", 1)[1])
+                graph_path = str(rdir / "graph_fy_out" / "graph.json" if (rdir / "graph_fy_out" / "graph.json").exists() else rdir / "graph.json")
                 i += 1
             elif a in ("--terse", "--caveman"):
                 terse = True
@@ -2193,14 +2400,26 @@ def dispatch_command(cmd: str) -> None:
         flag_drift = False
         flag_secrets = False
         flag_all = False
+        base_graph_path: Path | None = None
 
         i = 2
         while i < len(sys.argv):
             arg = sys.argv[i]
-            if arg == "--graph":
+            if arg in ("--graph", "-g") and i + 1 < len(sys.argv):
                 i += 1
-                if i < len(sys.argv):
-                    graph_path = Path(sys.argv[i])
+                graph_path = Path(sys.argv[i])
+            elif arg.startswith("--graph="):
+                graph_path = Path(arg.split("=", 1)[1])
+            elif arg in ("--base", "--base-graph") and i + 1 < len(sys.argv):
+                i += 1
+                base_graph_path = Path(sys.argv[i])
+            elif arg.startswith(("--base=", "--base-graph=")):
+                base_graph_path = Path(arg.split("=", 1)[1])
+            elif arg in ("--root", "-r", "--dir", "-d") and i + 1 < len(sys.argv):
+                i += 1
+                graph_path = _find_graph_path_for_target(sys.argv[i])
+            elif arg.startswith(("--root=", "--dir=")):
+                graph_path = _find_graph_path_for_target(arg.split("=", 1)[1])
             elif arg == "--json":
                 json_output = True
             elif arg in ("--cycles", "--cycle"):
@@ -2223,8 +2442,8 @@ def dispatch_command(cmd: str) -> None:
                 target_path = Path(arg)
             i += 1
 
-        if target_path and target_path.is_file() and target_path.suffix == ".json":
-            graph_path = target_path
+        if target_path:
+            graph_path = _find_graph_path_for_target(target_path)
 
         if not graph_path.exists():
             print(f"error: graph file not found at {graph_path}. Run `graph_fy build` first.", file=sys.stderr)
@@ -2236,6 +2455,14 @@ def dispatch_command(cmd: str) -> None:
         except Exception as exc:
             print(f"error: failed to read {graph_path}: {exc}", file=sys.stderr)
             sys.exit(1)
+
+        base_graph = None
+        if base_graph_path and base_graph_path.exists():
+            try:
+                with open(base_graph_path, encoding="utf-8") as f:
+                    base_graph = json.load(f)
+            except Exception:
+                pass
 
         has_specific = any([flag_cycles, flag_layers, flag_dead, flag_orphans, flag_actions, flag_drift, flag_secrets])
         if flag_all:
@@ -2249,6 +2476,8 @@ def dispatch_command(cmd: str) -> None:
                 check_dead=True,
                 check_cycles=True,
                 check_layers=True,
+                check_context_managers=True,
+                base_graph=base_graph,
             )
         elif has_specific:
             result = run_lint(
@@ -2261,6 +2490,8 @@ def dispatch_command(cmd: str) -> None:
                 check_dead=flag_dead,
                 check_cycles=flag_cycles,
                 check_layers=flag_layers,
+                check_context_managers=True,
+                base_graph=base_graph,
             )
         else:
             result = run_lint(
@@ -2273,6 +2504,8 @@ def dispatch_command(cmd: str) -> None:
                 check_dead=False,
                 check_cycles=True,
                 check_layers=True,
+                check_context_managers=True,
+                base_graph=base_graph,
             )
         if json_output:
             print(json.dumps(result, indent=2))
@@ -3289,6 +3522,7 @@ def dispatch_command(cmd: str) -> None:
         node_limit = 5000
         no_viz = False
         obsidian_dir = out_dir / "obsidian"
+        custom_export_dir: Path | None = None
         # Shared push-connection settings for the graph-database sinks (neo4j,
         # falkordb), parsed from the generic --push/--user/--password flags below.
         push_uri: str | None = None
@@ -3318,10 +3552,14 @@ def dispatch_command(cmd: str) -> None:
                 i += 2
             elif a == "--sections" and i + 1 < len(args):
                 sections_path = Path(args[i + 1]); i += 2
-            elif a == "--output" and i + 1 < len(args):
+            elif a in ("--output", "--out", "-o") and i + 1 < len(args):
                 callflow_output = Path(args[i + 1]).expanduser()
                 if not callflow_output.is_absolute():
                     callflow_output = Path.cwd() / callflow_output
+                i += 2
+            elif a in ("-r", "--root") and i + 1 < len(args):
+                graph_path = _find_graph_path_for_target(args[i + 1])
+                graph_path_explicit = True
                 i += 2
             elif a == "--lang" and i + 1 < len(args):
                 callflow_lang = args[i + 1]; i += 2
@@ -3349,21 +3587,17 @@ def dispatch_command(cmd: str) -> None:
             elif a == "--no-viz":
                 no_viz = True; i += 1
             elif a == "--dir" and i + 1 < len(args):
-                obsidian_dir = Path(args[i + 1]); i += 2
+                custom_export_dir = Path(args[i + 1])
+                obsidian_dir = custom_export_dir
+                i += 2
             elif a == "--push" and i + 1 < len(args):
                 push_uri = args[i + 1]; i += 2
             elif a == "--user" and i + 1 < len(args):
                 push_user = args[i + 1]; i += 2
             elif a == "--password" and i + 1 < len(args):
                 push_password = args[i + 1]; i += 2
-            elif subcmd == "callflow-html" and not a.startswith("-") and not graph_path_explicit:
-                candidate = Path(a)
-                if candidate.name == "graph.json" or candidate.suffix.lower() == ".json":
-                    graph_path = candidate
-                elif (candidate / "graph.json").exists():
-                    graph_path = candidate / "graph.json"
-                else:
-                    graph_path = candidate / _graph_fy_OUT / "graph.json"
+            elif not a.startswith("-") and not graph_path_explicit:
+                graph_path = _find_graph_path_for_target(a)
                 graph_path_explicit = True
                 i += 1
             else:
@@ -3473,7 +3707,17 @@ def dispatch_command(cmd: str) -> None:
 
         labels: dict[int, str] = {}
         if labels_path.exists():
-            labels = {int(k): v for k, v in json.loads(labels_path.read_text(encoding="utf-8")).items()}
+            try:
+                raw_labels = json.loads(labels_path.read_text(encoding="utf-8"))
+                if isinstance(raw_labels, dict):
+                    source_dict = raw_labels.get("community_labels") or raw_labels.get("labels") or raw_labels
+                    for k, v in source_dict.items():
+                        try:
+                            labels[int(k)] = str(v)
+                        except (ValueError, TypeError):
+                            continue
+            except Exception:
+                labels = {}
 
         out_dir = graph_path.parent
 
@@ -3515,13 +3759,14 @@ def dispatch_command(cmd: str) -> None:
                     file=sys.stderr,
                 )
                 sys.exit(1)
+            wiki_dir = custom_export_dir if custom_export_dir is not None else (out_dir / "wiki")
             if not gods_data:
                 gods_data = _god_nodes(G)
-            n = _to_wiki(G, communities, str(out_dir / "wiki"),
+            n = _to_wiki(G, communities, str(wiki_dir),
                          community_labels=labels or None, cohesion=cohesion or None,
                          god_nodes_data=gods_data)
-            print(f"Wiki: {n} articles written to {out_dir}/wiki/")
-            print(f"  {out_dir}/wiki/index.md  ->  agent entry point")
+            print(f"Wiki: {n} articles written to {wiki_dir}/")
+            print(f"  {wiki_dir}/index.md  ->  agent entry point")
 
         elif subcmd == "svg":
             from graph_fy.export import to_svg as _to_svg
@@ -3589,6 +3834,189 @@ def dispatch_command(cmd: str) -> None:
                 pass
         result = run_benchmark(graph_path, corpus_words=corpus_words)
         print_benchmark(result)
+
+    elif cmd in ("arch-entities", "arch_entities", "entities-arch"):
+        from graph_fy.multi_repo import synthesize_entity_architecture, resolve_multi_graphs
+        args = sys.argv[2:]
+        if not args:
+            print("Usage: graph_fy arch-entities <Entity1> <Entity2> ... [--graph <path>] [--format mermaid|json|markdown] [--hops N]", file=sys.stderr)
+            sys.exit(1)
+        entities = []
+        graph_paths = []
+        fmt = "markdown"
+        hops = 1
+        i = 0
+        while i < len(args):
+            if args[i] in ("--graph", "-g") and i + 1 < len(args):
+                for p in args[i + 1].split(","):
+                    if p.strip():
+                        graph_paths.append(p.strip())
+                i += 2
+            elif args[i].startswith("--graph="):
+                for p in args[i].split("=", 1)[1].split(","):
+                    if p.strip():
+                        graph_paths.append(p.strip())
+                i += 1
+            elif args[i] in ("--format", "-f") and i + 1 < len(args):
+                fmt = args[i + 1].lower()
+                i += 2
+            elif args[i].startswith("--format="):
+                fmt = args[i].split("=", 1)[1].lower()
+                i += 1
+            elif args[i] == "--hops" and i + 1 < len(args):
+                try:
+                    hops = int(args[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+            elif not args[i].startswith("-"):
+                for ent in args[i].split(","):
+                    if ent.strip():
+                        entities.append(ent.strip())
+                i += 1
+            else:
+                i += 1
+
+        if not entities:
+            print("error: at least one entity name required", file=sys.stderr)
+            sys.exit(1)
+
+        if not graph_paths:
+            graph_paths = [_default_graph_path()]
+        G = resolve_multi_graphs(graph_paths)
+        arch = synthesize_entity_architecture(entities, G, max_hops=hops)
+
+        if fmt == "json":
+            print(json.dumps(arch, indent=2))
+        elif fmt == "mermaid":
+            print(arch["mermaid"])
+        else:
+            print(f"### Entity Architecture Synthesis ({len(arch['entities'])} entities matched, {arch['subgraph_edges_count']} relationships)\n")
+            print("#### Matched Entities:")
+            print("| Entity | Symbol Label | Source File | Location | Degree | Repo |")
+            print("| :--- | :--- | :--- | :--- | :--- | :--- |")
+            for ent in arch["entities"]:
+                print(f"| {ent['entity']} | `{ent['label']}` | `{ent['source_file']}` | {ent['source_location']} | {ent['degree']} | {ent['repo']} |")
+            print("\n#### Whole-Entity Architectural Flow:")
+            print("```mermaid")
+            print(arch["mermaid"])
+            print("```\n")
+            if arch["matrix"]:
+                print("#### Entity Interaction Matrix:")
+                for src_ent, tgt_map in arch["matrix"].items():
+                    for tgt_ent, rels in tgt_map.items():
+                        print(f"- **{src_ent}** -> **{tgt_ent}**: {', '.join(rels)}")
+        sys.exit(0)
+
+    elif cmd in ("eval", "evals"):
+        args = sys.argv[2:]
+        graph_paths = []
+        db_path = None
+        root_dir = "."
+        as_json = "--json" in args
+        comparative = "--comparative" in args or "--compare" in args
+        report_path = None
+        scenarios_path = None
+        limit = None
+        category = None
+        i = 0
+        while i < len(args):
+            if args[i] in ("--graph", "-g") and i + 1 < len(args):
+                for p in args[i + 1].split(","):
+                    if p.strip():
+                        graph_paths.append(p.strip())
+                i += 2
+            elif args[i].startswith("--graph="):
+                for p in args[i].split("=", 1)[1].split(","):
+                    if p.strip():
+                        graph_paths.append(p.strip())
+                i += 1
+            elif args[i] in ("--db",) and i + 1 < len(args):
+                db_path = args[i + 1]
+                i += 2
+            elif args[i] in ("--root", "-r") and i + 1 < len(args):
+                root_dir = args[i + 1]
+                i += 2
+            elif args[i] in ("--report",) and i + 1 < len(args):
+                report_path = args[i + 1]
+                i += 2
+            elif args[i].startswith("--report="):
+                report_path = args[i].split("=", 1)[1]
+                i += 1
+            elif args[i] in ("--scenarios", "-s"):
+                if i + 1 < len(args) and not args[i + 1].startswith("-"):
+                    scenarios_path = args[i + 1]
+                    i += 2
+                else:
+                    scenarios_path = "evals/real_world_scenarios.json"
+                    i += 1
+            elif args[i].startswith("--scenarios="):
+                scenarios_path = args[i].split("=", 1)[1]
+                i += 1
+            elif args[i] in ("--limit", "-n") and i + 1 < len(args):
+                try:
+                    limit = int(args[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+            elif args[i].startswith("--limit="):
+                try:
+                    limit = int(args[i].split("=", 1)[1])
+                except ValueError:
+                    pass
+                i += 1
+            elif args[i] in ("--category", "-c") and i + 1 < len(args):
+                category = args[i + 1]
+                i += 2
+            elif args[i].startswith("--category="):
+                category = args[i].split("=", 1)[1]
+                i += 1
+            else:
+                i += 1
+
+        target_graph_path = graph_paths[0] if graph_paths else _default_graph_path()
+        if comparative:
+            from graph_fy.comparative_eval import run_comparative_evals
+            comp_report = run_comparative_evals(
+                graph_path=target_graph_path,
+                db_path=db_path,
+                root_dir=root_dir,
+                scenarios_path=scenarios_path or "evals/real_world_scenarios.json",
+                category_filter=category,
+                limit=limit,
+            )
+            md_content = comp_report.to_markdown()
+            if report_path:
+                Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+                Path(report_path).write_text(md_content, encoding="utf-8")
+                print(f"Comparative report written to {report_path}")
+            if as_json:
+                import dataclasses
+                print(json.dumps(dataclasses.asdict(comp_report), indent=2))
+            else:
+                print(md_content)
+            sys.exit(0 if comp_report.skill_pass_rate_pct >= 80.0 else 1)
+        else:
+            from graph_fy.evals import run_evals
+            report = run_evals(
+                graph_path=target_graph_path,
+                db_path=db_path,
+                root_dir=root_dir,
+                scenarios_path=scenarios_path,
+                category_filter=category,
+                limit=limit,
+            )
+            md_content = report.to_markdown()
+            if report_path:
+                Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+                Path(report_path).write_text(md_content, encoding="utf-8")
+                print(f"Eval report written to {report_path}")
+            if as_json:
+                import dataclasses
+                print(json.dumps(dataclasses.asdict(report), indent=2))
+            else:
+                print(md_content)
+            sys.exit(0 if report.overall_score >= 80.0 else 1)
 
     elif cmd == "global":
         subcmd = sys.argv[2] if len(sys.argv) > 2 else ""

@@ -19,10 +19,13 @@ from graph_fy.affected import _as_repo_relative, _bare_name, _normalize_label, _
 # Edge relations relevant to downstream transitive impact
 IMPACT_RELATIONS: frozenset[str] = frozenset({
     "calls",
+    "indirect_call",
     "imports",
+    "imports_from",
     "inherits",
     "implements",
     "references",
+    "uses",
     "depends_on",
     "subscribes_to",
 })
@@ -137,6 +140,7 @@ def compute_impact(
     target: str,
     max_depth: int = 10,
     root: Path | None = None,
+    pagerank: dict[Any, float] | None = None,
 ) -> dict[str, Any]:
     """Compute downstream transitive dependency closure and blast radius risk.
 
@@ -145,6 +149,7 @@ def compute_impact(
         target: Target node id, label, or file path.
         max_depth: Maximum traversal depth for downstream impact (default 10).
         root: Optional repository root for path resolution.
+        pagerank: Optional precomputed PageRank scores dictionary.
 
     Returns:
         Dictionary containing matched targets, downstream dependents, categorized
@@ -170,25 +175,32 @@ def compute_impact(
         }
 
     # Identify god nodes (top 5% or top 10 most connected real entities)
-    degrees = dict(graph.degree())
-    real_degrees = {
-        n: d for n, d in degrees.items()
-        if not _is_file_or_concept(graph.nodes[n])
-        and graph.nodes[n].get("label", "") not in _BUILTIN_NOISE_LABELS
-    }
-    god_threshold = 10
-    if real_degrees:
-        sorted_degs = sorted(real_degrees.values(), reverse=True)
-        # Top 5% threshold or minimum 10
-        p95_idx = max(0, int(len(sorted_degs) * 0.05) - 1)
-        god_threshold = max(10, sorted_degs[p95_idx])
-    god_node_set = {n for n, d in real_degrees.items() if d >= god_threshold}
+    god_node_set = getattr(graph, "_cached_god_nodes", None)
+    if god_node_set is None:
+        degrees = dict(graph.degree())
+        real_degrees = {
+            n: d for n, d in degrees.items()
+            if not _is_file_or_concept(graph.nodes[n])
+            and graph.nodes[n].get("label", "") not in _BUILTIN_NOISE_LABELS
+        }
+        god_threshold = 10
+        if real_degrees:
+            sorted_degs = sorted(real_degrees.values(), reverse=True)
+            # Top 5% threshold or minimum 10
+            p95_idx = max(0, int(len(sorted_degs) * 0.05) - 1)
+            god_threshold = max(10, sorted_degs[p95_idx])
+        god_node_set = {n for n, d in real_degrees.items() if d >= god_threshold}
+        try:
+            graph._cached_god_nodes = god_node_set
+        except Exception:
+            pass
 
-    # Precalculate PageRank if graph has nodes
-    pagerank: dict[Any, float] = {}
-    if len(graph) > 0:
-        from graph_fy.retrieval import compute_pagerank
-        pagerank = compute_pagerank(graph)
+    # Precalculate PageRank if graph has nodes and not provided (avoid expensive full-graph PR on huge graphs)
+    if pagerank is None:
+        pagerank = {}
+        if 0 < len(graph) <= 2000:
+            from graph_fy.retrieval import compute_pagerank
+            pagerank = compute_pagerank(graph)
 
     # Graph edge traversal:
     # An edge A -> B with relation in IMPACT_RELATIONS means A depends on B (calls, imports, inherits, references B).
@@ -203,9 +215,13 @@ def compute_impact(
 
     # Also seed with member nodes (methods/contains) if any target is a class/module
     for t in targets:
-        out_edges = graph.out_edges(t, data=True) if hasattr(graph, "out_edges") else (
-            (s, v, d) for s, v, d in graph.edges(data=True) if s == t
-        )
+        if hasattr(graph, "out_edges"):
+            out_edges = graph.out_edges(t, data=True)
+        else:
+            out_edges = (
+                (t, nbr if s == t else s, d)
+                for s, nbr, d in graph.edges(t, data=True)
+            )
         for _s, member, edata in out_edges:
             rel = str(edata.get("relation", "")).lower()
             if rel in ("method", "contains"):
@@ -215,14 +231,20 @@ def compute_impact(
                     queue.append((m_str, 0))
 
     while queue:
+        if len(downstream_entries) >= 2000:
+            break
         curr, d = queue.popleft()
         if d >= max_depth:
             continue
 
         # In-edges where someone points to curr
-        incoming = graph.in_edges(curr, data=True) if hasattr(graph, "in_edges") else (
-            (u, v, edata) for u, v, edata in graph.edges(data=True) if v == curr
-        )
+        if hasattr(graph, "in_edges"):
+            incoming = graph.in_edges(curr, data=True)
+        else:
+            incoming = (
+                (nbr if u == curr else u, curr, edata)
+                for u, nbr, edata in graph.edges(curr, data=True)
+            )
         for u, _v, edata in incoming:
             rel = str(edata.get("relation", "")).lower()
             if rel not in IMPACT_RELATIONS:
@@ -294,10 +316,15 @@ def compute_impact(
     comm_score = min(0.20, 0.05 * comm_count)
 
     # Metric 4: Centrality & Target importance (0.0 to 0.15)
-    target_prs = [pagerank.get(t, 0.0) for t in targets]
-    target_max_pr = max(target_prs, default=0.0)
-    max_graph_pr = max(pagerank.values(), default=1.0) or 1.0
-    pr_ratio = min(1.0, target_max_pr / max_graph_pr) if max_graph_pr > 0 else 0.0
+    if pagerank:
+        target_prs = [pagerank.get(t, 0.0) for t in targets]
+        target_max_pr = max(target_prs, default=0.0)
+        max_graph_pr = max(pagerank.values(), default=1.0) or 1.0
+        pr_ratio = min(1.0, target_max_pr / max_graph_pr) if max_graph_pr > 0 else 0.0
+    else:
+        max_deg = max(real_degrees.values(), default=1) or 1
+        target_max_deg = max((real_degrees.get(t, 0) for t in targets), default=0)
+        pr_ratio = min(1.0, target_max_deg / max_deg) if max_deg > 0 else 0.0
     centrality_score = 0.15 * pr_ratio
 
     total_score = round(count_score + god_score + comm_score + centrality_score, 3)

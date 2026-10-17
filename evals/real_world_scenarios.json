@@ -1,0 +1,3483 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "description": "Exhaustive benchmark suite of real-world software engineering tasks, CVE blast-radius analyses, dependency migrations, circular import refactors, and anti-hallucination tests for graph_fy.",
+  "metadata": {
+    "total_scenarios": 106,
+    "categories": [
+      "API Breaking Changes & Migration",
+      "Anti-Hallucination & Zombie APIs",
+      "Architecture & Distributed Tracing",
+      "Auth & Session Cryptography",
+      "Blast Radius & Interface Refactoring",
+      "Circular Dependency & Decoupling",
+      "Cross-Repo Resolution",
+      "Performance & Resource Leaks",
+      "Security / CVE Blast Radius",
+      "State Leaks & Concurrency",
+      "Typo-Tolerance & Did-You-Mean"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "SEC-001",
+      "title": "Session Cache Poisoning via Missing Vary: Cookie (CVE-2026-27205)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "CRITICAL",
+      "real_world_context": "CVE-2026-27205 in pallets/flask: When checking 'key in session' without mutating data, Flask omitted 'Vary: Cookie' header, allowing shared caching proxies (CDNs/Varnish) to cache user-specific pages.",
+      "user_prompt": "Audit Flask session handling when checking membership via 'in' operator ('admin' in session). Trace how response headers are populated in save_session and verify if Vary: Cookie is emitted to prevent intermediary cache poisoning.",
+      "target_symbols": [
+        "session",
+        "open_session",
+        "save_session",
+        "SecureCookieSession",
+        "process_response"
+      ],
+      "expected_files": [
+        "flask/sessions.py",
+        "flask/app.py",
+        "flask/wrappers.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.cache_header_patch",
+        "request.disable_caching",
+        "flask.session_cache_guard"
+      ],
+      "verification": {
+        "must_contain": [
+          "session",
+          "save_session",
+          "cookie"
+        ],
+        "must_not_contain": [
+          "QuantumLedger",
+          "NonExistentZeroKnowledge"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-002",
+      "title": "Permanent Session Cookie Disclosure (CVE-2023-30861)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "CRITICAL",
+      "real_world_context": "CVE-2023-30861: When session.permanent = True and SESSION_REFRESH_EACH_REQUEST is default, lack of explicit mutation during request caused missing Vary: Cookie, leaking session cookies to CDNs.",
+      "user_prompt": "Trace session permanent lifetime handling and cookie header emissions across SecureCookieSessionInterface.save_session and process_response. How does Flask determine whether a session was accessed?",
+      "target_symbols": [
+        "SecureCookieSessionInterface",
+        "save_session",
+        "should_set_cookie",
+        "permanent"
+      ],
+      "expected_files": [
+        "flask/sessions.py",
+        "flask/app.py"
+      ],
+      "forbidden_hallucinations": [
+        "session.force_vary_header",
+        "flask.patch_cookie_vary"
+      ],
+      "verification": {
+        "must_contain": [
+          "session",
+          "cookie",
+          "save_session"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-003",
+      "title": "Secret Key Fallback Order Flaw in Rotation (CVE-2025-47278)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "HIGH",
+      "real_world_context": "CVE-2025-47278 in pallets/flask: Flask reversed SECRET_KEY_FALLBACKS ordering, signing new cookies with stale keys instead of the primary key during cryptographic key rotation.",
+      "user_prompt": "Inspect SECRET_KEY and SECRET_KEY_FALLBACKS handling in Flask session serialization. Trace serializer instantiation and signing key assignment to verify key rotation ordering.",
+      "target_symbols": [
+        "SECRET_KEY",
+        "SECRET_KEY_FALLBACKS",
+        "URLSafeTimedSerializer",
+        "open_session"
+      ],
+      "expected_files": [
+        "flask/sessions.py",
+        "flask/config.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.crypto.rotate_keys",
+        "secret_key_manager"
+      ],
+      "verification": {
+        "must_contain": [
+          "secret_key",
+          "serializer",
+          "session"
+        ],
+        "must_not_contain": [
+          "NonExistentZeroKnowledge"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-004",
+      "title": "Sandboxed Template SSTI Escape via Format Strings (CVE-2024-34064)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "CRITICAL",
+      "real_world_context": "CVE-2024-34064 in Jinja2: SandboxedEnvironment format attribute access allowed sandbox escape via Python string format specifiers and class hierarchy traversal.",
+      "user_prompt": "Audit Jinja2 SandboxedEnvironment to inspect how attribute access is filtered on format methods. Locate is_safe_attribute, unsafe_attributes, and inspect the interceptor for string formatting.",
+      "target_symbols": [
+        "SandboxedEnvironment",
+        "is_safe_attribute",
+        "unsafe_attributes",
+        "call"
+      ],
+      "expected_files": [
+        "jinja2/sandbox.py",
+        "jinja2/environment.py"
+      ],
+      "forbidden_hallucinations": [
+        "jinja2.ast_sandbox_compiler",
+        "safe_eval_wrapper"
+      ],
+      "verification": {
+        "must_contain": [
+          "sandbox",
+          "environment",
+          "attribute"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-005",
+      "title": "ReDoS and CPU Starvation in Multipart Form Parser (CVE-2023-46136)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "HIGH",
+      "real_world_context": "CVE-2023-46136 in pallets/werkzeug: Large number of multipart parts or malicious boundary lines resulted in unbounded CPU consumption in formparser.py.",
+      "user_prompt": "Trace multipart/form-data parsing in Werkzeug. Identify FormDataParser, MultiPartParser, and the boundary line buffer parser to verify limits on max parts and line lengths.",
+      "target_symbols": [
+        "FormDataParser",
+        "MultiPartParser",
+        "parse",
+        "default_stream_factory"
+      ],
+      "expected_files": [
+        "werkzeug/formparser.py",
+        "werkzeug/sansio/multipart.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.regex_multipart_sanitizer",
+        "fast_multipart_c"
+      ],
+      "verification": {
+        "must_contain": [
+          "parser",
+          "multipart",
+          "form"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-006",
+      "title": "Directory Traversal via Safe Join Bypass (CVE-2019-1010083)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "HIGH",
+      "real_world_context": "CVE-2019-1010083 / Pallets safe_join: Path traversal vulnerabilities when sending static files if untrusted paths with backslashes or encoded dots bypass naive join logic.",
+      "user_prompt": "Examine send_file and send_from_directory in Flask and safe_join in Werkzeug. Trace path sanitization and directory jail enforcement.",
+      "target_symbols": [
+        "send_file",
+        "send_from_directory",
+        "safe_join",
+        "NotFound"
+      ],
+      "expected_files": [
+        "flask/helpers.py",
+        "werkzeug/security.py",
+        "werkzeug/utils.py"
+      ],
+      "forbidden_hallucinations": [
+        "os.path.unsafe_join",
+        "flask.jail_path"
+      ],
+      "verification": {
+        "must_contain": [
+          "send_file",
+          "safe_join",
+          "directory"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-007",
+      "title": "Cross-Origin Resource Sharing Wildcard Origin with Credentials",
+      "category": "Security / CVE Blast Radius",
+      "severity": "HIGH",
+      "real_world_context": "CORS misconfiguration in flask-cors: Allowing Access-Control-Allow-Origin: * when Access-Control-Allow-Credentials: true violates browser security standards and allows credential theft.",
+      "user_prompt": "Audit flask-cors CORS decorator and extension configuration. Trace evaluate_options and check how CORS_ALLOW_HEADERS, CORS_ORIGINS, and supports_credentials are validated.",
+      "target_symbols": [
+        "CORS",
+        "cross_origin",
+        "evaluate_options",
+        "supports_credentials"
+      ],
+      "expected_files": [
+        "flask_cors/extension.py",
+        "flask_cors/decorator.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask_cors.auto_fix_origin",
+        "cors_wildcard_patch"
+      ],
+      "verification": {
+        "must_contain": [
+          "cors",
+          "origin",
+          "header"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-001",
+      "title": "Werkzeug 3.0 Removed url_quote and url_decode Migration",
+      "category": "API Breaking Changes & Migration",
+      "severity": "HIGH",
+      "real_world_context": "Werkzeug 3.0 removed werkzeug.urls.url_quote, url_unquote, url_encode, url_decode (#2768). Downstream libraries like Flask-Login crashed on import until updated.",
+      "user_prompt": "Trace references to URL quoting and decoding across Werkzeug and Flask-Login. Identify where url_quote was imported from werkzeug.urls and how to replace it with urllib.parse.",
+      "target_symbols": [
+        "url_quote",
+        "url_decode",
+        "iri_to_uri",
+        "uri_to_iri",
+        "quote"
+      ],
+      "expected_files": [
+        "werkzeug/urls.py",
+        "flask_login/utils.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.urls.url_quote_v3",
+        "flask.url_quote"
+      ],
+      "verification": {
+        "must_contain": [
+          "url",
+          "quote",
+          "parse"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-002",
+      "title": "Flask 3.0 Removal of before_first_request Lifecycle Hook",
+      "category": "API Breaking Changes & Migration",
+      "severity": "MEDIUM",
+      "real_world_context": "Flask 3.0 removed app.before_first_request. Apps and extensions must migrate initialization to application factory setup or lifespan hooks.",
+      "user_prompt": "Locate request lifecycle handlers in Flask. Check if before_first_request exists, and trace how preprocess_request, before_request_funcs, and dispatch_request are organized.",
+      "target_symbols": [
+        "before_request",
+        "preprocess_request",
+        "before_request_funcs",
+        "dispatch_request"
+      ],
+      "expected_files": [
+        "flask/app.py",
+        "flask/sansio/app.py"
+      ],
+      "forbidden_hallucinations": [
+        "app.before_first_request_async",
+        "flask.init_once_hook"
+      ],
+      "verification": {
+        "must_contain": [
+          "request",
+          "preprocess_request",
+          "dispatch"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-003",
+      "title": "Deprecation of safe_str_cmp in favor of hmac.compare_digest",
+      "category": "API Breaking Changes & Migration",
+      "severity": "LOW",
+      "real_world_context": "Werkzeug removed safe_str_cmp in 2.1+. Downstream code must use standard library hmac.compare_digest for timing-attack-safe comparisons.",
+      "user_prompt": "Check how password hashing and constant-time token comparison are implemented in werkzeug.security and itsdangerous. Locate check_password_hash and compare_digest usage.",
+      "target_symbols": [
+        "check_password_hash",
+        "generate_password_hash",
+        "compare_digest"
+      ],
+      "expected_files": [
+        "werkzeug/security.py",
+        "itsdangerous/signer.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.safe_cmp_fallback",
+        "crypto_string_equals"
+      ],
+      "verification": {
+        "must_contain": [
+          "password",
+          "hash",
+          "security"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-004",
+      "title": "Flask-SQLAlchemy 3.0 Migration from Query to select() Execution",
+      "category": "API Breaking Changes & Migration",
+      "severity": "HIGH",
+      "real_world_context": "Flask-SQLAlchemy 3.0 aligned with SQLAlchemy 2.0, deprecating Model.query and session.query in favor of db.session.execute(db.select(Model)).",
+      "user_prompt": "Audit Flask-SQLAlchemy session execution patterns. Trace how SQLAlchemy extension initializes db.session, db.select, and the Pagination helper.",
+      "target_symbols": [
+        "SQLAlchemy",
+        "session",
+        "paginate",
+        "select",
+        "Pagination"
+      ],
+      "expected_files": [
+        "flask_sqlalchemy/extension.py",
+        "flask_sqlalchemy/pagination.py"
+      ],
+      "forbidden_hallucinations": [
+        "db.raw_query_executor",
+        "flask_sqlalchemy.v1_compat_layer"
+      ],
+      "verification": {
+        "must_contain": [
+          "sqlalchemy",
+          "session",
+          "pagination"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-005",
+      "title": "Deprecation of werkzeug.__version__ Module Attribute",
+      "category": "API Breaking Changes & Migration",
+      "severity": "LOW",
+      "real_world_context": "Werkzeug 3.0 deprecated module-level __version__ attribute. Code must use importlib.metadata.version('werkzeug').",
+      "user_prompt": "Inspect top-level module metadata and version reporting across Werkzeug and Flask __init__.py files.",
+      "target_symbols": [
+        "__version__",
+        "__all__"
+      ],
+      "expected_files": [
+        "werkzeug/__init__.py",
+        "flask/__init__.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.get_runtime_semver",
+        "version_tuple_dynamic"
+      ],
+      "verification": {
+        "must_contain": [
+          "version",
+          "init"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-006",
+      "title": "Removal of flask.Markup and Migration to markupsafe.Markup",
+      "category": "API Breaking Changes & Migration",
+      "severity": "MEDIUM",
+      "real_world_context": "flask.Markup and flask.escape were removed in Flask 2.3+; downstream code must import directly from markupsafe.",
+      "user_prompt": "Verify where Markup and escape are defined and imported across Flask, Jinja2, and MarkupSafe. Identify the canonical definitions in markupsafe.",
+      "target_symbols": [
+        "Markup",
+        "escape",
+        "soft_str"
+      ],
+      "expected_files": [
+        "markupsafe/__init__.py",
+        "jinja2/utils.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.Markup",
+        "flask.html_escape_fast"
+      ],
+      "verification": {
+        "must_contain": [
+          "markup",
+          "escape"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-001",
+      "title": "Flask-Login Session Authentication calling itsdangerous Serializer",
+      "category": "Cross-Repo Resolution",
+      "severity": "HIGH",
+      "real_world_context": "Multi-repo resolution: Flask-Login uses Flask's session and itsdangerous URLSafeTimedSerializer to sign user remember-me cookies.",
+      "user_prompt": "Trace how Flask-Login login_user persists user state into Flask session and creates remember-me cookie tokens via URLSafeTimedSerializer in itsdangerous.",
+      "target_symbols": [
+        "LoginManager",
+        "login_user",
+        "current_user",
+        "URLSafeTimedSerializer",
+        "save_session"
+      ],
+      "expected_files": [
+        "flask_login/login_manager.py",
+        "flask_login/utils.py",
+        "flask/sessions.py",
+        "itsdangerous/url_safe.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask_login.jwt_signer",
+        "login_manager.raw_crypt"
+      ],
+      "verification": {
+        "must_contain": [
+          "login",
+          "user",
+          "session",
+          "serializer"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-002",
+      "title": "Flask-Migrate Binding Alembic Environment to Flask-SQLAlchemy",
+      "category": "Cross-Repo Resolution",
+      "severity": "HIGH",
+      "real_world_context": "Multi-repo resolution: Flask-Migrate CLI commands (db upgrade/migrate) invoke Alembic operations configured with Flask-SQLAlchemy engine and metadata.",
+      "user_prompt": "Trace how Migrate extension initializes with Flask and Flask-SQLAlchemy. Find the binding between Migrate.init_app, db.metadata, and the Alembic script directory.",
+      "target_symbols": [
+        "Migrate",
+        "init_app",
+        "upgrade",
+        "migrate",
+        "SQLAlchemy"
+      ],
+      "expected_files": [
+        "flask_migrate/__init__.py",
+        "flask_migrate/cli.py",
+        "flask_sqlalchemy/extension.py"
+      ],
+      "forbidden_hallucinations": [
+        "alembic.auto_sync_tables",
+        "flask_migrate.sql_runner"
+      ],
+      "verification": {
+        "must_contain": [
+          "migrate",
+          "sqlalchemy",
+          "init_app"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-003",
+      "title": "Flask-CORS Preflight Options Interception on Werkzeug Response",
+      "category": "Cross-Repo Resolution",
+      "severity": "MEDIUM",
+      "real_world_context": "Multi-repo resolution: Flask-CORS decorates Flask view functions and manipulates Werkzeug Response headers for CORS preflight OPTIONS requests.",
+      "user_prompt": "Trace how cross_origin decorator intercepts HTTP OPTIONS preflight requests and modifies Response headers generated by Werkzeug.",
+      "target_symbols": [
+        "cross_origin",
+        "CORS",
+        "Response",
+        "make_response",
+        "headers"
+      ],
+      "expected_files": [
+        "flask_cors/decorator.py",
+        "flask/app.py",
+        "werkzeug/wrappers/response.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask_cors.auto_options_middleware",
+        "cors_raw_socket"
+      ],
+      "verification": {
+        "must_contain": [
+          "cors",
+          "response",
+          "header"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-004",
+      "title": "Flask CLI Command Hierarchy Inheritance from Click Group",
+      "category": "Cross-Repo Resolution",
+      "severity": "MEDIUM",
+      "real_world_context": "Multi-repo resolution: FlaskGroup in flask.cli subclasses click.Group and integrates with click.Context for CLI execution.",
+      "user_prompt": "Trace how FlaskGroup in flask.cli inherits from click.Group and uses click.Context to pass the application context to CLI commands.",
+      "target_symbols": [
+        "FlaskGroup",
+        "AppGroup",
+        "Group",
+        "Context",
+        "main"
+      ],
+      "expected_files": [
+        "flask/cli.py",
+        "click/core.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.argparse_wrapper",
+        "click.fast_cli_runner"
+      ],
+      "verification": {
+        "must_contain": [
+          "flask",
+          "click",
+          "group",
+          "context"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-005",
+      "title": "MarkupSafe Escape Acceleration in Jinja2 Node Compiler",
+      "category": "Cross-Repo Resolution",
+      "severity": "MEDIUM",
+      "real_world_context": "Multi-repo resolution: Jinja2 compiles template AST nodes directly calling markupsafe.escape for auto-escaping efficiency.",
+      "user_prompt": "Trace how Jinja2 CodeGenerator outputs Python bytecode/code calling markupsafe.escape and Markup for variable expression rendering.",
+      "target_symbols": [
+        "CodeGenerator",
+        "visit_Output",
+        "escape",
+        "Markup"
+      ],
+      "expected_files": [
+        "jinja2/compiler.py",
+        "markupsafe/__init__.py"
+      ],
+      "forbidden_hallucinations": [
+        "jinja2.c_escape_extension",
+        "html_fast_buffer"
+      ],
+      "verification": {
+        "must_contain": [
+          "escape",
+          "markup",
+          "generator"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-006",
+      "title": "Frontend Highcharts TypeScript Model Bridge to REST Backend",
+      "category": "Cross-Repo Resolution",
+      "severity": "MEDIUM",
+      "real_world_context": "Cross-boundary polyrepo resolution: Highcharts SeriesOptionsType and Chart interfaces interacting with JSON data payloads.",
+      "user_prompt": "Locate Chart and SeriesOptions interfaces in Highcharts and trace how chart options are initialized and merged.",
+      "target_symbols": [
+        "Chart",
+        "Options",
+        "series",
+        "render"
+      ],
+      "expected_files": [
+        "highcharts/Series.ts",
+        "highcharts/Chart.ts"
+      ],
+      "forbidden_hallucinations": [
+        "Highcharts.auto_connect_rest",
+        "highcharts_backend_adapter"
+      ],
+      "verification": {
+        "must_contain": [
+          "chart",
+          "series",
+          "options"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CONC-001",
+      "title": "Context Teardown Signal Leak in Generator/Streaming Response",
+      "category": "State Leaks & Concurrency",
+      "severity": "HIGH",
+      "real_world_context": "Flask RequestContext teardown leak: When a route returns a streaming generator, the request context must be preserved until the generator is closed, otherwise thread-local context pops prematurely.",
+      "user_prompt": "Trace how Flask handles streaming responses in wsgi_app. Follow RequestContext.push, pop, and auto_pop to understand when teardown_request callbacks are invoked for generators.",
+      "target_symbols": [
+        "RequestContext",
+        "push",
+        "pop",
+        "auto_pop",
+        "teardown_request",
+        "wsgi_app"
+      ],
+      "expected_files": [
+        "flask/ctx.py",
+        "flask/app.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.async_generator_context_fix",
+        "thread_leak_cleaner"
+      ],
+      "verification": {
+        "must_contain": [
+          "context",
+          "request",
+          "pop",
+          "push"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CONC-002",
+      "title": "Thread-Local Request Stack Pollution in Async Worker Tasks",
+      "category": "State Leaks & Concurrency",
+      "severity": "HIGH",
+      "real_world_context": "Werkzeug LocalStack / contextvars migration: Moving from threading.local to contextvars.ContextVar to prevent state bleeding across async greenlets/coroutines.",
+      "user_prompt": "Inspect how Flask and Werkzeug isolate request and application state per thread or context. Trace LocalStack, LocalProxy, and ContextVar implementations.",
+      "target_symbols": [
+        "LocalStack",
+        "LocalProxy",
+        "top",
+        "push",
+        "pop"
+      ],
+      "expected_files": [
+        "werkzeug/local.py",
+        "flask/globals.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.coroutine_thread_patch",
+        "isolated_thread_pool"
+      ],
+      "verification": {
+        "must_contain": [
+          "local",
+          "proxy",
+          "stack"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CONC-003",
+      "title": "Database Connection Pool Starvation in Concurrent Tasks",
+      "category": "State Leaks & Concurrency",
+      "severity": "HIGH",
+      "real_world_context": "Flask-SQLAlchemy scoped_session teardown: Ensuring database connections are returned to the engine pool at the end of each request to avoid pool starvation.",
+      "user_prompt": "Trace how Flask-SQLAlchemy integrates with Flask request teardown. Locate the teardown handler that calls db.session.remove() when requests finish.",
+      "target_symbols": [
+        "scoped_session",
+        "remove",
+        "teardown_appcontext",
+        "SQLAlchemy"
+      ],
+      "expected_files": [
+        "flask_sqlalchemy/extension.py",
+        "flask_sqlalchemy/session.py"
+      ],
+      "forbidden_hallucinations": [
+        "sqlalchemy.kill_idle_connections",
+        "pool_auto_drain"
+      ],
+      "verification": {
+        "must_contain": [
+          "session",
+          "sqlalchemy",
+          "teardown"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-001",
+      "title": "Anti-Hallucination Rejection of Deprecated request.is_xhr",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "MEDIUM",
+      "real_world_context": "Anti-hallucination test: LLMs often hallucinate request.is_xhr in Flask. It was removed in Flask 1.0 (X-Requested-With header check must be manual).",
+      "user_prompt": "How do I use request.is_xhr in Flask to detect if a request is AJAX?",
+      "target_symbols": [
+        "request",
+        "headers",
+        "Request"
+      ],
+      "expected_files": [
+        "flask/wrappers.py",
+        "werkzeug/wrappers/request.py"
+      ],
+      "forbidden_hallucinations": [
+        "request.is_xhr",
+        "def is_xhr(self)"
+      ],
+      "verification": {
+        "must_contain": [
+          "request",
+          "headers"
+        ],
+        "must_not_contain": [
+          "def is_xhr(self): return True"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1000
+      }
+    },
+    {
+      "id": "ANTI-002",
+      "title": "Anti-Hallucination Rejection of app.json_encoder",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "MEDIUM",
+      "real_world_context": "Anti-hallucination test: Flask 2.2+ replaced app.json_encoder with app.json provider architecture. LLMs frequently hallucinate custom JSONEncoder subclasses.",
+      "user_prompt": "How do I customize JSON serialization by subclassing app.json_encoder in Flask?",
+      "target_symbols": [
+        "json",
+        "DefaultJSONProvider",
+        "JSONProvider"
+      ],
+      "expected_files": [
+        "flask/json/provider.py",
+        "flask/app.py"
+      ],
+      "forbidden_hallucinations": [
+        "class CustomJSONEncoder(app.json_encoder)"
+      ],
+      "verification": {
+        "must_contain": [
+          "json",
+          "provider"
+        ],
+        "must_not_contain": [
+          "class CustomJSONEncoder(app.json_encoder)"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1000
+      }
+    },
+    {
+      "id": "ANTI-003",
+      "title": "Anti-Hallucination Rejection of Phantom Distributed Transaction Manager",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: Phantom symbol query verifying graph_fy emits a hard 'Target Symbol Not Found' guard rather than hallucinating distributed 2PC protocols.",
+      "user_prompt": "Trace the implementation of db.dist_transact_2pc() in Flask-SQLAlchemy for two-phase commit across microservices.",
+      "target_symbols": [],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "db.dist_transact_2pc",
+        "TwoPhaseCommitManager",
+        "prepare_transaction"
+      ],
+      "verification": {
+        "must_contain": [
+          "Target Symbol Not Found"
+        ],
+        "must_not_contain": [
+          "db.dist_transact_2pc"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 500
+      }
+    },
+    {
+      "id": "ANTI-004",
+      "title": "Anti-Hallucination Rejection of Fictional Zero-Knowledge Cryptographic Driver",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: Fictional query verifying graph_fy rejects nonexistent zero-knowledge proof engines in itsdangerous.",
+      "user_prompt": "Inspect the NonExistentZeroKnowledgeProofEngine implementation in itsdangerous.",
+      "target_symbols": [],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "NonExistentZeroKnowledgeProofEngine",
+        "zk_snark_verify"
+      ],
+      "verification": {
+        "must_contain": [
+          "Target Symbol Not Found"
+        ],
+        "must_not_contain": [
+          "NonExistentZeroKnowledgeProofEngine"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 500
+      }
+    },
+    {
+      "id": "ANTI-005",
+      "title": "Anti-Hallucination Rejection of Imagined Async Streaming Template Function",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "MEDIUM",
+      "real_world_context": "Anti-hallucination test: Phantom API function verifying graph_fy does not invent render_template_async_stream helper.",
+      "user_prompt": "Find def render_template_async_stream() in flask.templating.",
+      "target_symbols": [],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "def render_template_async_stream()"
+      ],
+      "verification": {
+        "must_contain": [
+          "Target Symbol Not Found"
+        ],
+        "must_not_contain": [
+          "def render_template_async_stream():"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 500
+      }
+    },
+    {
+      "id": "CIRC-001",
+      "title": "Circular Import Resolution between App Factory and Blueprints",
+      "category": "Circular Dependency & Decoupling",
+      "severity": "MEDIUM",
+      "real_world_context": "Common Flask architectural pitfall: app.py imports blueprint modules, while blueprint route files import 'from app import app' or 'db', causing ImportError during module loading.",
+      "user_prompt": "Trace how Flask Blueprint registration is designed to decouple route definitions from the application instance. Locate Blueprint.register and Flask.register_blueprint.",
+      "target_symbols": [
+        "Blueprint",
+        "register_blueprint",
+        "record",
+        "deferred"
+      ],
+      "expected_files": [
+        "flask/blueprints.py",
+        "flask/app.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.lazy_import_decorator",
+        "circular_patcher"
+      ],
+      "verification": {
+        "must_contain": [
+          "blueprint",
+          "register_blueprint",
+          "route"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CIRC-002",
+      "title": "God-Node Decoupling of Flask Application Class",
+      "category": "Circular Dependency & Decoupling",
+      "severity": "HIGH",
+      "real_world_context": "Refactoring god node: Flask class in flask/app.py has hundreds of methods and high fan-in/fan-out. Decoupling routing, templating, and config into mixins or sans-io classes.",
+      "user_prompt": "Inspect the architectural structure and god-node connections of the Flask application class. Trace its inheritance from SansIOApp and identify its primary subsystem hubs.",
+      "target_symbols": [
+        "Flask",
+        "App",
+        "SansIOApp",
+        "add_url_rule",
+        "endpoint"
+      ],
+      "expected_files": [
+        "flask/app.py",
+        "flask/sansio/app.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.monolithic_hub_proxy"
+      ],
+      "verification": {
+        "must_contain": [
+          "flask",
+          "app",
+          "sansio"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "CRITICAL",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CIRC-003",
+      "title": "Bidirectional Foreign Key Relationship Cycles in Models",
+      "category": "Circular Dependency & Decoupling",
+      "severity": "MEDIUM",
+      "real_world_context": "SQLAlchemy circular model relationship: Two models referencing each other with foreign keys require post_update=True or lazy evaluation to avoid circular dependency deadlocks.",
+      "user_prompt": "Trace how Flask-SQLAlchemy Model and relationship handle lazy evaluation and model registry mapping.",
+      "target_symbols": [
+        "Model",
+        "relationship",
+        "ForeignKey",
+        "metadata"
+      ],
+      "expected_files": [
+        "flask_sqlalchemy/model.py",
+        "flask_sqlalchemy/extension.py"
+      ],
+      "forbidden_hallucinations": [
+        "db.cycle_detector_hook"
+      ],
+      "verification": {
+        "must_contain": [
+          "model",
+          "relationship",
+          "sqlalchemy"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "PERF-001",
+      "title": "Unbounded Memory Growth on Dynamic Query Parameters in Cache",
+      "category": "Performance & Resource Leaks",
+      "severity": "HIGH",
+      "real_world_context": "Memory leak: Using functools.lru_cache(maxsize=None) or dictionary caches with un-normalized HTTP query parameter combinations leads to memory exhaustion.",
+      "user_prompt": "Audit caching utilities across Werkzeug and Jinja. Check LRUCache implementation in jinja2 and inspect how cache size limits and evictions are enforced.",
+      "target_symbols": [
+        "LRUCache",
+        "setdefault",
+        "get",
+        "copy"
+      ],
+      "expected_files": [
+        "jinja2/utils.py",
+        "werkzeug/utils.py"
+      ],
+      "forbidden_hallucinations": [
+        "jinja2.infinite_cache_dump",
+        "memleak_guard"
+      ],
+      "verification": {
+        "must_contain": [
+          "cache",
+          "lru",
+          "jinja"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "PERF-002",
+      "title": "N+1 Database Query Cascade in Relationship Lazy Loading",
+      "category": "Performance & Resource Leaks",
+      "severity": "MEDIUM",
+      "real_world_context": "ORM performance trap: Accessing related models in Jinja templates triggers N+1 SQL queries unless joinedload / selectinload is configured.",
+      "user_prompt": "Trace how Flask-SQLAlchemy models interact with template rendering and examine how queries are executed when pagination is applied.",
+      "target_symbols": [
+        "Pagination",
+        "paginate",
+        "items",
+        "query"
+      ],
+      "expected_files": [
+        "flask_sqlalchemy/pagination.py",
+        "flask_sqlalchemy/extension.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask_sqlalchemy.auto_eager_loader"
+      ],
+      "verification": {
+        "must_contain": [
+          "pagination",
+          "paginate",
+          "sqlalchemy"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "PERF-003",
+      "title": "File Descriptor Exhaustion from Unclosed File Streaming",
+      "category": "Performance & Resource Leaks",
+      "severity": "HIGH",
+      "real_world_context": "Resource leak: send_file without closing file pointer on connection abort leaves file descriptors open until GC, causing OS FD exhaustion under load.",
+      "user_prompt": "Trace file closing and response iterator wrapping in send_file and wrap_file in Werkzeug and Flask. Verify how wsgi.file_wrapper and close() callbacks are registered.",
+      "target_symbols": [
+        "send_file",
+        "wrap_file",
+        "FileWrapper",
+        "close"
+      ],
+      "expected_files": [
+        "werkzeug/wsgi.py",
+        "flask/helpers.py"
+      ],
+      "forbidden_hallucinations": [
+        "os.force_close_fd_pool"
+      ],
+      "verification": {
+        "must_contain": [
+          "send_file",
+          "file",
+          "wrapper"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "AUTH-001",
+      "title": "Remember-Me Token Generation and Timing-Safe Verification",
+      "category": "Auth & Session Cryptography",
+      "severity": "HIGH",
+      "real_world_context": "Authentication token security: Verifying tokens using constant-time comparison to prevent timing attacks, and enforcing timestamp expiry via itsdangerous.TimestampSigner.",
+      "user_prompt": "Trace how itsdangerous TimestampSigner signs tokens with timestamps and unsigns them with max_age validation. Identify sign, unsign, and signature verification logic.",
+      "target_symbols": [
+        "TimestampSigner",
+        "Signer",
+        "sign",
+        "unsign",
+        "validate"
+      ],
+      "expected_files": [
+        "itsdangerous/timed.py",
+        "itsdangerous/signer.py"
+      ],
+      "forbidden_hallucinations": [
+        "itsdangerous.jwt_decode",
+        "raw_timing_unsafe_equals"
+      ],
+      "verification": {
+        "must_contain": [
+          "signer",
+          "sign",
+          "unsign",
+          "timestamp"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "AUTH-002",
+      "title": "Session Salt Separation and HMAC Algorithm Downgrade Resistance",
+      "category": "Auth & Session Cryptography",
+      "severity": "MEDIUM",
+      "real_world_context": "Cryptographic hygiene: Using distinct salt values for cookie sessions vs remember-me tokens vs CSRF tokens to prevent cross-context token reuse attacks.",
+      "user_prompt": "Inspect salt parameter usage across itsdangerous URLSafeTimedSerializer and Flask SecureCookieSessionInterface. Verify how salt prefixes derive separate signing keys.",
+      "target_symbols": [
+        "salt",
+        "derive_key",
+        "digest_method",
+        "URLSafeTimedSerializer"
+      ],
+      "expected_files": [
+        "itsdangerous/signer.py",
+        "flask/sessions.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.universal_single_salt_pool"
+      ],
+      "verification": {
+        "must_contain": [
+          "salt",
+          "signer",
+          "session"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-008",
+      "title": "Werkzeug parse_options_header ReDoS & Boundary Handling (CVE-2023-25577)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "HIGH",
+      "real_world_context": "CVE-2023-25577: parse_options_header in werkzeug.http vulnerability where crafted HTTP Content-Type headers caused excessive CPU time.",
+      "user_prompt": "Audit werkzeug.http.parse_options_header for quadratic regex matching and boundary line parsing limits.",
+      "target_symbols": [
+        "parse_options_header",
+        "dump_options_header",
+        "unquote_header_value"
+      ],
+      "expected_files": [
+        "werkzeug/http.py",
+        "werkzeug/sansio/multipart.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.fast_c_header_parser"
+      ],
+      "verification": {
+        "must_contain": [
+          "parse",
+          "header",
+          "options"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-009",
+      "title": "Jinja2 Sandbox Attribute Access Escape via Cycler/Joiner (CVE-2019-10906)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "CRITICAL",
+      "real_world_context": "CVE-2019-10906 in Jinja2: SandboxedEnvironment sandbox escape via str.format or cycler/joiner attributes.",
+      "user_prompt": "Examine Jinja2 SandboxedEnvironment attribute safety checks on cycler, joiner, and format expressions to prevent sandbox escapes.",
+      "target_symbols": [
+        "SandboxedEnvironment",
+        "is_safe_attribute",
+        "cycler"
+      ],
+      "expected_files": [
+        "jinja2/sandbox.py"
+      ],
+      "forbidden_hallucinations": [
+        "jinja2.sandbox_firewall"
+      ],
+      "verification": {
+        "must_contain": [
+          "sandbox",
+          "attribute",
+          "environment"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-010",
+      "title": "Flask Session Secret Key Insecure Default Warning",
+      "category": "Security / CVE Blast Radius",
+      "severity": "HIGH",
+      "real_world_context": "Security hygiene in Flask: Using a default or hardcoded secret key allows attackers to forge session cookies.",
+      "user_prompt": "Trace Flask configuration initialization and inspect how a missing or default SECRET_KEY is detected in session signing.",
+      "target_symbols": [
+        "SECRET_KEY",
+        "open_session",
+        "config"
+      ],
+      "expected_files": [
+        "flask/sessions.py",
+        "flask/config.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.auto_secret_generator"
+      ],
+      "verification": {
+        "must_contain": [
+          "secret_key",
+          "session",
+          "config"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-011",
+      "title": "Click Shell Completion Script Shell Injection Hardening",
+      "category": "Security / CVE Blast Radius",
+      "severity": "MEDIUM",
+      "real_world_context": "Shell injection prevention in Click: Ensuring completion scripts safely quote choices and user inputs.",
+      "user_prompt": "Inspect Click shell completion script generation in click.shell_completion. Trace how command arguments and option names are escaped for bash/zsh.",
+      "target_symbols": [
+        "ShellComplete",
+        "BashComplete",
+        "get_completion_args"
+      ],
+      "expected_files": [
+        "click/shell_completion.py"
+      ],
+      "forbidden_hallucinations": [
+        "click.unsafe_eval_completion"
+      ],
+      "verification": {
+        "must_contain": [
+          "completion",
+          "shell",
+          "click"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-007",
+      "title": "Click 7 to 8 Migration: context_settings and shell_complete",
+      "category": "API Breaking Changes & Migration",
+      "severity": "MEDIUM",
+      "real_world_context": "Click 8.0 migration: autocompletion parameter replaced by shell_complete callback.",
+      "user_prompt": "Trace Click command invocation and parameter parsing. Find where autocompletion was deprecated in favor of shell_complete.",
+      "target_symbols": [
+        "Command",
+        "Context",
+        "shell_complete"
+      ],
+      "expected_files": [
+        "click/core.py"
+      ],
+      "forbidden_hallucinations": [
+        "click.v7_compat_completion"
+      ],
+      "verification": {
+        "must_contain": [
+          "command",
+          "context",
+          "click"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-008",
+      "title": "Werkzeug Removal of BaseRequest and BaseResponse Composability",
+      "category": "API Breaking Changes & Migration",
+      "severity": "MEDIUM",
+      "real_world_context": "Werkzeug 2.1+ removed BaseRequest and BaseResponse in favor of Request and Response mixins.",
+      "user_prompt": "Trace how Werkzeug Request and Response classes compose mixins from sansio and wrappers. Locate the replacement for BaseRequest.",
+      "target_symbols": [
+        "Request",
+        "Response",
+        "RequestStreamMixin"
+      ],
+      "expected_files": [
+        "werkzeug/wrappers/request.py",
+        "werkzeug/wrappers/response.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.BaseRequest"
+      ],
+      "verification": {
+        "must_contain": [
+          "request",
+          "response",
+          "werkzeug"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-009",
+      "title": "Flask-Login UserLoader and AnonymousUserMixin Attribute Handling",
+      "category": "API Breaking Changes & Migration",
+      "severity": "LOW",
+      "real_world_context": "Flask-Login API design: AnonymousUserMixin provides is_authenticated, is_active, is_anonymous properties.",
+      "user_prompt": "Trace how Flask-Login handles anonymous users. Locate AnonymousUserMixin and user_loader callback registration in LoginManager.",
+      "target_symbols": [
+        "LoginManager",
+        "user_loader",
+        "AnonymousUserMixin",
+        "is_authenticated"
+      ],
+      "expected_files": [
+        "flask_login/login_manager.py",
+        "flask_login/mixins.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask_login.anonymous_jwt"
+      ],
+      "verification": {
+        "must_contain": [
+          "login",
+          "user",
+          "anonymous"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-010",
+      "title": "SQLAlchemy DeclarativeBase Subclassing Migration in Model",
+      "category": "API Breaking Changes & Migration",
+      "severity": "MEDIUM",
+      "real_world_context": "SQLAlchemy 2.0 / Flask-SQLAlchemy 3.0: Model base subclassing DeclarativeBase rather than declarative_base() factory.",
+      "user_prompt": "Audit Flask-SQLAlchemy Model base class construction. Trace how declarative base and registry are bound to SQLAlchemy.",
+      "target_symbols": [
+        "SQLAlchemy",
+        "Model",
+        "DeclarativeBase"
+      ],
+      "expected_files": [
+        "flask_sqlalchemy/model.py",
+        "flask_sqlalchemy/extension.py"
+      ],
+      "forbidden_hallucinations": [
+        "sqlalchemy.raw_declarative_v1"
+      ],
+      "verification": {
+        "must_contain": [
+          "sqlalchemy",
+          "model",
+          "base"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-007",
+      "title": "Flask CLI Help Command Delegation to Click HelpFormatter",
+      "category": "Cross-Repo Resolution",
+      "severity": "LOW",
+      "real_world_context": "Multi-repo CLI integration: flask --help passes formatting options to click.HelpFormatter.",
+      "user_prompt": "Trace how flask --help delegates formatting to click.formatting.HelpFormatter and builds CLI option summaries.",
+      "target_symbols": [
+        "HelpFormatter",
+        "format_help",
+        "FlaskGroup"
+      ],
+      "expected_files": [
+        "flask/cli.py",
+        "click/formatting.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.custom_help_ansi"
+      ],
+      "verification": {
+        "must_contain": [
+          "help",
+          "formatter",
+          "click"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-008",
+      "title": "Werkzeug Routing MapAdapter Regex Compilation and Rule Matching",
+      "category": "Cross-Repo Resolution",
+      "severity": "HIGH",
+      "real_world_context": "Core WSGI dispatching: Werkzeug Map and MapAdapter compile URL Rules into regex patterns.",
+      "user_prompt": "Trace how Werkzeug Map and Rule compile URL patterns into regexes and dispatch incoming paths in MapAdapter.match.",
+      "target_symbols": [
+        "Map",
+        "Rule",
+        "MapAdapter",
+        "match",
+        "compile"
+      ],
+      "expected_files": [
+        "werkzeug/routing/map.py",
+        "werkzeug/routing/rules.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.fast_trie_router"
+      ],
+      "verification": {
+        "must_contain": [
+          "map",
+          "rule",
+          "routing"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-009",
+      "title": "Jinja2 Multi-Directory Template Loader Resolution",
+      "category": "Cross-Repo Resolution",
+      "severity": "MEDIUM",
+      "real_world_context": "Template loading pipeline: FileSystemLoader and ChoiceLoader searching paths across packages.",
+      "user_prompt": "Trace how Jinja2 FileSystemLoader and ChoiceLoader search multiple directory paths to resolve template inheritances.",
+      "target_symbols": [
+        "FileSystemLoader",
+        "ChoiceLoader",
+        "get_source"
+      ],
+      "expected_files": [
+        "jinja2/loaders.py"
+      ],
+      "forbidden_hallucinations": [
+        "jinja2.cloud_storage_loader"
+      ],
+      "verification": {
+        "must_contain": [
+          "loader",
+          "template",
+          "jinja"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CONC-004",
+      "title": "Background Task DB Session Leak Outside Request Lifecycle",
+      "category": "State Leaks & Concurrency",
+      "severity": "HIGH",
+      "real_world_context": "Connection pool leaks: Background tasks running without app_context or failing to close sessions.",
+      "user_prompt": "Trace how database sessions should be managed when executing tasks outside of an active HTTP request context in Flask-SQLAlchemy.",
+      "target_symbols": [
+        "app_context",
+        "session",
+        "SQLAlchemy"
+      ],
+      "expected_files": [
+        "flask_sqlalchemy/session.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask_sqlalchemy.auto_thread_cleaner"
+      ],
+      "verification": {
+        "must_contain": [
+          "session",
+          "context",
+          "sqlalchemy"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CONC-005",
+      "title": "CallbackDict Modification Tracking in Response Headers",
+      "category": "State Leaks & Concurrency",
+      "severity": "LOW",
+      "real_world_context": "Mutation tracking: CallbackDict invokes on_update to dirty cache headers upon modification.",
+      "user_prompt": "Trace how Werkzeug Response headers and cookie structures track mutation using CallbackDict and on_update callbacks.",
+      "target_symbols": [
+        "CallbackDict",
+        "Headers",
+        "Response"
+      ],
+      "expected_files": [
+        "werkzeug/datastructures/mixins.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.immutable_dict_patch"
+      ],
+      "verification": {
+        "must_contain": [
+          "callback",
+          "dict",
+          "headers"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-006",
+      "title": "Anti-Hallucination Rejection of Deprecated flask.ext Namespace",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "MEDIUM",
+      "real_world_context": "Anti-hallucination guard: Rejecting flask.ext which was removed in Flask 1.0.",
+      "user_prompt": "Find the definition of flask.ext.sqlalchemy in Flask codebase.",
+      "target_symbols": [],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "flask.ext.sqlalchemy"
+      ],
+      "verification": {
+        "must_contain": [
+          "Target Symbol Not Found"
+        ],
+        "must_not_contain": [
+          "flask.ext.sqlalchemy"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 500
+      }
+    },
+    {
+      "id": "ANTI-007",
+      "title": "Anti-Hallucination Rejection of Fictional Werkzeug AES-GCM Encryptor",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination guard: Werkzeug only provides password hashing, not symmetric AES encryption.",
+      "user_prompt": "Inspect def werkzeug.security.encrypt_aes_gcm() in werkzeug.",
+      "target_symbols": [],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "encrypt_aes_gcm"
+      ],
+      "verification": {
+        "must_contain": [
+          "Target Symbol Not Found"
+        ],
+        "must_not_contain": [
+          "encrypt_aes_gcm"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 500
+      }
+    },
+    {
+      "id": "ANTI-008",
+      "title": "Anti-Hallucination Rejection of Hallucinated SQLAlchemy Fast Batch Insert",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination guard: Rejecting imaginary batch insert helper.",
+      "user_prompt": "Trace db.session.fast_batch_insert_optimized() in Flask-SQLAlchemy.",
+      "target_symbols": [],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "fast_batch_insert_optimized"
+      ],
+      "verification": {
+        "must_contain": [
+          "Target Symbol Not Found"
+        ],
+        "must_not_contain": [
+          "fast_batch_insert_optimized"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 500
+      }
+    },
+    {
+      "id": "CIRC-004",
+      "title": "Decoupling Blueprint Error Handlers from App Global Error Handlers",
+      "category": "Circular Dependency & Decoupling",
+      "severity": "MEDIUM",
+      "real_world_context": "Exception hierarchy: Blueprint error handlers take precedence over application error handlers.",
+      "user_prompt": "Trace how error handlers registered on Blueprints are prioritized over application-wide error handlers in handle_user_exception.",
+      "target_symbols": [
+        "Blueprint",
+        "handle_user_exception",
+        "register_error_handler"
+      ],
+      "expected_files": [
+        "flask/app.py",
+        "flask/blueprints.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.error_cascade_proxy"
+      ],
+      "verification": {
+        "must_contain": [
+          "blueprint",
+          "error",
+          "handler"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "PERF-004",
+      "title": "Dynamic URL Rule Regex Compilation Caching",
+      "category": "Performance & Resource Leaks",
+      "severity": "LOW",
+      "real_world_context": "Regex caching in routing: Rules compile regexes once upon map binding.",
+      "user_prompt": "Trace how Werkzeug Rule regex compilation caches compiled patterns to avoid recompiling URL matching regexes.",
+      "target_symbols": [
+        "Rule",
+        "compile",
+        "Map"
+      ],
+      "expected_files": [
+        "werkzeug/routing/rules.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.dynamic_recompile_cache"
+      ],
+      "verification": {
+        "must_contain": [
+          "rule",
+          "compile",
+          "regex"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "TYPO-001",
+      "title": "Typo Resolution: request_contexxt to request_context",
+      "category": "Typo-Tolerance & Did-You-Mean",
+      "severity": "LOW",
+      "real_world_context": "Developer makes minor typo in AST symbol request_context.",
+      "user_prompt": "Inspect request_contexxt setup and tear down lifecycle.",
+      "target_symbols": [
+        "request_context",
+        "RequestContext"
+      ],
+      "expected_files": [
+        "flask/ctx.py",
+        "flask/app.py"
+      ],
+      "forbidden_hallucinations": [
+        "request_contexxt"
+      ],
+      "verification": {
+        "must_contain": [
+          "request_context",
+          "did you mean"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "TYPO-002",
+      "title": "Typo Resolution: before_requst to before_request",
+      "category": "Typo-Tolerance & Did-You-Mean",
+      "severity": "LOW",
+      "real_world_context": "Developer types before_requst instead of before_request hook.",
+      "user_prompt": "Where are before_requst hooks registered and dispatched in Flask?",
+      "target_symbols": [
+        "before_request",
+        "preprocess_request"
+      ],
+      "expected_files": [
+        "flask/app.py"
+      ],
+      "forbidden_hallucinations": [
+        "before_requst"
+      ],
+      "verification": {
+        "must_contain": [
+          "before_request",
+          "did you mean"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "TYPO-003",
+      "title": "Typo Resolution: save_sesion to save_session",
+      "category": "Typo-Tolerance & Did-You-Mean",
+      "severity": "LOW",
+      "real_world_context": "Developer types save_sesion when analyzing session persistence.",
+      "user_prompt": "Audit save_sesion execution flow and cookie header modification.",
+      "target_symbols": [
+        "save_session",
+        "open_session"
+      ],
+      "expected_files": [
+        "flask/sessions.py"
+      ],
+      "forbidden_hallucinations": [
+        "save_sesion"
+      ],
+      "verification": {
+        "must_contain": [
+          "save_session",
+          "did you mean"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "TYPO-004",
+      "title": "Typo Resolution: safe_joinn to safe_join",
+      "category": "Typo-Tolerance & Did-You-Mean",
+      "severity": "LOW",
+      "real_world_context": "Developer queries safe_joinn for path traversal mitigation.",
+      "user_prompt": "Trace safe_joinn implementation in Werkzeug security utilities.",
+      "target_symbols": [
+        "safe_join"
+      ],
+      "expected_files": [
+        "werkzeug/security.py",
+        "werkzeug/utils.py"
+      ],
+      "forbidden_hallucinations": [
+        "safe_joinn"
+      ],
+      "verification": {
+        "must_contain": [
+          "safe_join",
+          "did you mean"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "TYPO-005",
+      "title": "Typo Resolution: render_templat to render_template",
+      "category": "Typo-Tolerance & Did-You-Mean",
+      "severity": "LOW",
+      "real_world_context": "Typo in render_templat template rendering call.",
+      "user_prompt": "How does render_templat pass context into Jinja environment?",
+      "target_symbols": [
+        "render_template",
+        "render_template_string"
+      ],
+      "expected_files": [
+        "flask/templating.py"
+      ],
+      "forbidden_hallucinations": [
+        "render_templat"
+      ],
+      "verification": {
+        "must_contain": [
+          "render_template",
+          "did you mean"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "TYPO-006",
+      "title": "Typo Resolution: jsonifyy to jsonify",
+      "category": "Typo-Tolerance & Did-You-Mean",
+      "severity": "LOW",
+      "real_world_context": "Typo in jsonifyy JSON response serializer.",
+      "user_prompt": "Trace jsonifyy response construction and application/json MIME type setting.",
+      "target_symbols": [
+        "jsonify"
+      ],
+      "expected_files": [
+        "flask/json/__init__.py",
+        "flask/app.py"
+      ],
+      "forbidden_hallucinations": [
+        "jsonifyy"
+      ],
+      "verification": {
+        "must_contain": [
+          "jsonify",
+          "did you mean"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "TYPO-007",
+      "title": "Typo Resolution: dispatch_requst to dispatch_request",
+      "category": "Typo-Tolerance & Did-You-Mean",
+      "severity": "LOW",
+      "real_world_context": "Typo in dispatch_requst endpoint router.",
+      "user_prompt": "Audit dispatch_requst and view function invocation.",
+      "target_symbols": [
+        "dispatch_request"
+      ],
+      "expected_files": [
+        "flask/app.py",
+        "flask/views.py"
+      ],
+      "forbidden_hallucinations": [
+        "dispatch_requst"
+      ],
+      "verification": {
+        "must_contain": [
+          "dispatch_request",
+          "did you mean"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "TYPO-008",
+      "title": "Typo Resolution: url_quoot to url_quote",
+      "category": "Typo-Tolerance & Did-You-Mean",
+      "severity": "LOW",
+      "real_world_context": "Typo in url_quoot URL encoder.",
+      "user_prompt": "Trace url_quoot usage across routing and redirect generation.",
+      "target_symbols": [
+        "url_quote",
+        "quote"
+      ],
+      "expected_files": [
+        "werkzeug/urls.py"
+      ],
+      "forbidden_hallucinations": [
+        "url_quoot"
+      ],
+      "verification": {
+        "must_contain": [
+          "quote",
+          "did you mean"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-012",
+      "title": "Jinja2 xmlattr Filter Attribute Injection (CVE-2024-34064)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "CRITICAL",
+      "real_world_context": "CVE-2024-34064 in Jinja2: xmlattr filter failed to properly validate attribute names containing spaces or quotes, allowing attribute injection and XSS.",
+      "user_prompt": "Audit xmlattr filter implementation in Jinja2 filters. Trace how attribute keys and values are sanitized and escaped.",
+      "target_symbols": [
+        "xmlattr",
+        "escape",
+        "filters"
+      ],
+      "expected_files": [
+        "jinja2/filters.py"
+      ],
+      "forbidden_hallucinations": [
+        "jinja2.xmlattr_safety_shield"
+      ],
+      "verification": {
+        "must_contain": [
+          "xmlattr",
+          "filter",
+          "escape"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-013",
+      "title": "Werkzeug Windows Reserved Device Name DoS (CVE-2026-21860)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "HIGH",
+      "real_world_context": "CVE-2026-21860 in Werkzeug: safe_join did not block Windows reserved device names (CON, PRN, AUX, NUL, COM1-9), causing threads reading send_from_directory to hang indefinitely.",
+      "user_prompt": "Trace path validation in safe_join and send_from_directory to verify how reserved filenames are detected and rejected.",
+      "target_symbols": [
+        "safe_join",
+        "send_from_directory",
+        "send_file"
+      ],
+      "expected_files": [
+        "werkzeug/security.py",
+        "werkzeug/utils.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.windows_sandbox_filter"
+      ],
+      "verification": {
+        "must_contain": [
+          "safe_join",
+          "directory",
+          "path"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-014",
+      "title": "Werkzeug Multipart Parser High CPU Exhaustion (CVE-2023-46136)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "HIGH",
+      "real_world_context": "CVE-2023-46136: Crafted multipart/form-data payload with specific boundary prefixes caused exponential buffer re-evaluation and CPU starvation.",
+      "user_prompt": "Audit form-data parser in parse_multipart_data and MultiPartParser buffer scanning logic.",
+      "target_symbols": [
+        "parse_multipart_data",
+        "MultiPartParser",
+        "parse_form_data"
+      ],
+      "expected_files": [
+        "werkzeug/formparser.py",
+        "werkzeug/sansio/multipart.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.multipart_ddos_interceptor"
+      ],
+      "verification": {
+        "must_contain": [
+          "multipart",
+          "parser",
+          "form"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-015",
+      "title": "Urllib3 Cross-Origin Redirect Cookie Leakage (CVE-2023-45803)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "CRITICAL",
+      "real_world_context": "CVE-2023-45803 in urllib3: HTTP client did not strip Cookie headers when redirected to cross-origin or insecure HTTP targets.",
+      "user_prompt": "Trace redirect handling in HTTPConnectionPool and verify if Cookie header is stripped upon origin mismatch.",
+      "target_symbols": [
+        "HTTPConnectionPool",
+        "PoolManager",
+        "urlopen"
+      ],
+      "expected_files": [
+        "urllib3/poolmanager.py",
+        "urllib3/connectionpool.py"
+      ],
+      "forbidden_hallucinations": [
+        "urllib3.cookie_stealth_guard"
+      ],
+      "verification": {
+        "must_contain": [
+          "pool",
+          "redirect",
+          "connection"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-016",
+      "title": "HTTP Header Parsing Regular Expression Denial of Service (CVE-2023-25577)",
+      "category": "Security / CVE Blast Radius",
+      "severity": "MEDIUM",
+      "real_world_context": "CVE-2023-25577 in Werkzeug: High memory and CPU consumption during parsing of heavily nested or chained HTTP headers.",
+      "user_prompt": "Inspect parse_options_header and HTTP header parsing regular expressions for catastrophic backtracking vulnerabilities.",
+      "target_symbols": [
+        "parse_options_header",
+        "Headers"
+      ],
+      "expected_files": [
+        "werkzeug/http.py",
+        "werkzeug/datastructures/headers.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.safe_header_regex_compiler"
+      ],
+      "verification": {
+        "must_contain": [
+          "header",
+          "parse",
+          "http"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MED",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-011",
+      "title": "Pydantic V1 to V2 Validator Migration",
+      "category": "API Breaking Changes & Migration",
+      "severity": "MEDIUM",
+      "real_world_context": "Pydantic V2 deprecated @validator and .dict() in favor of @field_validator and .model_dump().",
+      "user_prompt": "Trace model validation dispatch and identify callers relying on V1 validator signatures.",
+      "target_symbols": [
+        "BaseModel",
+        "field_validator",
+        "model_validate"
+      ],
+      "expected_files": [
+        "pydantic/main.py"
+      ],
+      "forbidden_hallucinations": [
+        "pydantic.auto_transpile_validators"
+      ],
+      "verification": {
+        "must_contain": [
+          "model",
+          "validate"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MED",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-012",
+      "title": "SQLAlchemy 1.4 to 2.0 Select Statement Transition",
+      "category": "API Breaking Changes & Migration",
+      "severity": "HIGH",
+      "real_world_context": "SQLAlchemy 2.0 removed Query.get() and Query.filter() chaining in favor of session.execute(select(...)).",
+      "user_prompt": "Trace database querying interfaces from session.execute to select query compilation.",
+      "target_symbols": [
+        "Session",
+        "execute",
+        "select"
+      ],
+      "expected_files": [
+        "sqlalchemy/orm/session.py"
+      ],
+      "forbidden_hallucinations": [
+        "sqlalchemy.legacy_query_bridge_auto_wrap"
+      ],
+      "verification": {
+        "must_contain": [
+          "session",
+          "execute"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-013",
+      "title": "Werkzeug 3.0 Removal of Deprecated werkzeug.urls Primitives",
+      "category": "API Breaking Changes & Migration",
+      "severity": "HIGH",
+      "real_world_context": "Werkzeug 3.0 removed werkzeug.urls.url_quote, url_decode, and url_encode in favor of urllib.parse.",
+      "user_prompt": "Trace all imports and invocations of werkzeug.urls and find downstream callers in routing.",
+      "target_symbols": [
+        "url_quote",
+        "url_decode",
+        "url_encode"
+      ],
+      "expected_files": [
+        "werkzeug/urls.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.urls_shim_layer"
+      ],
+      "verification": {
+        "must_contain": [
+          "urls",
+          "quote"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIG-014",
+      "title": "Click 8 Shell Completion Context Protocol Refactor",
+      "category": "API Breaking Changes & Migration",
+      "severity": "MEDIUM",
+      "real_world_context": "Click 8 replaced get_bash_completion with shell_complete protocol across Command and ParamType.",
+      "user_prompt": "Trace CLI completion discovery and param autocompletion hooks across Command and Option.",
+      "target_symbols": [
+        "Command",
+        "shell_complete",
+        "Context"
+      ],
+      "expected_files": [
+        "click/core.py",
+        "click/shell_completion.py"
+      ],
+      "forbidden_hallucinations": [
+        "click.auto_autocomplete_magic"
+      ],
+      "verification": {
+        "must_contain": [
+          "command",
+          "context"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MED",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-010",
+      "title": "Flask-Migrate and Alembic Config Migration Tree Resolution",
+      "category": "Cross-Repo Resolution",
+      "severity": "HIGH",
+      "real_world_context": "Flask-Migrate binds Flask database models to Alembic migration environment via Config and script directory.",
+      "user_prompt": "Trace how Flask-Migrate configures Alembic command runner and hooks into Flask CLI.",
+      "target_symbols": [
+        "Migrate",
+        "upgrade",
+        "migrate"
+      ],
+      "expected_files": [
+        "flask_migrate/__init__.py",
+        "alembic/command.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask_migrate.auto_schema_teleport"
+      ],
+      "verification": {
+        "must_contain": [
+          "migrate",
+          "config"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-011",
+      "title": "Flask-Login and ItsDangerous Timestamped Token Signer Contract",
+      "category": "Cross-Repo Resolution",
+      "severity": "HIGH",
+      "real_world_context": "Flask-Login remember cookie security depends on ItsDangerous URLSafeTimedSerializer for tamper-proofing.",
+      "user_prompt": "Audit how login_user generates remember me tokens and validates expiration timestamps.",
+      "target_symbols": [
+        "login_user",
+        "URLSafeTimedSerializer",
+        "remember_cookie"
+      ],
+      "expected_files": [
+        "flask_login/utils.py",
+        "itsdangerous/url_safe.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask_login.quantum_remember_key"
+      ],
+      "verification": {
+        "must_contain": [
+          "login",
+          "user",
+          "cookie"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CONC-006",
+      "title": "Streaming Response Teardown Context Leak",
+      "category": "State Leaks & Concurrency",
+      "severity": "CRITICAL",
+      "real_world_context": "When streaming responses via generator views in Flask, context teardown is deferred until generator consumption finishes.",
+      "user_prompt": "Trace generator response wrapping in wsgi_app and verify when teardown_request callbacks are invoked.",
+      "target_symbols": [
+        "wsgi_app",
+        "response",
+        "teardown_request"
+      ],
+      "expected_files": [
+        "flask/app.py",
+        "flask/ctx.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.auto_vacuum_generator_context"
+      ],
+      "verification": {
+        "must_contain": [
+          "response",
+          "teardown",
+          "request"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CONC-007",
+      "title": "copy_current_request_context Thread Pool Leaks",
+      "category": "State Leaks & Concurrency",
+      "severity": "HIGH",
+      "real_world_context": "Dispatching work to ThreadPoolExecutor using copy_current_request_context can leak contextvars if threads are recycled.",
+      "user_prompt": "Audit copy_current_request_context implementation and verify how RequestContext is pushed and popped inside child threads.",
+      "target_symbols": [
+        "copy_current_request_context",
+        "RequestContext",
+        "push",
+        "pop"
+      ],
+      "expected_files": [
+        "flask/ctx.py"
+      ],
+      "forbidden_hallucinations": [
+        "flask.thread_pool_leak_auto_drain"
+      ],
+      "verification": {
+        "must_contain": [
+          "context",
+          "request",
+          "copy"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "PERF-005",
+      "title": "Unhashable Object Memoization Memory Leak",
+      "category": "Performance & Resource Leaks",
+      "severity": "HIGH",
+      "real_world_context": "Caching functions with complex dict or query args using custom lru_cache implementations can cause unbounded heap growth.",
+      "user_prompt": "Audit cache key generation in memoize decorators and verify maximum cache size limits.",
+      "target_symbols": [
+        "memoize",
+        "lru_cache",
+        "cache"
+      ],
+      "expected_files": [
+        "werkzeug/utils.py"
+      ],
+      "forbidden_hallucinations": [
+        "werkzeug.infinite_ram_compressor"
+      ],
+      "verification": {
+        "must_contain": [
+          "cache"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MED",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "PERF-006",
+      "title": "N+1 Relationship Eager Loading in Declarative Models",
+      "category": "Performance & Resource Leaks",
+      "severity": "HIGH",
+      "real_world_context": "Lazy loading relationships across collections triggers N+1 SQL queries if joinedload or selectinload is omitted.",
+      "user_prompt": "Trace relationship loader strategies and verify eager loading options in query plans.",
+      "target_symbols": [
+        "relationship",
+        "joinedload",
+        "selectinload"
+      ],
+      "expected_files": [
+        "sqlalchemy/orm/relationships.py"
+      ],
+      "forbidden_hallucinations": [
+        "sqlalchemy.n_plus_one_auto_magician"
+      ],
+      "verification": {
+        "must_contain": [
+          "relationship"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-009",
+      "title": "Phantom: FastAPI Auto Database Sync",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: FastAPI has no built-in auto_database_sync mechanism.",
+      "user_prompt": "Audit FastAPI.auto_database_sync and trace how migrations are automatically triggered on server startup.",
+      "target_symbols": [
+        "FastAPI.auto_database_sync"
+      ],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "FastAPI.auto_database_sync",
+        "auto_database_sync"
+      ],
+      "verification": {
+        "must_contain": [],
+        "must_not_contain": [
+          "auto_database_sync",
+          "QuantumLedger"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-010",
+      "title": "Phantom: Flask Quantum Crypto Verifier",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: Flask does not have a quantum crypto verifier module.",
+      "user_prompt": "Trace quantum_crypto_verifier and post-quantum session signature verification.",
+      "target_symbols": [
+        "Flask.quantum_crypto_verifier"
+      ],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "quantum_crypto_verifier"
+      ],
+      "verification": {
+        "must_contain": [],
+        "must_not_contain": [
+          "quantum_crypto_verifier",
+          "QuantumLedger"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-011",
+      "title": "Phantom: SQLAlchemy AI Query Optimizer",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: SQLAlchemy does not have an AI query optimizer.",
+      "user_prompt": "Inspect ai_query_optimizer execution in SQLAlchemy compilation engine.",
+      "target_symbols": [
+        "SQLAlchemy.ai_query_optimizer"
+      ],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "ai_query_optimizer"
+      ],
+      "verification": {
+        "must_contain": [],
+        "must_not_contain": [
+          "ai_query_optimizer",
+          "QuantumLedger"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-012",
+      "title": "Phantom: Celery Neural Task Scheduler",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: Celery has no neural task scheduler.",
+      "user_prompt": "Audit neural_task_scheduler and worker queue priority optimization in Celery.",
+      "target_symbols": [
+        "Celery.neural_task_scheduler"
+      ],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "neural_task_scheduler"
+      ],
+      "verification": {
+        "must_contain": [],
+        "must_not_contain": [
+          "neural_task_scheduler",
+          "QuantumLedger"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-013",
+      "title": "Phantom: Jinja2 Distributed Mesh Template Cache",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: Jinja2 does not contain a distributed mesh template cache.",
+      "user_prompt": "Trace distributed_mesh_template_cache consensus synchronization across cluster nodes.",
+      "target_symbols": [
+        "Jinja2.distributed_mesh_template_cache"
+      ],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "distributed_mesh_template_cache"
+      ],
+      "verification": {
+        "must_contain": [],
+        "must_not_contain": [
+          "distributed_mesh_template_cache",
+          "QuantumLedger"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ARCH-001",
+      "title": "Distributed Tracing Context Propagation across ASGI/WSGI Middleware",
+      "category": "Architecture & Distributed Tracing",
+      "severity": "HIGH",
+      "real_world_context": "W3C traceparent and tracestate header parsing and injection into OpenTelemetry span context across asynchronous middleware boundaries.",
+      "user_prompt": "Trace how incoming W3C traceparent HTTP headers are extracted by ASGI middleware and injected into downstream task execution contexts.",
+      "target_symbols": [
+        "traceparent",
+        "tracestate",
+        "middleware",
+        "span_context",
+        "dispatch"
+      ],
+      "expected_files": [
+        "middleware/tracing.py",
+        "core/context.py",
+        "dispatch/router.py"
+      ],
+      "forbidden_hallucinations": [
+        "fastapi.auto_opentelemetry_bridge",
+        "otel.magic_span_injector"
+      ],
+      "verification": {
+        "must_contain": [
+          "middleware",
+          "trace",
+          "context"
+        ],
+        "must_not_contain": [
+          "QuantumLedger",
+          "auto_opentelemetry_bridge"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ARCH-002",
+      "title": "Event-Driven Dead Letter Queue (DLQ) Envelope and Retry Routing",
+      "category": "Architecture & Distributed Tracing",
+      "severity": "HIGH",
+      "real_world_context": "Message broker retry exhaustion: tracking how unhandled poison pills in message handlers are wrapped in DLQ metadata and forwarded to dead-letter exchange.",
+      "user_prompt": "Audit poison pill exception handling in consumer message dispatcher to verify dead-letter queue envelope serialization and exponential backoff retry counter.",
+      "target_symbols": [
+        "DeadLetterQueue",
+        "retry_count",
+        "publish_to_dlq",
+        "MessageConsumer"
+      ],
+      "expected_files": [
+        "queue/consumer.py",
+        "queue/dlq.py",
+        "queue/retry.py"
+      ],
+      "forbidden_hallucinations": [
+        "celery.auto_teleport_dlq",
+        "rabbit.quantum_broker"
+      ],
+      "verification": {
+        "must_contain": [
+          "queue",
+          "retry",
+          "message"
+        ],
+        "must_not_contain": [
+          "auto_teleport_dlq",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ARCH-003",
+      "title": "Graceful Shutdown Lifecycle and Active Request Draining",
+      "category": "Architecture & Distributed Tracing",
+      "severity": "CRITICAL",
+      "real_world_context": "SIGTERM handler coordination: stopping new HTTP listener acceptance while waiting for in-flight requests and background drain timers to finish before process termination.",
+      "user_prompt": "Inspect graceful shutdown handler on SIGTERM signal. Verify whether active requests are drained within the timeout grace period before cancelling background workers.",
+      "target_symbols": [
+        "graceful_shutdown",
+        "active_requests",
+        "sigterm_handler",
+        "drain_connections"
+      ],
+      "expected_files": [
+        "server/lifecycle.py",
+        "server/worker.py",
+        "server/signal.py"
+      ],
+      "forbidden_hallucinations": [
+        "uvicorn.force_instant_freeze",
+        "process.teleport_memory"
+      ],
+      "verification": {
+        "must_contain": [
+          "shutdown",
+          "worker",
+          "signal"
+        ],
+        "must_not_contain": [
+          "force_instant_freeze",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "CRITICAL",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CONC-008",
+      "title": "AsyncIO Event Loop Blocking via Synchronous File I/O in Async Route",
+      "category": "State Leaks & Concurrency",
+      "severity": "HIGH",
+      "real_world_context": "Synchronous open() and read() calls inside async route handlers block the main uvloop thread, causing latency spikes and dropped WebSocket heartbeats.",
+      "user_prompt": "Identify blocking synchronous file operations inside async request handlers and refactor to use run_in_executor or aiofiles.",
+      "target_symbols": [
+        "async_handler",
+        "open",
+        "run_in_executor",
+        "event_loop"
+      ],
+      "expected_files": [
+        "api/handlers.py",
+        "utils/file_io.py"
+      ],
+      "forbidden_hallucinations": [
+        "asyncio.auto_magical_nonblocking_open",
+        "uvloop.unblock_sync_calls"
+      ],
+      "verification": {
+        "must_contain": [
+          "async",
+          "handler",
+          "file"
+        ],
+        "must_not_contain": [
+          "auto_magical_nonblocking_open",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CONC-009",
+      "title": "Async Connection Pool Exhaustion from Unclosed Streaming Generator",
+      "category": "State Leaks & Concurrency",
+      "severity": "CRITICAL",
+      "real_world_context": "Server-Sent Events (SSE) stream disconnected early by client: missing try/finally or __aexit__ on DB cursor acquisition exhausts database connection pool.",
+      "user_prompt": "Audit SSE streaming response generator for database connection leak when client terminates TCP connection prematurely before generator exhausts.",
+      "target_symbols": [
+        "acquire_connection",
+        "stream_events",
+        "release_connection",
+        "StreamingResponse"
+      ],
+      "expected_files": [
+        "api/sse.py",
+        "db/pool.py",
+        "api/response.py"
+      ],
+      "forbidden_hallucinations": [
+        "postgres.auto_reap_abandoned_clients",
+        "sse.magic_close_guard"
+      ],
+      "verification": {
+        "must_contain": [
+          "stream",
+          "connection",
+          "response"
+        ],
+        "must_not_contain": [
+          "auto_reap_abandoned_clients",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "CRITICAL",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CONC-010",
+      "title": "Thread-Unsafe Mutable Default Argument Cross-Request Corruption",
+      "category": "State Leaks & Concurrency",
+      "severity": "HIGH",
+      "real_world_context": "Mutable default arguments (def process(items=[])) shared across threads in multithreaded web server causing data leakage across concurrent user requests.",
+      "user_prompt": "Scan for mutable default arguments in request payload processing and filter classes that bleed state across concurrent requests.",
+      "target_symbols": [
+        "process_payload",
+        "default_options",
+        "request_state"
+      ],
+      "expected_files": [
+        "core/payload.py",
+        "core/parser.py"
+      ],
+      "forbidden_hallucinations": [
+        "python.auto_freeze_defaults",
+        "threading.memory_barrier_dict"
+      ],
+      "verification": {
+        "must_contain": [
+          "payload",
+          "request",
+          "parser"
+        ],
+        "must_not_contain": [
+          "auto_freeze_defaults",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-017",
+      "title": "SSRF in Webhook Dispatcher via DNS Rebinding and Metadata IP Bypass",
+      "category": "Security / CVE Blast Radius",
+      "severity": "CRITICAL",
+      "real_world_context": "Outbound webhook URL dispatcher parses IP once at validation, but DNS rebinding resolves to 169.254.169.254 on connect, exposing cloud metadata tokens.",
+      "user_prompt": "Audit outbound webhook dispatcher to prevent SSRF and DNS rebinding attacks against 169.254.169.254 and RFC 1918 internal subnets.",
+      "target_symbols": [
+        "dispatch_webhook",
+        "validate_url",
+        "resolve_ip",
+        "is_private_ip"
+      ],
+      "expected_files": [
+        "webhooks/dispatcher.py",
+        "webhooks/validator.py",
+        "security/ip.py"
+      ],
+      "forbidden_hallucinations": [
+        "httpx.quantum_anti_ssrf_layer",
+        "socket.block_all_bad_ips"
+      ],
+      "verification": {
+        "must_contain": [
+          "webhook",
+          "dispatcher",
+          "url"
+        ],
+        "must_not_contain": [
+          "quantum_anti_ssrf_layer",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "CRITICAL",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-018",
+      "title": "OAuth2 PKCE Code Verifier Hash Truncation and State Parameter Replay",
+      "category": "Security / CVE Blast Radius",
+      "severity": "CRITICAL",
+      "real_world_context": "OAuth 2.0 Authorization Code Flow with PKCE: missing timing-safe comparison or truncation of code_challenge verification enables code injection.",
+      "user_prompt": "Verify OAuth2 PKCE code_verifier SHA-256 validation in token exchange endpoint and check state parameter one-time-use nonce enforcement.",
+      "target_symbols": [
+        "verify_code_challenge",
+        "exchange_token",
+        "validate_state",
+        "OAuth2Provider"
+      ],
+      "expected_files": [
+        "auth/oauth2.py",
+        "auth/pkce.py",
+        "auth/tokens.py"
+      ],
+      "forbidden_hallucinations": [
+        "oauth2.magic_single_use_validator",
+        "jwt.quantum_sign"
+      ],
+      "verification": {
+        "must_contain": [
+          "oauth",
+          "token",
+          "auth"
+        ],
+        "must_not_contain": [
+          "magic_single_use_validator",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-019",
+      "title": "Timing Side-Channel Attack in HMAC Token Verification",
+      "category": "Security / CVE Blast Radius",
+      "severity": "HIGH",
+      "real_world_context": "Using standard string equality (==) instead of hmac.compare_digest for API key or webhook signature validation allows byte-by-byte timing attacks.",
+      "user_prompt": "Audit cryptographic signature verification in API authentication middleware to replace non-constant-time equality checks with hmac.compare_digest.",
+      "target_symbols": [
+        "verify_signature",
+        "hmac_sha256",
+        "authenticate_request"
+      ],
+      "expected_files": [
+        "security/crypto.py",
+        "auth/middleware.py",
+        "auth/signatures.py"
+      ],
+      "forbidden_hallucinations": [
+        "crypto.auto_constant_time_equals",
+        "secrets.quantum_compare"
+      ],
+      "verification": {
+        "must_contain": [
+          "signature",
+          "crypto",
+          "auth"
+        ],
+        "must_not_contain": [
+          "auto_constant_time_equals",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "SEC-020",
+      "title": "SQL Injection / ORM Bypass via Raw Order-By Clause Parameterization",
+      "category": "Security / CVE Blast Radius",
+      "severity": "CRITICAL",
+      "real_world_context": "Dynamic query builder accepts user-supplied sort column directly in order_by(text(sort_col)), bypassing ORM parameter escaping and enabling boolean-based SQLi.",
+      "user_prompt": "Inspect dynamic sorting logic in API listing pagination endpoint for raw SQL clause interpolation in order_by clauses.",
+      "target_symbols": [
+        "apply_sorting",
+        "build_query",
+        "paginate",
+        "text"
+      ],
+      "expected_files": [
+        "db/query.py",
+        "api/pagination.py",
+        "db/sorting.py"
+      ],
+      "forbidden_hallucinations": [
+        "sqlalchemy.auto_sanitize_raw_text",
+        "sql.magic_sql_shield"
+      ],
+      "verification": {
+        "must_contain": [
+          "query",
+          "pagination",
+          "sort"
+        ],
+        "must_not_contain": [
+          "auto_sanitize_raw_text",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "CRITICAL",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIGR-015",
+      "title": "Pydantic V1 @validator to V2 @field_validator Mode Parameter Migration",
+      "category": "API Breaking Changes & Migration",
+      "severity": "MEDIUM",
+      "real_world_context": "Pydantic V2 deprecated @validator(pre=True) in favor of @field_validator(..., mode=\"before\") with ValidationInfo context parameter.",
+      "user_prompt": "Migrate legacy Pydantic V1 root_validator and field validator decorators to Pydantic V2 @field_validator and @model_validator syntax.",
+      "target_symbols": [
+        "field_validator",
+        "model_validator",
+        "ValidationInfo",
+        "BaseModel"
+      ],
+      "expected_files": [
+        "schemas/user.py",
+        "schemas/base.py",
+        "schemas/orders.py"
+      ],
+      "forbidden_hallucinations": [
+        "pydantic.auto_transpile_v1_to_v2",
+        "pydantic.legacy_bridge"
+      ],
+      "verification": {
+        "must_contain": [
+          "model",
+          "validator",
+          "base"
+        ],
+        "must_not_contain": [
+          "auto_transpile_v1_to_v2",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIGR-016",
+      "title": "SQLAlchemy 2.0 Implicit Autocommit Removal in Session Context",
+      "category": "API Breaking Changes & Migration",
+      "severity": "HIGH",
+      "real_world_context": "SQLAlchemy 2.0 removed implicit autocommit on raw connection execution, requiring explicit session.begin() or connection.commit() blocks.",
+      "user_prompt": "Refactor database transaction execution blocks and connection commit handling in transaction processing.",
+      "target_symbols": [
+        "sessionmaker",
+        "begin",
+        "commit",
+        "execute",
+        "select"
+      ],
+      "expected_files": [
+        "db/session.py",
+        "db/transaction.py",
+        "db/engine.py"
+      ],
+      "forbidden_hallucinations": [
+        "sqlalchemy.restore_implicit_autocommit",
+        "db.magic_commit_proxy"
+      ],
+      "verification": {
+        "must_contain": [
+          "transaction",
+          "commit"
+        ],
+        "must_not_contain": [
+          "restore_implicit_autocommit",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "MIGR-017",
+      "title": "HTTPX 0.24+ Removal of Deprecated app Parameter in ASGITransport",
+      "category": "API Breaking Changes & Migration",
+      "severity": "LOW",
+      "real_world_context": "HTTPX test client removed httpx.AsyncClient(app=app) in favor of explicit transport=ASGITransport(app=app).",
+      "user_prompt": "Audit async HTTP client test fixtures for deprecated app parameter and migrate to httpx.ASGITransport(app=app).",
+      "target_symbols": [
+        "AsyncClient",
+        "ASGITransport",
+        "test_client_fixture"
+      ],
+      "expected_files": [
+        "tests/conftest.py",
+        "tests/test_api.py"
+      ],
+      "forbidden_hallucinations": [
+        "httpx.auto_compat_app_wrapper",
+        "test.magic_transport"
+      ],
+      "verification": {
+        "must_contain": [
+          "client",
+          "test",
+          "async"
+        ],
+        "must_not_contain": [
+          "auto_compat_app_wrapper",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-012",
+      "title": "API Gateway to Payment Microservice gRPC Field Type Contract Drift",
+      "category": "Cross-Repo Resolution",
+      "severity": "CRITICAL",
+      "real_world_context": "Cross-repo schema contract breaking change: payment protobuf stub changed amount_cents from int64 to string representation, breaking uncompiled API gateway callers.",
+      "user_prompt": "Trace cross-repository gRPC client stub usage in API gateway and verify message field type compatibility with payment service protobuf definition.",
+      "target_symbols": [
+        "PaymentClient",
+        "ProcessPaymentRequest",
+        "amount_cents",
+        "channel"
+      ],
+      "expected_files": [
+        "gateway/clients/payment.py",
+        "protos/payment_pb2.py",
+        "services/payment.py"
+      ],
+      "forbidden_hallucinations": [
+        "grpc.auto_coercion_layer",
+        "protobuf.quantum_backward_compat"
+      ],
+      "verification": {
+        "must_contain": [
+          "client",
+          "payment",
+          "request"
+        ],
+        "must_not_contain": [
+          "auto_coercion_layer",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "CRITICAL",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "CROSS-013",
+      "title": "Distributed Cache Invalidation Race between Redis PubSub and L1 Cache",
+      "category": "Cross-Repo Resolution",
+      "severity": "HIGH",
+      "real_world_context": "Multi-tier cache invalidation: when database writes occur, a broadcast to Redis PubSub must invalidate in-memory L1 cache on all app server replicas before query response.",
+      "user_prompt": "Trace cache eviction lifecycle across local LRU memory cache and distributed Redis invalidation pubsub channel.",
+      "target_symbols": [
+        "invalidate_key",
+        "publish_invalidation",
+        "on_cache_message",
+        "L1Cache"
+      ],
+      "expected_files": [
+        "cache/l1.py",
+        "cache/redis_pubsub.py",
+        "cache/manager.py"
+      ],
+      "forbidden_hallucinations": [
+        "redis.atomic_distributed_l1_sync",
+        "cache.quantum_flush"
+      ],
+      "verification": {
+        "must_contain": [
+          "cache",
+          "redis",
+          "invalidation"
+        ],
+        "must_not_contain": [
+          "atomic_distributed_l1_sync",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "PERF-007",
+      "title": "Circular Reference Memory Leak in EventEmitter Listener Closures",
+      "category": "Performance & Resource Leaks",
+      "severity": "HIGH",
+      "real_world_context": "Event listener closure retains reference to parent controller while controller holds reference to event bus, preventing garbage collection on route completion.",
+      "user_prompt": "Trace event emitter listener registration in request lifecycle handlers and audit for cyclic reference leaks preventing garbage collection.",
+      "target_symbols": [
+        "on_event",
+        "remove_listener",
+        "EventEmitter",
+        "weakref"
+      ],
+      "expected_files": [
+        "events/emitter.py",
+        "events/handlers.py",
+        "core/controller.py"
+      ],
+      "forbidden_hallucinations": [
+        "gc.auto_break_cyclic_closures",
+        "events.magic_weak_bus"
+      ],
+      "verification": {
+        "must_contain": [
+          "event",
+          "listener",
+          "emitter"
+        ],
+        "must_not_contain": [
+          "auto_break_cyclic_closures",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "PERF-008",
+      "title": "Catastrophic Regex Backtracking (ReDoS) in Semantic Version Validator",
+      "category": "Performance & Resource Leaks",
+      "severity": "MEDIUM",
+      "real_world_context": "Complex nested quantifiers ((a+)+) in semver regex parser cause exponential CPU exhaustion when supplied with malformed 200-character input strings.",
+      "user_prompt": "Audit version string regex validation rules for catastrophic backtracking vulnerabilities under adversarial payload inputs.",
+      "target_symbols": [
+        "SEMVER_REGEX",
+        "validate_version",
+        "match",
+        "compile"
+      ],
+      "expected_files": [
+        "utils/semver.py",
+        "validators/package.py"
+      ],
+      "forbidden_hallucinations": [
+        "re.auto_linear_time_switch",
+        "regex.quantum_redos_guard"
+      ],
+      "verification": {
+        "must_contain": [
+          "version",
+          "regex",
+          "validate"
+        ],
+        "must_not_contain": [
+          "auto_linear_time_switch",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-014",
+      "title": "Phantom: FastAPI Dynamic Scope Validator",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: fastapi.security does not contain OAuth2DynamicScopeValidator.",
+      "user_prompt": "Inspect OAuth2DynamicScopeValidator and multi-tenant permission policy enforcement in FastAPI security module.",
+      "target_symbols": [
+        "fastapi.security.OAuth2DynamicScopeValidator"
+      ],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "OAuth2DynamicScopeValidator"
+      ],
+      "verification": {
+        "must_contain": [],
+        "must_not_contain": [
+          "OAuth2DynamicScopeValidator",
+          "QuantumLedger"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-015",
+      "title": "Phantom: Werkzeug Quantum-Resistant HMAC Signer",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: Werkzeug does not contain QuantumResistantHMACSigner.",
+      "user_prompt": "Audit QuantumResistantHMACSigner in werkzeug security module for post-quantum lattice cryptography verification.",
+      "target_symbols": [
+        "werkzeug.security.QuantumResistantHMACSigner"
+      ],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "QuantumResistantHMACSigner"
+      ],
+      "verification": {
+        "must_contain": [],
+        "must_not_contain": [
+          "QuantumResistantHMACSigner",
+          "QuantumLedger"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-016",
+      "title": "Phantom: Click Voice Command Activation Trigger",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: Click has no voice command activation trigger decorator.",
+      "user_prompt": "Configure voice_command_activation_trigger decorator on CLI command group for audio input dispatch.",
+      "target_symbols": [
+        "click.decorators.voice_command_activation_trigger"
+      ],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "voice_command_activation_trigger"
+      ],
+      "verification": {
+        "must_contain": [],
+        "must_not_contain": [
+          "voice_command_activation_trigger",
+          "QuantumLedger"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-017",
+      "title": "Phantom: Pydantic Distributed Sharded Parquet Exporter",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: Pydantic does not have to_distributed_sharded_parquet method.",
+      "user_prompt": "Trace to_distributed_sharded_parquet serialization pipeline across cluster worker partitions in Pydantic models.",
+      "target_symbols": [
+        "pydantic.BaseModel.to_distributed_sharded_parquet"
+      ],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "to_distributed_sharded_parquet"
+      ],
+      "verification": {
+        "must_contain": [],
+        "must_not_contain": [
+          "to_distributed_sharded_parquet",
+          "QuantumLedger"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ANTI-018",
+      "title": "Phantom: graph_fy Autonomous Neural Code Writer",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "severity": "CRITICAL",
+      "real_world_context": "Anti-hallucination test: graph_fy is zero-LLM deterministic AST and has no autonomous neural code writer.",
+      "user_prompt": "Execute autonomous_neural_code_writer on codebase AST to auto-generate production endpoints.",
+      "target_symbols": [
+        "graph_fy.retrieval.autonomous_neural_code_writer"
+      ],
+      "expected_files": [],
+      "forbidden_hallucinations": [
+        "autonomous_neural_code_writer"
+      ],
+      "verification": {
+        "must_contain": [],
+        "must_not_contain": [
+          "autonomous_neural_code_writer",
+          "QuantumLedger"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "BLAST-001",
+      "title": "Core Exporter Interface Refactor Blast Radius: BaseExporter.export_stream",
+      "category": "Blast Radius & Interface Refactoring",
+      "severity": "CRITICAL",
+      "real_world_context": "Modifying the core BaseExporter.export_stream signature: determine all downstream visualizer exporters, call sites, and test fixtures affected.",
+      "user_prompt": "Calculate blast radius and affected downstream visualizer implementations if BaseExporter.export_stream parameter signature is modified.",
+      "target_symbols": [
+        "BaseExporter",
+        "export_stream",
+        "export_html",
+        "HTMLExporter"
+      ],
+      "expected_files": [
+        "graph_fy/exporters/base.py",
+        "graph_fy/exporters/html.py",
+        "graph_fy/describe_arch_html.py"
+      ],
+      "forbidden_hallucinations": [
+        "export.magic_downstream_migrator",
+        "quantum_exporter"
+      ],
+      "verification": {
+        "must_contain": [
+          "exporter",
+          "stream",
+          "export"
+        ],
+        "must_not_contain": [
+          "magic_downstream_migrator",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "CRITICAL",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "BLAST-002",
+      "title": "AST Extractor Node Signature Change Blast Radius: extract_code_entities",
+      "category": "Blast Radius & Interface Refactoring",
+      "severity": "HIGH",
+      "real_world_context": "Refactoring AST parser extractor return tuple: trace all build, clustering, and retrieval consumers impacted across the repository.",
+      "user_prompt": "Trace all callers and pipeline stages that consume output from extract_code_entities when adding syntax tree span metadata.",
+      "target_symbols": [
+        "extract_code_entities",
+        "build_from_json",
+        "ASTExtractor"
+      ],
+      "expected_files": [
+        "graph_fy/extractors/ast_parser.py",
+        "graph_fy/build.py",
+        "graph_fy/cli.py"
+      ],
+      "forbidden_hallucinations": [
+        "ast.auto_transform_entities",
+        "quantum_ast_parser"
+      ],
+      "verification": {
+        "must_contain": [
+          "extract",
+          "entities",
+          "ast"
+        ],
+        "must_not_contain": [
+          "auto_transform_entities",
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "TYPO-009",
+      "title": "Typo Resolution: describe_architectur to describe_architecture",
+      "category": "Typo-Tolerance & Did-You-Mean",
+      "severity": "LOW",
+      "real_world_context": "Typo tolerance: user query contains describe_architectur instead of describe_architecture.",
+      "user_prompt": "Trace describe_architectur pipeline flow and visualizer stage generation.",
+      "target_symbols": [
+        "describe_architecture"
+      ],
+      "expected_files": [
+        "graph_fy/describe_arch.py"
+      ],
+      "forbidden_hallucinations": [],
+      "verification": {
+        "must_contain": [
+          "describe_architecture",
+          "did you mean"
+        ],
+        "must_not_contain": [
+          "QuantumLedger"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    }
+  ]
+}

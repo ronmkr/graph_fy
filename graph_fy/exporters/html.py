@@ -46,6 +46,40 @@ def _html_styles() -> str:
     --warning: #b06000;
     --purple: #9334e6;
   }
+  [data-theme="dark"] {
+    --bg: #121212;
+    --surface: #1e1e1e;
+    --surface-variant: #282828;
+    --border: #333333;
+    --border-accent: #444444;
+    --text: #e8eaed;
+    --muted: #9aa0a6;
+    --accent: #8ab4f8;
+    --accent-hover: #aecbfa;
+    --accent-glow: rgba(138, 180, 248, 0.25);
+    --coral: #f28b82;
+    --success: #81c995;
+    --warning: #fdd663;
+    --purple: #c58af9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --surface-variant: #282828;
+      --border: #333333;
+      --border-accent: #444444;
+      --text: #e8eaed;
+      --muted: #9aa0a6;
+      --accent: #8ab4f8;
+      --accent-hover: #aecbfa;
+      --accent-glow: rgba(138, 180, 248, 0.25);
+      --coral: #f28b82;
+      --success: #81c995;
+      --warning: #fdd663;
+      --purple: #c58af9;
+    }
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     background-color: var(--bg);
@@ -55,12 +89,12 @@ def _html_styles() -> str:
     height: 100vh;
     overflow: hidden;
   }
-  #graph { flex: 1; background: #ffffff; }
+  #graph { flex: 1; background: var(--surface); }
   #sidebar {
     width: 360px;
     min-width: 300px;
     max-width: 480px;
-    background: #ffffff;
+    background: var(--surface);
     border-left: 1px solid var(--border);
     box-shadow: -2px 0 8px rgba(60,64,67,0.08);
     display: flex;
@@ -69,7 +103,7 @@ def _html_styles() -> str:
   }
   #sidebar-tabs {
     display: flex;
-    background: #ffffff;
+    background: var(--surface);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -92,12 +126,12 @@ def _html_styles() -> str:
   }
   .tab-btn:hover { color: var(--text); background: var(--surface-variant); }
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); background: transparent; font-weight: 600; }
-  .tab-pane { display: none; flex: 1; flex-direction: column; overflow-y: auto; padding: 14px; background: #ffffff; }
+  .tab-pane { display: none; flex: 1; flex-direction: column; overflow-y: auto; padding: 14px; background: var(--surface); }
   .tab-pane.active { display: flex; }
   #search-wrap { padding: 0 0 10px 0; border-bottom: 1px solid var(--border); }
   #search {
     width: 100%;
-    background: #f1f3f4;
+    background: var(--surface-variant);
     border: 1px solid transparent;
     color: var(--text);
     padding: 8px 12px;
@@ -108,7 +142,7 @@ def _html_styles() -> str:
     transition: all 0.15s;
   }
   #search:focus {
-    background: #ffffff;
+    background: var(--surface);
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--accent-glow);
   }
@@ -145,25 +179,25 @@ def _html_styles() -> str:
   .action-btn:hover { background: #f8fafd; border-color: var(--accent); }
   .action-btn.primary { background: var(--accent); border-color: transparent; color: #fff; font-weight: 500; }
   .action-btn.primary:hover { background: var(--accent-hover); box-shadow: 0 1px 3px rgba(60,64,67,0.3); }
-  .schema-box { background: #f8f9fa; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-family: ui-monospace, monospace; font-size: 10.5px; color: #174ea6; margin-bottom: 8px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; line-height: 1.4; }
-  #sql-input { width: 100%; background: #f8f9fa; border: 1px solid var(--border); color: var(--text); font-family: ui-monospace, monospace; font-size: 11.5px; padding: 8px 10px; border-radius: 8px; resize: vertical; outline: none; margin-bottom: 6px; }
-  #sql-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); background: #ffffff; }
-  .results-table-wrap { max-height: 180px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; margin-top: 6px; background: #ffffff; }
+  .schema-box { background: var(--surface-variant); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--accent); margin-bottom: 8px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; line-height: 1.4; }
+  #sql-input { width: 100%; background: var(--surface-variant); border: 1px solid var(--border); color: var(--text); font-family: ui-monospace, monospace; font-size: 11.5px; padding: 8px 10px; border-radius: 8px; resize: vertical; outline: none; margin-bottom: 6px; }
+  #sql-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); background: var(--surface); }
+  .results-table-wrap { max-height: 180px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; margin-top: 6px; background: var(--surface); }
   .query-table { width: 100%; border-collapse: collapse; font-size: 11.5px; font-family: Roboto, sans-serif; text-align: left; }
-  .query-table th { background: #f1f3f4; color: var(--text); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--border); position: sticky; top: 0; text-transform: uppercase; font-size: 10px; }
-  .query-table td { padding: 6px 10px; border-bottom: 1px solid #f1f3f4; color: var(--text); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .query-table tr:hover td { background: #e8f0fe; cursor: pointer; color: var(--accent); }
+  .query-table th { background: var(--surface-variant); color: var(--text); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--border); position: sticky; top: 0; text-transform: uppercase; font-size: 10px; }
+  .query-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); color: var(--text); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .query-table tr:hover td { background: var(--surface-variant); cursor: pointer; color: var(--accent); }
   .risk-badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; font-family: Roboto, sans-serif; }
   .risk-LOW { background: #ceead6; color: #137333; border: 1px solid #a8dab5; }
   .risk-MEDIUM { background: #feefc3; color: #b06000; border: 1px solid #fdd663; }
   .risk-HIGH { background: #fedfc8; color: #b34700; border: 1px solid #fcbb8b; }
   .risk-CRITICAL { background: #fad2cf; color: #c5221f; border: 1px solid #f28b82; }
   .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
-  .metric-card { background: #ffffff; border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; box-shadow: 0 1px 2px rgba(60,64,67,0.08); }
+  .metric-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; box-shadow: 0 1px 2px rgba(60,64,67,0.08); }
   .metric-val { font-size: 16px; font-weight: 600; color: var(--accent); font-family: Roboto, "Google Sans", sans-serif; }
   .metric-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
-  .closure-item { padding: 5px 8px; font-size: 11px; font-family: Roboto, sans-serif; border-left: 3px solid var(--accent); margin: 3px 0; border-radius: 4px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: #f8f9fa; color: var(--text); }
-  .closure-item:hover { background: #e8f0fe; color: var(--accent); }
+  .closure-item { padding: 5px 8px; font-size: 11px; font-family: Roboto, sans-serif; border-left: 3px solid var(--accent); margin: 3px 0; border-radius: 4px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--surface-variant); color: var(--text); }
+  .closure-item:hover { background: var(--surface-variant); color: var(--accent); }
   .closure-item.is-test { border-left-color: #1a73e8; }
   .closure-item.is-api { border-left-color: #d93025; }
   .closure-item.is-iac { border-left-color: #ea8600; }
@@ -301,6 +335,7 @@ const nodesDS = new vis.DataSet(RAW_NODES.map((n, i) => ({{
   y: 30 * Math.sqrt(i) * Math.sin(i * 2.4),
   _community: n.community, _community_name: n.community_name,
   _source_file: n.source_file, _file_type: n.file_type, _degree: n.degree,
+  _repo: n.repo,
 }})));
 
 const edgesDS = new vis.DataSet(RAW_EDGES.map((e, i) => ({{
@@ -360,10 +395,13 @@ function showInfo(nodeId) {{
   const neighborItems = neighborIds.map(nid => {{
     const nb = nodesDS.get(nid);
     const color = nb ? nb.color.background : '#555';
-    return `<span class="neighbor-link" style="border-left-color:${{esc(color)}}" data-nid="${{esc(nid)}}">${{esc(nb ? nb.label : nid)}}</span>`;
+    const repoBadge = (nb && nb._repo && nb._repo !== n._repo) ? ` <small style="opacity:0.8; font-size:9.5px; background:var(--surface-variant); padding:1px 4px; border-radius:4px;">📦 ${{esc(nb._repo)}}</small>` : '';
+    return `<span class="neighbor-link" style="border-left-color:${{esc(color)}}" data-nid="${{esc(nid)}}">${{esc(nb ? nb.label : nid)}}${{repoBadge}}</span>`;
   }}).join('');
+  const repoChip = n._repo ? `<div class="field"><span class="repo-badge" style="background:var(--accent-subtle); color:var(--accent); border:1px solid var(--border-accent); padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">📦 ${{esc(n._repo)}}</span></div>` : '';
   document.getElementById('info-content').innerHTML = `
     <div class="field"><b>${{esc(n.label)}}</b></div>
+    ${{repoChip}}
     <div class="field">Type: ${{esc(n._file_type || 'unknown')}}</div>
     <div class="field">Community: ${{esc(n._community_name)}}</div>
     <div class="field">Source: ${{esc(n._source_file || '-')}}</div>
@@ -373,7 +411,7 @@ function showInfo(nodeId) {{
       <button class="action-btn btn-info-slice" data-nid="${{esc(nodeId)}}" data-hops="1">1-Hop</button>
       <button class="action-btn btn-info-slice" data-nid="${{esc(nodeId)}}" data-hops="2">2-Hop</button>
     </div>
-    ${{neighborIds.length ? `<div class="field" style="margin-top:8px;color:#aaa;font-size:11px">Neighbors (${{neighborIds.length}})</div><div id="neighbors-list">${{neighborItems}}</div>` : ''}}
+    ${{neighborIds.length ? `<div class="field" style="margin-top:8px;color:var(--muted);font-size:11px">Neighbors (${{neighborIds.length}})</div><div id="neighbors-list">${{neighborItems}}</div>` : ''}}
   `;
 }}
 
@@ -451,13 +489,26 @@ container.addEventListener('click', () => {{
     network.selectNodes([hoveredNodeId]);
   }}
 }});
+function showDefaultInfo() {{
+  const topNodes = [...RAW_NODES].sort((a, b) => (b.size || 0) - (a.size || 0)).slice(0, 8);
+  let html = '<div style="margin-top:10px;"><p style="font-size:12px;color:var(--muted);margin-bottom:8px;">Click a node to inspect it, or select a key architectural hub:</p>';
+  html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+  topNodes.forEach(n => {{
+    html += `<button class="action-btn" style="font-size:11px;padding:4px 8px;cursor:pointer;border-radius:12px;border:1px solid var(--border);" onclick="network.focus('${{n.id}}', {{scale:1.4, animation:true}}); network.selectNodes(['${{n.id}}']); showInfo('${{n.id}}');">${{n.label}}</button>`;
+  }});
+  html += '</div></div>';
+  const infoEl = document.getElementById('info-content');
+  if (infoEl) infoEl.innerHTML = html;
+}}
+
 network.on('click', params => {{
   if (params.nodes.length > 0) {{
     showInfo(params.nodes[0]);
   }} else if (hoveredNodeId === null) {{
-    document.getElementById('info-content').innerHTML = '<span class="empty">Click a node to inspect it</span>';
+    showDefaultInfo();
   }}
 }});
+showDefaultInfo();
 
 // Search Box
 const searchInput = document.getElementById('search');
@@ -465,6 +516,14 @@ const searchResults = document.getElementById('search-results');
 searchInput.addEventListener('input', () => {{
   const q = searchInput.value.toLowerCase().trim();
   searchResults.innerHTML = '';
+  try {{
+    if (history.replaceState) {{
+      const url = new URL(window.location);
+      if (q) url.searchParams.set('search', q);
+      else url.searchParams.delete('search');
+      history.replaceState(null, '', url);
+    }}
+  }} catch(e){{}}
   if (!q) {{ searchResults.style.display = 'none'; return; }}
   const matches = RAW_NODES.filter(n => n.label.toLowerCase().includes(q)).slice(0, 20);
   if (!matches.length) {{ searchResults.style.display = 'none'; return; }}
@@ -480,7 +539,13 @@ searchInput.addEventListener('input', () => {{
       network.selectNodes([n.id]);
       showInfo(n.id);
       searchResults.style.display = 'none';
-      searchInput.value = '';
+      try {{
+        if (history.replaceState) {{
+          const url = new URL(window.location);
+          url.searchParams.set('focus', n.id);
+          history.replaceState(null, '', url);
+        }}
+      }} catch(e){{}}
     }};
     searchResults.appendChild(el);
   }});
@@ -489,6 +554,31 @@ document.addEventListener('click', e => {{
   if (!searchResults.contains(e.target) && e.target !== searchInput)
     searchResults.style.display = 'none';
 }});
+
+// Initialize from URL deep link
+(function() {{
+  try {{
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get('search') || params.get('q') || (window.location.hash ? decodeURIComponent(window.location.hash.slice(1)) : '');
+    const theme = params.get('theme');
+    if (theme === 'dark' || theme === 'light') {{
+      document.documentElement.setAttribute('data-theme', theme);
+      try {{ localStorage.setItem('graph_fy_theme', theme); }} catch(e){{}}
+    }}
+    if (q && searchInput) {{
+      searchInput.value = q;
+      searchInput.dispatchEvent(new Event('input'));
+    }}
+    const focusId = params.get('focus');
+    if (focusId && typeof network !== 'undefined') {{
+      setTimeout(() => {{
+        network.focus(focusId, {{ scale: 1.5, animation: true }});
+        network.selectNodes([focusId]);
+        showInfo(focusId);
+      }}, 300);
+    }}
+  }} catch(e){{}}
+}})();
 
 // Client-Side Zero-Server SQL / Query Engine
 function executeSqlQuery(sql) {{
@@ -1167,6 +1257,19 @@ LEGEND.forEach(c => {{
   }};
   legendEl.appendChild(item);
 }});
+
+function toggleTheme() {{
+  const current = document.documentElement.getAttribute('data-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try {{ localStorage.setItem('graph_fy_theme', next); }} catch(e){{}}
+}}
+(function() {{
+  try {{
+    const saved = localStorage.getItem('graph_fy_theme');
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+  }} catch(e){{}}
+}})();
 </script>"""  # nosec B608
 
 
@@ -1345,6 +1448,7 @@ def to_html(
             "source_file": sanitize_label(str(data.get("source_file") or "")),
             "file_type": data.get("file_type", ""),
             "degree": deg,
+            "repo": sanitize_label(str(data.get("repo") or "")),
         }
         # Conditional learning fields — only present for annotated nodes, so
         # un-annotated output keeps the exact pre-feature node dict shape.
@@ -1437,6 +1541,7 @@ def to_html(
     <button class="tab-btn" data-tab="tab-blast">Blast Radius</button>
     <button class="tab-btn" data-tab="tab-slice">Slice</button>
     <button class="tab-btn" data-tab="tab-legend">Legend</button>
+    <button id="themeToggle" class="tab-btn" onclick="toggleTheme()" title="Toggle dark/light mode" style="flex:0 0 36px; font-size:13px; padding:0 8px;">🌓</button>
   </div>
 
   <div id="tab-info" class="tab-pane active">
