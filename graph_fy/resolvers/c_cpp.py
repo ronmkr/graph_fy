@@ -10,14 +10,37 @@ _DECLDEF_HEADER_SUFFIXES = frozenset({".h", ".hpp", ".hh", ".hxx"})
 _DECLDEF_IMPL_SUFFIXES = frozenset({".m", ".mm", ".cpp", ".cc", ".cxx", ".c"})
 
 
-def _resolve_c_include_path(raw: str, str_path: str) -> "Path | None":
-    """Resolve a quoted #include path to a real file on disk."""
+def _resolve_c_include_path(raw: str, str_path: str, extra_include_dirs: list[Path] | None = None) -> "Path | None":
+    """Resolve a quoted #include path to a real file on disk.
+
+    Checks:
+    1. Same-directory relative to the including file.
+    2. Caller-provided extra include directories.
+    3. Target-scoped CMake include directories (with transitive link library DAG inheritance).
+    """
     if not raw:
         return None
     candidate = _resolve_cached((Path(str_path).parent / raw))
     if candidate.is_file():
         return candidate
+
+    if extra_include_dirs:
+        for inc_dir in extra_include_dirs:
+            c = _resolve_cached(inc_dir / raw)
+            if c.is_file():
+                return c
+
+    try:
+        from graph_fy.extractors.cmake import get_cmake_include_dirs
+        for inc_dir in get_cmake_include_dirs(str_path):
+            c = _resolve_cached(inc_dir / raw)
+            if c.is_file():
+                return c
+    except Exception:
+        pass
+
     return None
+
 
 
 def _decldef_class_stem(source_file: str) -> tuple[str, str] | None:

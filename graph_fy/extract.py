@@ -85,6 +85,9 @@ from graph_fy.extractors.bazel import extract_bazel, is_bazel_file  # noqa: F401
 from graph_fy.extractors.monorepo import extract_monorepo, is_monorepo_file  # noqa: F401
 from graph_fy.extractors.argocd import extract_argocd, is_argocd_manifest  # noqa: F401
 from graph_fy.extractors.rtk import extract_rtk, is_rtk_file  # noqa: F401
+from graph_fy.extractors.cmake import extract_cmake, is_cmake_file  # noqa: F401
+from graph_fy.extractors.qt_ui import extract_qt_ui, is_qt_ui_file  # noqa: F401
+from graph_fy.extractors.gradle import extract_gradle, is_gradle_file  # noqa: F401
 from graph_fy.security import sanitize_metadata
 from graph_fy.paths import disambiguate_ambiguous_candidates
 
@@ -665,6 +668,8 @@ _DISPATCH: dict[str, Any] = {
     ".cobol": extract_cobol,
     ".cpy": extract_cobol,
     ".sol": extract_solidity,
+    ".cmake": extract_cmake,
+    ".ui": extract_qt_ui,
 }
 
 
@@ -807,6 +812,12 @@ def _get_extractor(path: Path) -> Any | None:
     # package node + depends_on edges, by filename before generic suffix dispatch
     if is_package_manifest_path(path) and path.name.lower() != "package.json":
         return extract_package_manifest
+    if is_cmake_file(path):
+        return extract_cmake
+    if is_qt_ui_file(path):
+        return extract_qt_ui
+    if is_gradle_file(path):
+        return extract_gradle
     if path.suffix.lower() == ".txt":
         return extract_markdown
     # IaC & config extractors (Kubernetes, Helm, CloudFormation, Kafka, Argo CD)

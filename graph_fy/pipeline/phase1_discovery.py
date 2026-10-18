@@ -39,6 +39,13 @@ def infer_root_and_cache(
     return root, cache_location
 
 
+_SPECIAL_BUILD_FILENAMES = frozenset({
+    "cmakelists.txt", "build.gradle", "settings.gradle",
+    "build.gradle.kts", "settings.gradle.kts",
+    "dockerfile", "build", "build.bazel", "workspace", "workspace.bazel", "module.bazel",
+})
+
+
 def collect_files(
     target: Path,
     *,
@@ -87,9 +94,12 @@ def collect_files(
             for fname in filenames:
                 p = dp / fname
                 suffix = p.suffix
+                low_fname = fname.lower()
                 is_extractable = (
                     suffix in _EXTENSIONS
                     or suffix.lower() in _EXTENSIONS
+                    or low_fname in _SPECIAL_BUILD_FILENAMES
+                    or low_fname.startswith("dockerfile.")
                     or (all_formats and get_extractor_fn(p) is not None)
                 )
                 if is_extractable and not _ignored(p) and _resolves_under_root(p, containment_root):
@@ -113,9 +123,12 @@ def collect_files(
         for fname in filenames:
             p = dp / fname
             suffix = p.suffix
+            low_fname = fname.lower()
             is_extractable = (
                 suffix in _EXTENSIONS
                 or suffix.lower() in _EXTENSIONS
+                or low_fname in _SPECIAL_BUILD_FILENAMES
+                or low_fname.startswith("dockerfile.")
                 or (all_formats and get_extractor_fn(p) is not None)
             )
             if is_extractable and not _ignored(p) and _resolves_under_root(p, containment_root):

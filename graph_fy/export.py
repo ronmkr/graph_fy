@@ -434,7 +434,7 @@ def to_json(G: nx.Graph, communities: dict[int, list[str]], output_path: str, *,
 
     # Mirror into relational SQLite store (graph.db) when outputting graph.json (#22)
     out_p = Path(output_path)
-    if out_p.name in ("graph.json", "graph.tmp.json"):
+    if out_p.name in ("graph.json", "graph.tmp.json", ".graph.tmp.json"):
         try:
             to_sqlite(G, out_p.parent / "graph.db", built_at_commit=commit)
         except Exception:

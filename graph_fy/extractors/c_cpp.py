@@ -337,14 +337,121 @@ def _normalize_cpp_cli(source: bytes) -> bytes | None:
     return _CPP_CLI_ATTR_RE.sub(_blank_keeping_newlines, out)
 
 
+_QT_CONNECT_CLASSIC_RE = re.compile(
+    r"""(?:QObject::)?connect\s*\(\s*([^,]+)\s*,\s*SIGNAL\s*\(\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)\s*\)\s*,\s*([^,]+)\s*,\s*SLOT\s*\(\s*([A-Za-z0-9_]+(?:\s*\([^)]*\))?)\s*\)\s*\)"""
+)
+
+_QT_CONNECT_PMF_RE = re.compile(
+    r"""(?:QObject::)?connect\s*\(\s*([^,]+)\s*,\s*&([A-Za-z0-9_:]+)\s*,\s*([^,]+)\s*,\s*&([A-Za-z0-9_:]+)\s*\)"""
+)
+
+_QT_CONNECT_LAMBDA_RE = re.compile(
+    r"""(?:QObject::)?connect\s*\(\s*([^,]+)\s*,\s*&([A-Za-z0-9_:]+)\s*,\s*\["""
+)
+
+
+def _augment_qt_signals_slots(path: Path, result: dict) -> dict:
+    """Extract Qt QObject::connect() signal-to-slot event bindings as connects_signal_slot edges."""
+    try:
+        source = path.read_text(errors="replace")
+    except OSError:
+        return result
+
+    if "connect" not in source:
+        return result
+
+    str_path = str(path.resolve())
+    stem = _file_stem(path)
+    file_nid = _make_id(str_path)
+    edges = result.setdefault("edges", [])
+
+    # 1. Classic Qt syntax: connect(sender, SIGNAL(sig()), receiver, SLOT(slt()))
+    for m in _QT_CONNECT_CLASSIC_RE.finditer(source):
+        sender = m.group(1).strip()
+        signal = m.group(2).strip()
+        receiver = m.group(3).strip()
+        slot = m.group(4).strip()
+        line = source.count("\n", 0, m.start()) + 1
+
+        sender_nid = _make_id(stem, sender) if sender and sender != "this" else file_nid
+        slot_name = slot.split("(")[0].strip()
+        receiver_nid = _make_id(stem, slot_name) if slot_name else file_nid
+
+        edges.append({
+            "source": sender_nid,
+            "target": receiver_nid,
+            "relation": "connects_signal_slot",
+            "signal": signal,
+            "slot": slot,
+            "sender": sender,
+            "receiver": receiver,
+            "confidence": "EXTRACTED",
+            "weight": 1.0,
+            "source_file": str_path,
+            "source_location": f"L{line}",
+        })
+
+    # 2. Modern PMF syntax: connect(sender, &SenderClass::signal, receiver, &ReceiverClass::slot)
+    for m in _QT_CONNECT_PMF_RE.finditer(source):
+        sender = m.group(1).strip()
+        signal_full = m.group(2).strip()
+        receiver = m.group(3).strip()
+        slot_full = m.group(4).strip()
+        line = source.count("\n", 0, m.start()) + 1
+
+        sender_nid = _make_id(stem, sender) if sender and sender != "this" else file_nid
+        slot_tail = slot_full.split("::")[-1].strip()
+        slot_nid = _make_id(stem, slot_tail) if slot_tail else file_nid
+
+        edges.append({
+            "source": sender_nid,
+            "target": slot_nid,
+            "relation": "connects_signal_slot",
+            "signal": signal_full,
+            "slot": slot_full,
+            "sender": sender,
+            "receiver": receiver,
+            "confidence": "EXTRACTED",
+            "weight": 1.0,
+            "source_file": str_path,
+            "source_location": f"L{line}",
+        })
+
+    # 3. Lambda syntax: connect(sender, &SenderClass::signal, [=]() { ... })
+    for m in _QT_CONNECT_LAMBDA_RE.finditer(source):
+        sender = m.group(1).strip()
+        signal_full = m.group(2).strip()
+        line = source.count("\n", 0, m.start()) + 1
+
+        sender_nid = _make_id(stem, sender) if sender and sender != "this" else file_nid
+        edges.append({
+            "source": sender_nid,
+            "target": file_nid,
+            "relation": "connects_signal_slot",
+            "signal": signal_full,
+            "slot": "<lambda>",
+            "sender": sender,
+            "receiver": "lambda",
+            "confidence": "EXTRACTED",
+            "weight": 1.0,
+            "source_file": str_path,
+            "source_location": f"L{line}",
+        })
+
+    return result
+
+
 def extract_cpp(path: Path) -> dict:
     """Extract functions, classes, and includes from a .cpp/.cc/.cxx/.hpp file."""
     from graph_fy.extractors.engine import _extract_generic
     try:
         source = path.read_bytes()
     except OSError:
-        return _augment_cpp_string_tests(path, _extract_generic(path, _CPP_CONFIG))
+        res = _augment_cpp_string_tests(path, _extract_generic(path, _CPP_CONFIG))
+        return _augment_qt_signals_slots(path, res)
     result = _extract_generic(
         path, _CPP_CONFIG, source_override=_normalize_cpp_cli(source) or source
     )
-    return _augment_cpp_string_tests(path, result)
+    res = _augment_cpp_string_tests(path, result)
+    return _augment_qt_signals_slots(path, res)
+
