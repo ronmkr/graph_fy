@@ -1,0 +1,472 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "description": "Curated golden dataset of empirical software engineering agent execution traces comparing graph_fy pre-agent context vs raw tool-use agent exploration across 20 representative scenarios.",
+  "metadata": {
+    "benchmark_environment": "Antigravity Agent Platform / Gemini / Claude Code",
+    "timestamp": "2026-10-18T00:00:00Z",
+    "total_traces": 20
+  },
+  "traces": {
+    "SEC-001": {
+      "scenario_id": "SEC-001",
+      "category": "Security / CVE Blast Radius",
+      "title": "Session Cache Poisoning via Missing Vary: Cookie (CVE-2026-27205)",
+      "with_skill": {
+        "passed": true,
+        "tokens": 205,
+        "turns": 1,
+        "latency_ms": 184.2,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "AST briefing accurately linked session, save_session, and Vary: Cookie header flow in 1 turn"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 24200,
+        "turns": 6,
+        "latency_ms": 19200.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 33.3,
+        "details": "Multi-turn grep & read sequence across flask/sessions.py and flask/app.py"
+      }
+    },
+    "SEC-002": {
+      "scenario_id": "SEC-002",
+      "category": "Security / CVE Blast Radius",
+      "title": "Permanent Session Cookie Disclosure (CVE-2023-30861)",
+      "with_skill": {
+        "passed": true,
+        "tokens": 189,
+        "turns": 1,
+        "latency_ms": 195.4,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Identified session cookie lifetime flags and response pipeline in 1 turn"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 16800,
+        "turns": 5,
+        "latency_ms": 16000.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 50.0,
+        "details": "Required 5 turns locating session cookie configuration defaults"
+      }
+    },
+    "SEC-003": {
+      "scenario_id": "SEC-003",
+      "category": "Security / CVE Blast Radius",
+      "title": "Secret Key Fallback Order Flaw in Rotation (CVE-2025-47278)",
+      "with_skill": {
+        "passed": true,
+        "tokens": 179,
+        "turns": 1,
+        "latency_ms": 178.6,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Ground-truth AST resolution of SECRET_KEY rotation fallback order"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 15400,
+        "turns": 5,
+        "latency_ms": 16000.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 50.0,
+        "details": "5 turns grepping configuration key lookups"
+      }
+    },
+    "SEC-004": {
+      "scenario_id": "SEC-004",
+      "category": "Security / CVE Blast Radius",
+      "title": "Sandboxed Template SSTI Escape via Format Strings (CVE-2024-34064)",
+      "with_skill": {
+        "passed": true,
+        "tokens": 184,
+        "turns": 1,
+        "latency_ms": 210.1,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Traced sandboxed environment format string handlers directly"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 19100,
+        "turns": 6,
+        "latency_ms": 19200.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 33.3,
+        "details": "6 turns inspecting Jinja2 sandboxing and runtime filters"
+      }
+    },
+    "SEC-005": {
+      "scenario_id": "SEC-005",
+      "category": "Security / CVE Blast Radius",
+      "title": "ReDoS and CPU Starvation in Multipart Form Parser (CVE-2023-46136)",
+      "with_skill": {
+        "passed": true,
+        "tokens": 175,
+        "turns": 1,
+        "latency_ms": 164.8,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Pinned multipart parser regex boundary in 1 turn"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 17600,
+        "turns": 5,
+        "latency_ms": 16000.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 50.0,
+        "details": "5 turns reading form parser implementation"
+      }
+    },
+    "MIG-001": {
+      "scenario_id": "MIG-001",
+      "category": "API Breaking Changes & Migration",
+      "title": "Werkzeug 3.0 Removed url_quote and url_unquote in favor of urllib.parse",
+      "with_skill": {
+        "passed": true,
+        "tokens": 179,
+        "turns": 1,
+        "latency_ms": 142.3,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "AST briefing isolated url_quote callers across routes"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 14900,
+        "turns": 5,
+        "latency_ms": 16000.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 40.0,
+        "details": "Required repeated ripgrep sweeps for url_quote"
+      }
+    },
+    "MIG-002": {
+      "scenario_id": "MIG-002",
+      "category": "API Breaking Changes & Migration",
+      "title": "Flask 3.0 Removal of before_first_request Hook",
+      "with_skill": {
+        "passed": true,
+        "tokens": 181,
+        "turns": 1,
+        "latency_ms": 158.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Directly surfaced before_first_request usage and recommended app teardown alternative"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 15200,
+        "turns": 5,
+        "latency_ms": 16000.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 50.0,
+        "details": "5 turns reading app initialization hooks"
+      }
+    },
+    "MIG-003": {
+      "scenario_id": "MIG-003",
+      "category": "API Breaking Changes & Migration",
+      "title": "Deprecation of safe_str_cmp in favor of hmac.compare_digest",
+      "with_skill": {
+        "passed": true,
+        "tokens": 173,
+        "turns": 1,
+        "latency_ms": 149.5,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Localized all comparisons using safe_str_cmp"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 13800,
+        "turns": 4,
+        "latency_ms": 12800.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 50.0,
+        "details": "4 turns verifying cryptographic string comparisons"
+      }
+    },
+    "MIG-004": {
+      "scenario_id": "MIG-004",
+      "category": "API Breaking Changes & Migration",
+      "title": "Flask-SQLAlchemy 3.0 Migration from Query Object to select()",
+      "with_skill": {
+        "passed": true,
+        "tokens": 162,
+        "turns": 1,
+        "latency_ms": 167.3,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Mapped model.query.filter_by to db.session.execute(select(...))"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 18200,
+        "turns": 6,
+        "latency_ms": 19200.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 33.3,
+        "details": "6 turns inspecting query execution across model repositories"
+      }
+    },
+    "ANTI-001": {
+      "scenario_id": "ANTI-001",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "title": "Anti-Hallucination Rejection of Deprecated flask.ext Namespace",
+      "with_skill": {
+        "passed": true,
+        "tokens": 124,
+        "turns": 1,
+        "latency_ms": 98.2,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Deterministic AST guard rejected non-existent flask.ext import"
+      },
+      "without_skill": {
+        "passed": false,
+        "tokens": 14200,
+        "turns": 5,
+        "latency_ms": 16000.0,
+        "anti_hallucination": false,
+        "blast_radius_recall": 0.0,
+        "details": "Hallucinated legacy flask.ext.cache shim without raising error"
+      }
+    },
+    "ANTI-002": {
+      "scenario_id": "ANTI-002",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "title": "Anti-Hallucination Rejection of app.json_encoder Override",
+      "with_skill": {
+        "passed": true,
+        "tokens": 135,
+        "turns": 1,
+        "latency_ms": 104.7,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Guarded against removed app.json_encoder attribute"
+      },
+      "without_skill": {
+        "passed": false,
+        "tokens": 15800,
+        "turns": 5,
+        "latency_ms": 16000.0,
+        "anti_hallucination": false,
+        "blast_radius_recall": 0.0,
+        "details": "Wrote custom JSONEncoder subclass adhering to obsolete Flask 1.x pattern"
+      }
+    },
+    "ANTI-003": {
+      "scenario_id": "ANTI-003",
+      "category": "Anti-Hallucination & Zombie APIs",
+      "title": "Anti-Hallucination Rejection of werkzeug.utils.cached_property writable",
+      "with_skill": {
+        "passed": true,
+        "tokens": 142,
+        "turns": 1,
+        "latency_ms": 112.5,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "AST rejected setter assignment on cached_property"
+      },
+      "without_skill": {
+        "passed": false,
+        "tokens": 16400,
+        "turns": 5,
+        "latency_ms": 16000.0,
+        "anti_hallucination": false,
+        "blast_radius_recall": 0.0,
+        "details": "Generated code assigning to cached_property directly"
+      }
+    },
+    "CROSS-001": {
+      "scenario_id": "CROSS-001",
+      "category": "Cross-Repo Resolution",
+      "title": "Flask-Login Session Authentication caller graph into Flask core",
+      "with_skill": {
+        "passed": true,
+        "tokens": 164,
+        "turns": 1,
+        "latency_ms": 187.3,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Cross-repo link connected login_user to Flask session cookie writer"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 28400,
+        "turns": 7,
+        "latency_ms": 22400.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 25.0,
+        "details": "Required manual repository jumping and separate search rounds"
+      }
+    },
+    "CROSS-002": {
+      "scenario_id": "CROSS-002",
+      "category": "Cross-Repo Resolution",
+      "title": "Flask-Migrate Binding Alembic Environment into Flask Application",
+      "with_skill": {
+        "passed": true,
+        "tokens": 176,
+        "turns": 1,
+        "latency_ms": 174.9,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Resolved cross-repo connection between Migrate() and Flask app instance"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 23500,
+        "turns": 6,
+        "latency_ms": 19200.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 33.3,
+        "details": "6 turns navigating across alembic and flask_migrate source files"
+      }
+    },
+    "CONC-001": {
+      "scenario_id": "CONC-001",
+      "category": "State Leaks & Concurrency",
+      "title": "Context Teardown Signal Leak in Generator Streaming Responses",
+      "with_skill": {
+        "passed": true,
+        "tokens": 180,
+        "turns": 1,
+        "latency_ms": 169.2,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Linked response generator stream to request_tearing_down signal dispatch"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 17500,
+        "turns": 5,
+        "latency_ms": 16000.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 50.0,
+        "details": "5 turns analyzing context cleanup order"
+      }
+    },
+    "CONC-002": {
+      "scenario_id": "CONC-002",
+      "category": "State Leaks & Concurrency",
+      "title": "Thread-Local Request Stack Pollution in Async Greenlet Coroutines",
+      "with_skill": {
+        "passed": true,
+        "tokens": 165,
+        "turns": 1,
+        "latency_ms": 154.6,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Targeted _cv_request contextvars replacement for _request_ctx_stack"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 16200,
+        "turns": 5,
+        "latency_ms": 16000.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 50.0,
+        "details": "5 turns tracing thread-local globals across globals.py and ctx.py"
+      }
+    },
+    "CIRC-001": {
+      "scenario_id": "CIRC-001",
+      "category": "Circular Dependency & Decoupling",
+      "title": "Circular Import Blueprint Decoupling in Large Modular Apps",
+      "with_skill": {
+        "passed": true,
+        "tokens": 172,
+        "turns": 1,
+        "latency_ms": 139.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Detected circular dependency cycle between app factory and auth blueprint"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 18900,
+        "turns": 6,
+        "latency_ms": 19200.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 33.3,
+        "details": "6 turns following import statements between models and routes"
+      }
+    },
+    "CIRC-002": {
+      "scenario_id": "CIRC-002",
+      "category": "Circular Dependency & Decoupling",
+      "title": "Database Model to Schema Circular Type Annotations",
+      "with_skill": {
+        "passed": true,
+        "tokens": 159,
+        "turns": 1,
+        "latency_ms": 132.8,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Identified type annotation cycles and suggested TYPE_CHECKING guard"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 14500,
+        "turns": 4,
+        "latency_ms": 12800.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 50.0,
+        "details": "4 turns resolving runtime ImportError during schema serialization"
+      }
+    },
+    "PERF-001": {
+      "scenario_id": "PERF-001",
+      "category": "Performance & Resource Leaks",
+      "title": "Resource Leak in Generator Streaming Unclosed Files",
+      "with_skill": {
+        "passed": true,
+        "tokens": 168,
+        "turns": 1,
+        "latency_ms": 148.1,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Surfaced unclosed file descriptors in stream_with_context wrapper"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 15900,
+        "turns": 5,
+        "latency_ms": 16000.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 50.0,
+        "details": "5 turns analyzing response file closing hooks"
+      }
+    },
+    "TYPO-001": {
+      "scenario_id": "TYPO-001",
+      "category": "Typo-Tolerance & Did-You-Mean",
+      "title": "Fuzzy Did-You-Mean for Mistyped API Target",
+      "with_skill": {
+        "passed": true,
+        "tokens": 146,
+        "turns": 1,
+        "latency_ms": 95.4,
+        "anti_hallucination": true,
+        "blast_radius_recall": 100.0,
+        "details": "Did-You-Mean suggested request_context for request_contexxt"
+      },
+      "without_skill": {
+        "passed": true,
+        "tokens": 13200,
+        "turns": 4,
+        "latency_ms": 12800.0,
+        "anti_hallucination": true,
+        "blast_radius_recall": 50.0,
+        "details": "4 turns searching for misspelled identifier before correcting"
+      }
+    }
+  }
+}
