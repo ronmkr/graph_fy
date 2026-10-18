@@ -95,6 +95,47 @@ class GraphQueryEngine:
         """Render formatted human-readable impact analysis report."""
         return _format_impact_report(impact_data, terse=terse)
 
+    # --- Zero-Deserialization SQLite Relational Queries (#22) ---
+    @staticmethod
+    def get_sqlite_store(db_path: Path | str | None = None) -> Any:
+        """Open SqliteGraphStore if database exists."""
+        from graph_fy.paths import default_graph_db
+        from graph_fy.storage_sqlite import SqliteGraphStore
+        p = Path(db_path) if db_path is not None else Path(default_graph_db())
+        if p.exists():
+            return SqliteGraphStore(p)
+        return None
+
+    @staticmethod
+    def find_affected_sqlite(
+        seed: str,
+        db_path: Path | str | None = None,
+        *,
+        relations: Iterable[str] = DEFAULT_AFFECTED_RELATIONS,
+        depth: int = 2,
+    ) -> list[dict[str, Any]]:
+        """Zero-deserialization reverse-BFS blast radius traversal via SQLite recursive CTE (<2ms)."""
+        from graph_fy.paths import default_graph_db
+        from graph_fy.storage_sqlite import SqliteGraphStore
+        p = Path(db_path) if db_path is not None else Path(default_graph_db())
+        with SqliteGraphStore(p) as store:
+            return store.reverse_bfs(seed, relations=relations, max_depth=depth)
+
+    @staticmethod
+    def k_hop_ego_sqlite(
+        seed: str,
+        db_path: Path | str | None = None,
+        *,
+        max_depth: int = 1,
+        directed: bool = True,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Zero-deserialization k-hop ego sub-graph retrieval via SQLite recursive CTE (<2ms)."""
+        from graph_fy.paths import default_graph_db
+        from graph_fy.storage_sqlite import SqliteGraphStore
+        p = Path(db_path) if db_path is not None else Path(default_graph_db())
+        with SqliteGraphStore(p) as store:
+            return store.k_hop_ego_graph(seed, max_depth=max_depth, directed=directed)
+
     # --- GraphRAG Querying ---
     @staticmethod
     def query(
@@ -163,7 +204,7 @@ class GraphQueryEngine:
     ) -> dict[str, Any]:
         """Generate git diff-scoped architectural and blast radius context."""
         return _diff_context(
-            repo_root=repo_root,
+            root_dir=repo_root,
             base_ref=base_ref,
             graph=graph,
             graph_path=graph_path,

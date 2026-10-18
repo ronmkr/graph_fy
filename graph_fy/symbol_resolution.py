@@ -333,6 +333,8 @@ def resolve_cross_file_raw_calls(
             continue
         if raw_call.get("is_member_call"):
             continue
+        if raw_call.get("solidity_call"):
+            continue
         candidates = label_index.get(callee.lower(), [])
         if not candidates:
             continue

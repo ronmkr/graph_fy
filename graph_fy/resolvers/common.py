@@ -7,7 +7,15 @@ import os
 from pathlib import Path
 from typing import Any
 
-from graph_fy.extractors.base import _make_id
+from graph_fy.ids import make_id as _make_id
+
+
+def _file_stem(path: Path) -> str:
+    return path.with_suffix("").as_posix()
+
+
+def _read_text(node, source: bytes) -> str:
+    return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
 @functools.lru_cache(maxsize=65536)

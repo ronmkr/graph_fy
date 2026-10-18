@@ -29,6 +29,8 @@ DEFAULT_AFFECTED_RELATIONS = (
     "mixes_in",
     "embeds",
     "requires",
+    "calls_ffi",
+    "imports_native",
 )
 
 

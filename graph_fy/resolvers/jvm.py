@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from graph_fy.extractors.base import _make_id, _read_text
+from graph_fy.resolvers.common import _make_id, _read_text
 
 
 def _resolve_cross_file_java_imports(

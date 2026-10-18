@@ -375,6 +375,10 @@ from graph_fy.member_resolution import (
     _resolve_csharp_qualified_calls,
     _resolve_kotlin_qualified_calls,
 )
+from graph_fy.extractors.solidity import (
+    extract_solidity,
+    resolve_solidity_inherited_calls,
+)
 
 
 _KOTLIN_IMPORT_TARGET_RESOLVER = LanguageResolver(
@@ -456,6 +460,11 @@ register_language_resolver(
 register_language_resolver(
     LanguageResolver(
         "csharp_qualified_calls", frozenset({".cs"}), _resolve_csharp_qualified_calls
+    )
+)
+register_language_resolver(
+    LanguageResolver(
+        "solidity_inherited_calls", frozenset({".sol"}), resolve_solidity_inherited_calls
     )
 )
 # C# member-level interface dispatch (#3003): a call through an injected
@@ -655,6 +664,7 @@ _DISPATCH: dict[str, Any] = {
     ".cob": extract_cobol,
     ".cobol": extract_cobol,
     ".cpy": extract_cobol,
+    ".sol": extract_solidity,
 }
 
 

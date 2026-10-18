@@ -160,6 +160,11 @@ def dispatch_command(cmd: str) -> None:
         rc = cmd_god_nodes(sys.argv, _default_graph_path, _find_graph_path_for_target)
         if rc != 0:
             sys.exit(rc)
+    elif cmd in ("stats", "graph-stats", "graph_stats"):
+        from graph_fy.commands.analysis import cmd_stats
+        rc = cmd_stats(sys.argv, _default_graph_path, _find_graph_path_for_target)
+        if rc != 0:
+            sys.exit(rc)
     elif cmd == "save-result":
         from graph_fy.commands.reflect import cmd_save_result
         rc = cmd_save_result(sys.argv, _graph_fy_OUT)

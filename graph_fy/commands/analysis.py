@@ -315,3 +315,106 @@ def cmd_god_nodes(argv: list[str], default_graph_path_fn, find_graph_path_fn) ->
         for rank, n in enumerate(gods, 1):
             print(f"  {rank}. {_sanitize_label(str(n['label']))} - {n['degree']} edges")
     return 0
+
+
+def format_graph_stats(G, communities, active_graph_path: str | Path | None = None) -> str:
+    """Format graph stats summary matching CLI and MCP format."""
+    confs = [d.get("confidence", "EXTRACTED") for _, _, d in G.edges(data=True)]
+    total = len(confs) or 1
+    lines = [
+        f"Nodes: {G.number_of_nodes()}",
+        f"Edges: {G.number_of_edges()}",
+        f"Communities: {len(communities)}",
+        f"EXTRACTED: {round(confs.count('EXTRACTED')/total*100)}%",
+        f"INFERRED: {round(confs.count('INFERRED')/total*100)}%",
+        f"AMBIGUOUS: {round(confs.count('AMBIGUOUS')/total*100)}%",
+    ]
+    built_commit = G.graph.get("built_at_commit")
+    if built_commit:
+        short_commit = built_commit[:8]
+        if active_graph_path is not None:
+            p = Path(active_graph_path).resolve()
+            repo_root = p.parent.parent if p.parent.name == "graph_fy_out" else p.parent
+            from graph_fy.export import _git_head
+            head_commit = _git_head(repo_root)
+            if head_commit:
+                if head_commit.startswith(built_commit) or built_commit.startswith(head_commit):
+                    lines.append(f"Built at commit: {short_commit} (current HEAD)")
+                else:
+                    lines.append(f"Built at commit: {short_commit} (stale - current HEAD is {head_commit[:8]})")
+            else:
+                lines.append(f"Built at commit: {short_commit}")
+        else:
+            lines.append(f"Built at commit: {short_commit}")
+    return "\n".join(lines)
+
+
+def cmd_stats(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> int:
+    """Execute 'graph_fy stats' command."""
+    graph_path = default_graph_path_fn()
+    as_json = False
+    args = argv[2:]
+    i = 0
+    while i < len(args):
+        if args[i] in ("--graph", "-g") and i + 1 < len(args):
+            graph_path = args[i + 1]
+            i += 2
+        elif args[i].startswith("--graph="):
+            graph_path = args[i].split("=", 1)[1]
+            i += 1
+        elif args[i] in ("--root", "-r", "--dir", "-d") and i + 1 < len(args):
+            graph_path = str(find_graph_path_fn(args[i + 1]))
+            i += 2
+        elif args[i].startswith(("--root=", "--dir=")):
+            graph_path = str(find_graph_path_fn(args[i].split("=", 1)[1]))
+            i += 1
+        elif args[i] == "--json":
+            as_json = True
+            i += 1
+        elif not args[i].startswith("-"):
+            graph_path = str(find_graph_path_fn(args[i]))
+            i += 1
+        else:
+            i += 1
+
+    gp = Path(graph_path).resolve()
+    if not gp.exists():
+        print(f"error: graph file not found: {gp}", file=sys.stderr)
+        return 1
+
+    from graph_fy.serve import _load_graph, _communities_from_graph
+    try:
+        G = _load_graph(str(gp))
+        communities = _communities_from_graph(G)
+    except Exception as exc:
+        print(f"error: could not load graph: {exc}", file=sys.stderr)
+        return 1
+
+    if as_json:
+        confs = [d.get("confidence", "EXTRACTED") for _, _, d in G.edges(data=True)]
+        total = len(confs) or 1
+        built_commit = G.graph.get("built_at_commit")
+        repo_root = gp.parent.parent if gp.parent.name == "graph_fy_out" else gp.parent
+        from graph_fy.export import _git_head
+        head_commit = _git_head(repo_root) if built_commit else None
+        is_stale = None
+        if built_commit and head_commit:
+            is_stale = not (head_commit.startswith(built_commit) or built_commit.startswith(head_commit))
+        out = {
+            "nodes": G.number_of_nodes(),
+            "edges": G.number_of_edges(),
+            "communities": len(communities),
+            "confidence": {
+                "extracted_pct": round(confs.count("EXTRACTED") / total * 100),
+                "inferred_pct": round(confs.count("INFERRED") / total * 100),
+                "ambiguous_pct": round(confs.count("AMBIGUOUS") / total * 100),
+            },
+            "built_at_commit": built_commit,
+            "head_commit": head_commit,
+            "is_stale": is_stale,
+        }
+        print(json.dumps(out, indent=2))
+    else:
+        print(format_graph_stats(G, communities, gp))
+    return 0
+

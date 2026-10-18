@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from graph_fy.extractors.base import _make_id
+from graph_fy.ids import make_id as _make_id
 from graph_fy.resolvers.common import _is_type_like_definition, _resolve_cached
 
 

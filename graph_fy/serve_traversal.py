@@ -323,28 +323,31 @@ def _subgraph_to_text(G: nx.Graph, nodes: set[str], edges: list[tuple], token_bu
     for u, v in edges:
         if u in nodes and v in nodes:
             raw = G[u][v]
-            d = next(iter(raw.values()), {}) if isinstance(G, (nx.MultiGraph, nx.MultiDiGraph)) else raw
-            # Honor stored _src/_tgt direction over undirected BFS visit order.
-            src = d.get("_src", u)
-            tgt = d.get("_tgt", v)
-            # Guard against dangling endpoints in _src/_tgt.
-            if {src, tgt} != {u, v}:
-                src, tgt = u, v
-            context = d.get("context")
-            context_suffix = f" context={sanitize_label(str(context))}" if context else ""
-            # Use call site location rather than caller def line.
-            _loc = str(d.get("source_location") or "")
-            at_suffix = (
-                f" at={sanitize_label(str(d.get('source_file') or ''))}:{sanitize_label(_loc)}"
-                if _loc else ""
-            )
-            line = (
-                f"EDGE {sanitize_label(G.nodes[src].get('label', src))} "
-                f"--{sanitize_label(str(d.get('relation', '')))} "
-                f"[{sanitize_label(str(d.get('confidence', '')))}{context_suffix}]--> "
-                f"{sanitize_label(G.nodes[tgt].get('label', tgt))}{at_suffix}"
-            )
-            lines.append(line)
+            raw_edges = list(raw.values()) if isinstance(G, (nx.MultiGraph, nx.MultiDiGraph)) else [raw]
+            for d in raw_edges:
+                rels = d.get("relations") or [d.get("relation", "")]
+                for rel in rels:
+                    # Honor stored _src/_tgt direction over undirected BFS visit order.
+                    src = d.get("_src", u)
+                    tgt = d.get("_tgt", v)
+                    # Guard against dangling endpoints in _src/_tgt.
+                    if {src, tgt} != {u, v}:
+                        src, tgt = u, v
+                    context = d.get("context")
+                    context_suffix = f" context={sanitize_label(str(context))}" if context else ""
+                    # Use call site location rather than caller def line.
+                    _loc = str(d.get("source_location") or "")
+                    at_suffix = (
+                        f" at={sanitize_label(str(d.get('source_file') or ''))}:{sanitize_label(_loc)}"
+                        if _loc else ""
+                    )
+                    line = (
+                        f"EDGE {sanitize_label(G.nodes[src].get('label', src))} "
+                        f"--{sanitize_label(str(rel))} "
+                        f"[{sanitize_label(str(d.get('confidence', '')))}{context_suffix}]--> "
+                        f"{sanitize_label(G.nodes[tgt].get('label', tgt))}{at_suffix}"
+                    )
+                    lines.append(line)
     output = "\n".join(lines)
     if len(output) > char_budget:
         cut_at = output[:char_budget].rfind("\n")

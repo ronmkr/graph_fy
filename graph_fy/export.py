@@ -340,6 +340,8 @@ def to_json(G: nx.Graph, communities: dict[int, list[str]], output_path: str, *,
         if cid is not None and _labels:
             node["community_name"] = _labels.get(cid, f"Community {cid}")
         node["norm_label"] = _strip_diacritics(node.get("label", "")).lower()
+    expanded_links = []
+    has_multi_relations = False
     for link in data["links"]:
         if "confidence_score" not in link:
             conf = link.get("confidence", "EXTRACTED")
@@ -353,6 +355,17 @@ def to_json(G: nx.Graph, communities: dict[int, list[str]], output_path: str, *,
         if true_src is not None and true_tgt is not None:
             link["source"] = true_src
             link["target"] = true_tgt
+        rels = link.pop("relations", None)
+        expanded_links.append(link)
+        if rels and len(rels) > 1:
+            has_multi_relations = True
+            for r in rels:
+                if r != link.get("relation"):
+                    extra_link = dict(link, relation=r)
+                    expanded_links.append(extra_link)
+    if has_multi_relations:
+        data["multigraph"] = True
+    data["links"] = expanded_links
     # Canonicalize the key order WITHIN each node/link dict. node_link_data always
     # appends the node key (`id`) at the end, so a node whose `id` was an inline
     # attribute on a cold build (position varies) lands last after a read-rebuild
@@ -399,20 +412,51 @@ def to_json(G: nx.Graph, communities: dict[int, list[str]], output_path: str, *,
                 f"extraction if this is unexpected.",
                 file=sys.stderr,
             )
-    hyperedges = sorted(getattr(G, "graph", {}).get("hyperedges", []), key=_json_sort_key)
-    if isinstance(data.get("graph"), dict) and "hyperedges" in data["graph"]:
-        data["graph"]["hyperedges"] = hyperedges
-    data["hyperedges"] = hyperedges
     # Fallback provenance comes from the repo the graph is being written INTO
     # (output_path lives in <target>/graph_fy_out/), never the shell's cwd —
     # the same cwd-anchoring mistake #2316 fixed for `update`.
-    commit = built_at_commit if built_at_commit is not None else _git_head(Path(output_path).resolve().parent)
+    commit = built_at_commit if built_at_commit is not None else getattr(G, "graph", {}).get("built_at_commit")
+    if commit is None:
+        commit = _git_head(Path(output_path).resolve().parent)
     if commit:
         data["built_at_commit"] = commit
+
+    hyperedges = sorted(getattr(G, "graph", {}).get("hyperedges", []), key=_json_sort_key)
+    if isinstance(data.get("graph"), dict):
+        data["graph"] = dict(data["graph"])
+        data["graph"].pop("built_at_commit", None)
+        if "hyperedges" in data["graph"]:
+            data["graph"]["hyperedges"] = hyperedges
+    data["hyperedges"] = hyperedges
     from graph_fy.paths import write_json_atomic
     # Atomic write: a crash/ENOSPC mid-write must not truncate a good graph.json.
     write_json_atomic(output_path, data, indent=2)
+
+    # Mirror into relational SQLite store (graph.db) when outputting graph.json (#22)
+    out_p = Path(output_path)
+    if out_p.name in ("graph.json", "graph.tmp.json"):
+        try:
+            to_sqlite(G, out_p.parent / "graph.db", built_at_commit=commit)
+        except Exception:
+            pass
+
     return True
+
+
+def to_sqlite(
+    G: nx.Graph,
+    output_path: "str | Path",
+    built_at_commit: "str | None" = None,
+) -> bool:
+    """Persist graph G directly to SQLite relational store (graph.db) (#22)."""
+    from graph_fy.storage_sqlite import SqliteGraphStore
+    p = Path(output_path)
+    store = SqliteGraphStore(p)
+    try:
+        store.save_graph(G, commit=built_at_commit)
+        return True
+    finally:
+        store.close()
 
 
 def prune_dangling_edges(graph_data: dict) -> tuple[dict, int]:

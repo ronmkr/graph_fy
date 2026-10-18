@@ -794,6 +794,8 @@ def run_resolution_phase(
         # in the corpus — exactly what #2141 must not do.
         if rc.get("language") == "bash":
             continue
+        if rc.get("solidity_call"):
+            continue
         # A Markdown code span names a symbol, it does not call one. The
         # markdown_mentions resolver turns it into a `references` edge with the
         # cited file as evidence; a global name match here would mint a `calls`
@@ -1012,5 +1014,11 @@ def run_resolution_phase(
     except Exception:
         pass
 
+    # Cross-language FFI resolution (Rust <-> C/C++, PyO3, pybind11, wasm-bindgen) (#25)
+    try:
+        from graph_fy.ffi_resolve import resolve_ffi_boundaries
+        resolve_ffi_boundaries(all_nodes, all_edges, root=root)
+    except Exception:
+        pass
 
     return all_nodes, all_edges

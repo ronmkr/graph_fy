@@ -86,12 +86,12 @@ def _python_collect_type_refs(node, source: bytes, generic: bool, out: list[tupl
                 _python_collect_type_refs(c, source, generic, out)
 
 
-def _python_pre_scan_underscore_collisions(root_node, source: bytes, stem: str) -> dict[str, set[str]]:
-    """Pre-scan a Python module for name-only differences that collapse to one node id."""
-    groups: dict[str, set[str]] = {}
+def _python_pre_scan_underscore_collisions(root_node, source: bytes, stem: str) -> dict[str, Any]:
+    """Pre-scan a Python module for name differences and duplicate/kind declarations that collapse to one node id (#42, #3302)."""
+    raw_groups: dict[str, list[tuple[str, str]]] = {}
 
-    def _record(plain_nid: str, name: str) -> None:
-        groups.setdefault(plain_nid, set()).add(name)
+    def _record(plain_nid: str, name: str, kind: str) -> None:
+        raw_groups.setdefault(plain_nid, []).append((name, kind))
 
     def _undecorated(node):
         if node.type == "decorated_definition":
@@ -105,7 +105,7 @@ def _python_pre_scan_underscore_collisions(root_node, source: bytes, stem: str) 
             if name_node is not None:
                 name = _read_text(name_node, source)
                 if name:
-                    _record(_make_id(stem, name), name)
+                    _record(_make_id(stem, name), name, "function")
         elif child.type == "class_definition":
             class_name_node = child.child_by_field_name("name")
             body = child.child_by_field_name("body")
@@ -114,35 +114,124 @@ def _python_pre_scan_underscore_collisions(root_node, source: bytes, stem: str) 
             class_name = _read_text(class_name_node, source)
             if not class_name:
                 continue
-            _record(_make_id(stem, class_name), class_name)
+            _record(_make_id(stem, class_name), class_name, "class")
             classes.append((class_name, body))
 
-    module_groups = {nid: names for nid, names in groups.items() if len(names) >= 2}
+    # Pre-compute class IDs for class member scanning
+    temp_module_groups: dict[str, Any] = {}
+    for plain_nid, decl_list in raw_groups.items():
+        if len(decl_list) >= 2:
+            temp_module_groups[plain_nid] = _build_collision_entry(plain_nid, decl_list)
+
     for class_name, body in classes:
-        class_nid = _python_underscore_salted_nid(_make_id(stem, class_name), class_name, module_groups)
+        plain_class_nid = _make_id(stem, class_name)
+        class_nid = _python_underscore_salted_nid(plain_class_nid, class_name, temp_module_groups, kind="class")
         for member in map(_undecorated, body.children):
-            if member.type != "function_definition":
-                continue
-            name_node = member.child_by_field_name("name")
-            if name_node is None:
-                continue
-            name = _read_text(name_node, source)
-            if name:
-                _record(_make_id(class_nid, name), name)
+            if member.type == "function_definition":
+                name_node = member.child_by_field_name("name")
+                if name_node is None:
+                    continue
+                name = _read_text(name_node, source)
+                if name:
+                    _record(_make_id(class_nid, name), name, "method")
+            elif member.type == "class_definition":
+                name_node = member.child_by_field_name("name")
+                if name_node is None:
+                    continue
+                name = _read_text(name_node, source)
+                if name:
+                    _record(_make_id(class_nid, name), name, "class")
 
-    return {nid: names for nid, names in groups.items() if len(names) >= 2}
+    final_groups: dict[str, Any] = {}
+    for plain_nid, decl_list in raw_groups.items():
+        if len(decl_list) >= 2:
+            final_groups[plain_nid] = _build_collision_entry(plain_nid, decl_list)
+
+    return final_groups
 
 
-def _python_underscore_salted_nid(plain_nid: str, name: str, groups: dict[str, set[str]]) -> str:
+def _build_collision_entry(plain_nid: str, decl_list: list[tuple[str, str]]) -> dict[str, Any]:
+    """Compute deterministic IDs and canonical reference targets for colliding declarations."""
+    names = {d[0] for d in decl_list}
+    public_names = [n for n in names if not n.startswith("_")]
+    canonical_name = public_names[0] if len(public_names) == 1 else None
+
+    canonical_lookup: dict[str, str] = {}
+    assignments: list[tuple[str, str, str]] = []
+
+    for name in names:
+        subdecls = [d for d in decl_list if d[0] == name]
+        if name == canonical_name:
+            base_nid = plain_nid
+        else:
+            salt = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
+            base_nid = _make_id(plain_nid, salt)
+
+        if len(subdecls) == 1:
+            assignments.append((name, subdecls[0][1], base_nid))
+            canonical_lookup[name] = base_nid
+        else:
+            has_class = any(d[1] == "class" for d in subdecls)
+            fn_count = 0
+            for name_val, kind in subdecls:
+                if kind == "class" and has_class:
+                    assigned = base_nid
+                    canonical_lookup[name] = base_nid
+                elif not has_class and fn_count == 0:
+                    assigned = base_nid
+                    canonical_lookup[name] = base_nid
+                    fn_count += 1
+                else:
+                    if has_class and len(subdecls) == 2:
+                        fn_salt = hashlib.sha1(f"{kind}:{name}".encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
+                    else:
+                        fn_salt = hashlib.sha1(f"{kind}:{fn_count}:{name}".encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
+                    assigned = _make_id(plain_nid, fn_salt)
+                    fn_count += 1
+                assignments.append((name_val, kind, assigned))
+
+    return {
+        "raw_names": names,
+        "assignments": assignments,
+        "canonical": canonical_lookup,
+        "cursors": {},
+    }
+
+
+def _python_underscore_salted_nid(
+    plain_nid: str,
+    name: str,
+    groups: dict[str, Any],
+    *,
+    kind: str | None = None,
+) -> str:
     """Resolve a Python function/method's real node id against the collision map."""
-    names = groups.get(plain_nid)
-    if not names or len(names) < 2:
+    entry = groups.get(plain_nid)
+    if not entry:
         return plain_nid
-    public = [n for n in names if not n.startswith("_")]
-    if len(public) == 1 and name == public[0]:
-        return plain_nid
-    salt = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
-    return _make_id(plain_nid, salt)
+
+    # Legacy support if called with a plain set of names
+    if isinstance(entry, set):
+        if len(entry) < 2:
+            return plain_nid
+        public = [n for n in entry if not n.startswith("_")]
+        if len(public) == 1 and name == public[0]:
+            return plain_nid
+        salt = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
+        return _make_id(plain_nid, salt)
+
+    if kind is None:
+        return entry.get("canonical", {}).get(name, plain_nid)
+
+    assignments = entry.get("assignments", [])
+    cursors = entry.setdefault("cursors", {})
+    cur_idx = cursors.get((name, kind), 0)
+    for i in range(cur_idx, len(assignments)):
+        aname, akind, anid = assignments[i]
+        if aname == name and akind == kind:
+            cursors[(name, kind)] = i + 1
+            return anid
+    return entry.get("canonical", {}).get(name, plain_nid)
 
 
 def _python_collect_param_refs(params_node, source: bytes) -> list[tuple[str, str]]:

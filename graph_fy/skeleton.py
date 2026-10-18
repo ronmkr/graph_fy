@@ -35,6 +35,7 @@ _LANG_MAPPING: dict[str, tuple[str, str | None, str]] = {
     ".cc": ("tree_sitter_cpp", None, "cpp"),
     ".cxx": ("tree_sitter_cpp", None, "cpp"),
     ".cs": ("tree_sitter_c_sharp", None, "c_sharp"),
+    ".sol": ("tree_sitter_solidity", None, "solidity"),
 }
 
 _BLOCK_NODE_TYPES = frozenset({

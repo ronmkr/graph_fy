@@ -410,6 +410,14 @@ def default_graph_json() -> str:
     return str(target)
 
 
+def default_graph_db() -> str:
+    """Default ``graph.db`` path under the configured output dir."""
+    target = out_path("graph.db")
+    if not target.exists() and Path("graph_fy_out", "graph.db").exists():
+        return str(Path("graph_fy_out", "graph.db"))
+    return str(target)
+
+
 def is_absolute_any_platform(p: "str | Path | None") -> bool:
     """Whether *p* is absolute under POSIX **or** Windows rules.
 

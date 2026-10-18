@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from graph_fy.extractors.base import _make_id
+from graph_fy.resolvers.common import _make_id
 
 
 def _resolve_lua_import_target(raw_module: str, str_path: str) -> str:
