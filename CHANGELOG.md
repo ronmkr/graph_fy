@@ -2,7 +2,27 @@
 
 Full release notes with details on each version: [GitHub Releases](https://github.com/ronmkr/graph_fy/releases)
 
-## 0.2.0 (2026-10-17)
+## 0.3.0 (2026-10-19)
+
+- Feature: Build System & UI Extractors (Milestone 11, Step 11.4 [#26](https://github.com/ronmkr/graph_fy/issues/26)):
+  - **CMake Extractor** (`graph_fy/extractors/cmake.py`): AST extraction for `CMakeLists.txt` and `.cmake` files. Maps executable and library targets (`add_executable`, `add_library`), dependencies (`target_link_libraries`), target-scoped include directories (`target_include_directories`), and external packages (`find_package`).
+  - **Gradle Extractor** (`graph_fy/extractors/gradle.py`): Groovy and Kotlin DSL build parsing (`build.gradle`, `build.gradle.kts`, `settings.gradle`). Maps subproject dependencies (`project(':subproject')`), external dependencies (`implementation`, `api`, `testImplementation`), and multi-module microservice dependency graphs.
+  - **Qt UI XML Extractor** (`graph_fy/extractors/qt_ui.py`): User interface XML definition parsing (`.ui`), mapping widgets, layouts, actions, and custom signal/slot connections.
+  - **Qt Signal/Slot C++ Extractor & Resolver** (`graph_fy/extractors/c_cpp.py` & `graph_fy/resolvers/c_cpp.py`): Extracts and resolves `QObject::connect()` calls with `SIGNAL()`/`SLOT()` macros and modern member function pointers, linking UI widgets to backend C++ handlers.
+  - **Target-Scoped C++ Include Resolution**: Header `#include` resolution grounded in CMake target include directories, preventing ambiguous multi-target header collisions.
+- Feature: Cross-Language FFI Linker (Milestone 11, Step 11.3 [#25](https://github.com/ronmkr/graph_fy/issues/25)):
+  - Cross-language FFI boundary linking connecting C/C++ native exports (`extern "C"`) to Python (`ctypes`, `cffi`), Rust (`extern "C"`), and Go (`cgo`) invocations via `calls_ffi` edges.
+- Feature: Git Co-Change & Churn Engine (Milestone 11, Step 11.1 [#21](https://github.com/ronmkr/graph_fy/issues/21)):
+  - Revision history mining analyzing temporal coupling, commit frequency, and churn risk scores. Injected directly into pre-agent architectural briefings.
+- Feature: Zero-Deserialization SQLite WAL Storage (Milestone 11, Step 11.2 [#22](https://github.com/ronmkr/graph_fy/issues/22)):
+  - ACID SQLite `graph.db` with write-ahead logging (WAL), clustered `WITHOUT ROWID` edge tables, and recursive Common Table Expressions (CTEs) for sub-millisecond reverse-BFS blast radius lookups without JSON parsing overhead.
+- Feature: Code-First & Degree-Ranked Seed Disambiguation (`graph_fy/affected.py`):
+  - Disambiguates duplicate exact and bare label matches by prioritizing verified code symbols (`file_type == 'code'`) over documentation/markdown headings, resolving ties via graph degree.
+- Feature: Upstream v0.9.92 Parity Hardening ([#32](https://github.com/ronmkr/graph_fy/issues/32)-[#45](https://github.com/ronmkr/graph_fy/issues/45)):
+  - Disambiguated located node collisions with SHA1 salts, model-drifted confidence folding, JS/TS member prefixes (`_`, `$`, `#`), post-merge & post-rewrite git hooks, workspace package fallbacks, suppression of `Self` and generic stubs, Solidity C3 linearization, TS `this.field` typing, barrel import retraction, and pytest fixture unwrapping.
+- Benchmark: Three-Way Empirical Evaluation Across Enterprise Codebases:
+  - Head-to-head empirical evaluation across Spring Boot (`macrozheng/mall`, 524 Java microservices files) and Angular (`spring-petclinic-angular`, 97 TypeScript files) comparing: (1) Without Skills (Raw LLM), (2) Upstream Graphify v0.9.92, and (3) `graph_fy`.
+  - Demonstrated 58.2% to 89.4% token reduction vs raw whole-file ingestion, 0 extra tool turns (100% 1-turn briefings), 2.4x to 16.6x latency speedup, 100% anti-hallucination rate, full Docker Compose and GitHub Actions CI workflow extraction, modern Angular 18 signals and `inject()` recall, and elimination of 660 junk nodes from minified JS.
 
 - Feature: Comparative Evaluation Suite & 106 Real-World Scenarios (`graph_fy/comparative_eval.py` & `evals/`):
   - Head-to-head benchmark harness comparing With Skill (`graph_fy`) vs Without Skill (Raw LLM baseline).

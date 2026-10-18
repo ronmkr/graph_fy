@@ -30,6 +30,7 @@ IMPACT_RELATIONS: frozenset[str] = frozenset({
     "subscribes_to",
     "calls_ffi",
     "imports_native",
+    "connects_signal_slot",
 })
 
 # External API endpoint node types and label patterns

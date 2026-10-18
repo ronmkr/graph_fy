@@ -31,6 +31,7 @@ DEFAULT_AFFECTED_RELATIONS = (
     "requires",
     "calls_ffi",
     "imports_native",
+    "connects_signal_slot",
 )
 
 
@@ -152,6 +153,17 @@ def resolve_seed(graph: nx.Graph, query: str, root: Path | None = None) -> str |
     ]
     if len(exact_label_matches) == 1:
         return exact_label_matches[0]
+    if len(exact_label_matches) > 1:
+        code_matches = [
+            nid for nid in exact_label_matches
+            if graph.nodes[nid].get("file_type") == "code" and graph.nodes[nid].get("node_kind") != "heading"
+        ]
+        if len(code_matches) == 1:
+            return code_matches[0]
+        if code_matches:
+            sorted_cands = sorted(code_matches, key=lambda nid: graph.degree(nid), reverse=True)
+            if graph.degree(sorted_cands[0]) > graph.degree(sorted_cands[1]):
+                return sorted_cands[0]
     # Callable labels are decorated ("name()"), so a bare "name" query falls
     # through exact matching and then ties with any "name*" sibling in the
     # contains pass. Match on the undecorated name before giving up.
@@ -163,6 +175,17 @@ def resolve_seed(graph: nx.Graph, query: str, root: Path | None = None) -> str |
     ]
     if len(bare_name_matches) == 1:
         return bare_name_matches[0]
+    if len(bare_name_matches) > 1:
+        code_matches = [
+            nid for nid in bare_name_matches
+            if graph.nodes[nid].get("file_type") == "code" and graph.nodes[nid].get("node_kind") != "heading"
+        ]
+        if len(code_matches) == 1:
+            return code_matches[0]
+        if code_matches:
+            sorted_cands = sorted(code_matches, key=lambda nid: graph.degree(nid), reverse=True)
+            if graph.degree(sorted_cands[0]) > graph.degree(sorted_cands[1]):
+                return sorted_cands[0]
     # Compare paths in repo-relative form. Only this branch is path-shaped; the
     # label branches above keep the query verbatim.
     query_path = _normalize_label(_as_repo_relative(query, root))
