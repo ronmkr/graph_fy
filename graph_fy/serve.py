@@ -624,6 +624,19 @@ def _build_server(graph_path: str):
                     },
                 },
             ),
+            types.Tool(
+                name="fast_ast_search",
+                description="Sub-second (<100ms) unindexed lexical search and on-demand Tree-sitter AST extraction without requiring a pre-built graph.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Symbol name or pattern to search for"},
+                        "target": {"type": "string", "default": ".", "description": "Directory or file to search"},
+                        "limit": {"type": "integer", "default": 10, "description": "Maximum number of AST symbol results to return"},
+                    },
+                    "required": ["query"],
+                },
+            ),
         ]
         # Multi-project support: every tool accepts an optional project_path.
         # Injected here (rather than repeated in 11 literal schemas) so the set
@@ -938,10 +951,22 @@ def _build_server(graph_path: str):
     def _tool_get_code_skeleton(arguments: dict) -> str:
         from graph_fy.mcp import get_code_skeleton
         path = arguments.get("path", "")
+        symbol = arguments.get("symbol")
         if not path:
             raise ToolError("Missing required argument: 'path'")
         root = str(Path(active_graph_path).parent.parent) if Path(active_graph_path).parent.name == "graph_fy_out" else str(Path(active_graph_path).parent)
-        res = get_code_skeleton(path, root_dir=root)
+        res = get_code_skeleton(path, root_dir=root, symbol=symbol)
+        return json.dumps(res, indent=2)
+
+    def _tool_fast_ast_search(arguments: dict) -> str:
+        from graph_fy.mcp import fast_ast_search
+        query = arguments.get("query", "")
+        if not query:
+            raise ToolError("Missing required argument: 'query'")
+        target = arguments.get("target", ".")
+        limit = int(arguments.get("limit", 10))
+        root = str(Path(active_graph_path).parent.parent) if Path(active_graph_path).parent.name == "graph_fy_out" else str(Path(active_graph_path).parent)
+        res = fast_ast_search(query, target=target, limit=limit, root_dir=root)
         return json.dumps(res, indent=2)
 
     def _tool_get_symbol_implementation(arguments: dict) -> str:
@@ -1019,6 +1044,7 @@ def _build_server(graph_path: str):
         "refine_context": _tool_refine_context,
         "get_agent_context": _tool_get_agent_context,
         "get_test_selection": _tool_get_test_selection,
+        "fast_ast_search": _tool_fast_ast_search,
     }
 
     def _load_community_labels() -> dict[int, str]:

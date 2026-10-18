@@ -141,6 +141,9 @@ def dispatch_command(cmd: str) -> None:
     elif cmd in ("context", "prebrief"):
         from graph_fy.commands.context import cmd_context
         sys.exit(cmd_context(sys.argv))
+    elif cmd in ("skeleton", "file-skeleton"):
+        from graph_fy.commands.skeleton import cmd_skeleton
+        sys.exit(cmd_skeleton(sys.argv))
     elif cmd == "query":
         from graph_fy.commands.query import cmd_query
         rc = cmd_query(sys.argv, _default_graph_path, _find_graph_path_for_target)

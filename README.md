@@ -144,6 +144,9 @@ graph_fy . --no-viz                           # headless build (JSON + FTS5 inde
 # Query & Traversal
 graph_fy query "auth flow"                    # BM25 search expanded via graph traversal
 graph_fy query "auth flow" --terse            # Caveman mode: high-signal, compact output
+graph_fy query "hash_password" --fast-grep    # sub-second (<100ms) unindexed AST search (no prior build needed)
+graph_fy skeleton src/auth.py                 # extract AST interface skeleton without building graph
+graph_fy skeleton src/auth.py --symbol Login  # extract AST skeleton for single symbol in <10ms
 graph_fy query "auth flow" --skeleton         # AST code skeletons (types & signatures without bodies)
 graph_fy query "auth flow" --rag-prompt       # prompt-ready context block with strict budget packing
 graph_fy path "Frontend" "Database"           # shortest cross-layer dependency path (semantic Dijkstra)

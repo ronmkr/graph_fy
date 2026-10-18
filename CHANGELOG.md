@@ -10,6 +10,12 @@ Full release notes with details on each version: [GitHub Releases](https://githu
   - **Ready-to-Run Test Commands**: Automatically generates copy-pasteable test execution commands tailored to project ecosystems (`pytest`, `cargo`, `vitest`, `jest`, `npm`, `go`, `mvn`, `gradle`).
   - **MCP Test Selection Tool** (`get_test_selection`): Exposes test selection directly to coding agents via MCP with parameter overrides for `--since`, `--coverage`, and `--runner`.
   - **Coverage CLI** (`graph_fy coverage <file>`): Ingests coverage artifacts and reports overall repository line coverage, decorated nodes, and attached test-to-code edges.
+- Feature: Sub-Second On-Demand AST Search & Fast-Path Query for Local Tasks ([#50](https://github.com/ronmkr/graph_fy/issues/50)):
+  - **Unindexed Fast-Path AST Engine** (`graph_fy/fast_query.py`): Performs sub-second (<100ms) lexical search joined to on-demand Tree-sitter AST extraction, completely bypassing graph indexing, relational database serialization, and community partitioning.
+  - **Ripgrep & Standard Library Hybrid**: Leverages system `rg` when available for instant multi-file scanning, with graceful standard-library Python fallback.
+  - **Single-File Skeleton Extraction** (`graph_fy skeleton <file>`): CLI subcommand and API extracting AST skeletons for an entire file or a single symbol (`--symbol <name>`) in <10ms without a prior `graph_fy extract` pass.
+  - **CLI Fast-Grep Flag** (`graph_fy query "<text>" --fast-grep [target]`): Instantly retrieves exact symbol kind, definition line numbers, compact signature, docstring, and skeleton.
+  - **MCP Fast AST Tool** (`fast_ast_search` & symbol parameter in `get_code_skeleton`): Exposes sub-second AST search and single-symbol skeletonization directly to coding agents over MCP.
 - Feature: Progressive Body Hydration & Adaptive Skeletons ([#49](https://github.com/ronmkr/graph_fy/issues/49)):
   - **Progressive Body Disclosure** (`graph_fy/retrieval_context.py`): Inlines full verified AST function bodies for top focus candidates during pre-agent architectural briefings (`graph_fy context "<task>" --include-bodies` and MCP `get_agent_context`), eliminating subsequent exploratory read rounds for algorithmic and implementation debugging.
   - **Keyword-Driven Auto-Hydration**: Automatically activates full body disclosure for narrow, targeted queries containing algorithmic and debugging intent (`bug`, `fix`, `error`, `crash`, `leak`, `race`, `algo`, `implement`, etc.) when candidate set is focused ($\le 3$ candidates).

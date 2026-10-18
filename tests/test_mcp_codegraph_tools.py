@@ -371,7 +371,7 @@ def test_find_implementations(sample_code_tree):
 
 
 def test_codegraph_tool_specs():
-    assert len(CODEGRAPH_TOOL_SPECS) == 11
+    assert len(CODEGRAPH_TOOL_SPECS) == 12
     names = {spec["name"] for spec in CODEGRAPH_TOOL_SPECS}
     expected = {
         "find_definitions",
@@ -385,6 +385,7 @@ def test_codegraph_tool_specs():
         "refine_context",
         "get_agent_context",
         "get_test_selection",
+        "fast_ast_search",
     }
     assert names == expected
 
