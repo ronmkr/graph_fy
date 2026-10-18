@@ -62,6 +62,9 @@ def _normalize_route_path(p: str) -> str:
     if not p:
         return ""
     p = p.strip().strip("'\"`")
+    m = re.match(r"^(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\s+(.*)$", p, re.IGNORECASE)
+    if m:
+        p = m.group(2).strip()
     if not p.startswith("/"):
         p = "/" + p
     p = re.sub(r":([a-zA-Z0-9_]+)", r"{\1}", p)
@@ -579,15 +582,19 @@ def resolve_rtk_backend_edges(
         ntype = str(n.get("type", ""))
         lbl = str(n.get("label", ""))
 
-        if ntype in ("openapi_operation", "openapi_path") or lbl.startswith("OpenAPI:"):
+        if ntype in ("openapi_operation", "openapi_path", "api_operation", "api_path") or lbl.startswith(("OpenAPI:", "API:")):
             route_path = n.get("path") or n.get("route") or ""
-            route_method = str(n.get("http_method") or n.get("method") or "GET").upper()
+            route_method = str(n.get("http_method") or n.get("method") or "").upper()
             if not route_path and ":" in lbl:
                 parts = lbl.split(":")
-                if len(parts) >= 3:
-                    route_path = parts[-1]
+                route_path = parts[-1].strip()
+            if not route_method and route_path:
+                m_meth = re.match(r"^(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\s+(.*)$", route_path, re.IGNORECASE)
+                if m_meth:
+                    route_method = m_meth.group(1).upper()
+                    route_path = m_meth.group(2).strip()
             if route_path:
-                backend_routes.append((n, _normalize_route_path(route_path), route_method))
+                backend_routes.append((n, _normalize_route_path(route_path), route_method or "GET"))
 
         elif "route" in ntype or "endpoint" in ntype or n.get("http_route") or n.get("http_path"):
             route_path = n.get("http_route") or n.get("http_path") or n.get("route") or ""
