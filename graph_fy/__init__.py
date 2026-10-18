@@ -32,6 +32,8 @@ def __getattr__(name):
         "find_references": ("graph_fy.mcp", "find_references"),
         "find_implementations": ("graph_fy.mcp", "find_implementations"),
         "estimate_token_savings": ("graph_fy.mcp", "estimate_token_savings"),
+        "GraphQueryEngine": ("graph_fy.query_engine", "GraphQueryEngine"),
+        "get_query_engine": ("graph_fy.query_engine", "get_query_engine"),
     }
     if name in _map:
         import importlib

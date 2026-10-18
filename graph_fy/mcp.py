@@ -993,11 +993,11 @@ def get_diff_context(
     graph_path: str | None = None,
 ) -> dict:
     """Retrieve git diff-scoped ego-network context for code review / PR analysis."""
-    from graph_fy.retrieval import diff_context
-    return diff_context(
+    from graph_fy.query_engine import GraphQueryEngine
+    return GraphQueryEngine.diff_context(
         graph=graph,
         base_ref=base_ref,
-        root_dir=root_dir,
+        repo_root=root_dir,
         token_budget=token_budget,
         graph_path=graph_path,
     )
@@ -1029,8 +1029,8 @@ def get_agent_context(
     include_diagram: bool = True,
 ) -> dict:
     """Generate a holistic, deterministic pre-agent architectural briefing before LLM calls."""
-    from graph_fy.retrieval import task_context
-    return task_context(
+    from graph_fy.query_engine import GraphQueryEngine
+    return GraphQueryEngine.task_context(
         task=task,
         graph=graph,
         root_dir=root_dir,

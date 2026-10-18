@@ -864,14 +864,14 @@ def _build_server(graph_path: str):
         return "\n\n".join(lines)
 
     def _tool_get_impact_analysis(arguments: dict) -> str:
-        from graph_fy.impact import compute_impact, format_impact_report
+        from graph_fy.query_engine import GraphQueryEngine
         target = arguments.get("target", "")
         if not target:
             raise ToolError("Missing required argument: 'target'")
         depth = int(arguments.get("depth", 10))
         terse = bool(arguments.get("terse", False))
-        impact_data = compute_impact(G, target, max_depth=depth)
-        return format_impact_report(impact_data, terse=terse)
+        impact_data = GraphQueryEngine.compute_impact(G, target, max_depth=depth)
+        return GraphQueryEngine.format_impact_report(impact_data, terse=terse)
 
     def _tool_get_execution_flow(arguments: dict) -> str:
         from graph_fy.mcp import get_execution_flow
