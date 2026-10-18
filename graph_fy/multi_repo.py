@@ -253,7 +253,7 @@ def synthesize_entity_architecture(
 
     selected_nodes = set(entity_node_map.values())
     if not selected_nodes:
-        return {"entities": [], "mermaid": "graph TD\n", "matrix": {}, "edges_count": 0}
+        return {"entities": [], "mermaid": "graph TD\n", "matrix": {}, "subgraph_nodes_count": 0, "subgraph_edges_count": 0}
 
     # 2. Extract connecting subgraph (direct edges + 1-hop connecting bridges)
     subgraph_nodes = set(selected_nodes)
