@@ -82,3 +82,53 @@ def _file_stem(path: Path) -> str:
 
 def _read_text(node, source: bytes) -> str:
     return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+
+
+REFERENCE_CONTEXTS = frozenset({
+    "field", "parameter_type", "return_type", "generic_arg", "attribute", "value", "type",
+})
+
+
+def _source_location(line: int | str | None) -> str | None:
+    if line is None:
+        return None
+    if isinstance(line, str):
+        return line if line.startswith("L") else f"L{line}"
+    return f"L{line}"
+
+
+def _semantic_reference_edge(
+    source: str,
+    target: str,
+    context: str,
+    source_file: str,
+    line: int | str | None,
+) -> dict:
+    if context not in REFERENCE_CONTEXTS:
+        raise ValueError(f"unknown reference context: {context}")
+    return {
+        "source": source,
+        "target": target,
+        "relation": "references",
+        "context": context,
+        "confidence": "EXTRACTED",
+        "source_file": source_file,
+        "source_location": _source_location(line),
+        "weight": 1.0,
+    }
+
+
+def _find_body(node, config=None):
+    """Find the body node using config.body_field, falling back to child types."""
+    if config is not None:
+        body_field = getattr(config, "body_field", None)
+        if body_field:
+            b = node.child_by_field_name(body_field)
+            if b:
+                return b
+        fallback_types = getattr(config, "body_fallback_child_types", ())
+        for child in node.children:
+            if child.type in fallback_types:
+                return child
+    return None
+

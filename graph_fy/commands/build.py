@@ -1502,13 +1502,34 @@ def cmd_build(
             print(f"[graph_fy extract] Cargo: {len(cargo_result['nodes'])} nodes, "
                   f"{len(cargo_result['edges'])} edges")
 
-        # Merge AST + semantic + pg_result + cargo_result. Order matters for deduplication: passing AST
+        scip_result: dict = {"nodes": [], "edges": []}
+        scip_candidates = [
+            target / "index.scip.json",
+            target / "scip.json",
+            target / ".scip" / "index.scip.json",
+            target / ".scip" / "scip.json",
+        ]
+        for scip_path in scip_candidates:
+            if scip_path.is_file():
+                try:
+                    from graph_fy.scip_ingest import ingest_scip_json
+                    scip_data = json.loads(scip_path.read_text(encoding="utf-8", errors="replace"))
+                    scip_res = ingest_scip_json(scip_data, source_file=str(scip_path))
+                    if scip_res.get("nodes") or scip_res.get("edges"):
+                        scip_result["nodes"].extend(scip_res["nodes"])
+                        scip_result["edges"].extend(scip_res["edges"])
+                        print(f"[graph_fy extract] SCIP compiler index ingested ({len(scip_res['nodes'])} nodes, {len(scip_res['edges'])} edges)")
+                        break
+                except Exception as exc:
+                    print(f"[graph_fy extract] warning: failed to ingest SCIP index at {scip_path}: {exc}", file=sys.stderr)
+
+        # Merge AST + semantic + pg_result + cargo_result + scip_result. Order matters for deduplication: passing AST
         # first means semantic node attributes win on collision (richer labels
         # for symbols also referenced in docs). Hyperedges only come from the
         # semantic side.
         merged: dict = {
-            "nodes": list(ast_result.get("nodes", [])) + list(sem_result.get("nodes", [])) + list(pg_result.get("nodes", [])) + list(cargo_result.get("nodes", [])),
-            "edges": list(ast_result.get("edges", [])) + list(sem_result.get("edges", [])) + list(pg_result.get("edges", [])) + list(cargo_result.get("edges", [])),
+            "nodes": list(ast_result.get("nodes", [])) + list(sem_result.get("nodes", [])) + list(pg_result.get("nodes", [])) + list(cargo_result.get("nodes", [])) + list(scip_result.get("nodes", [])),
+            "edges": list(ast_result.get("edges", [])) + list(sem_result.get("edges", [])) + list(pg_result.get("edges", [])) + list(cargo_result.get("edges", [])) + list(scip_result.get("edges", [])),
             "hyperedges": list(sem_result.get("hyperedges", [])),
             "input_tokens": ast_result.get("input_tokens", 0) + sem_result.get("input_tokens", 0),
             "output_tokens": ast_result.get("output_tokens", 0) + sem_result.get("output_tokens", 0),

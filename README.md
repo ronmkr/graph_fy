@@ -10,7 +10,7 @@
 
 ## Why Local Analysis First?
 
-Blind agent exploration is expensive and slow. Coding agents typically read hundreds of raw files, consume tens of thousands of prompt tokens, and hallucinate missing dependencies. 
+Blind agent exploration is expensive and slow. Coding agents typically read hundreds of raw files, consume tens of thousands of prompt tokens, and hallucinate missing dependencies.
 
 `graph_fy` flips this paradigm:
 
@@ -29,7 +29,7 @@ Blind agent exploration is expensive and slow. Coding agents typically read hund
 `graph_fy` exports 100% offline, self-contained interactive visualizers with WCAG AAA color contrast, hardware-accelerated SVG animations, deep-linking state synchronization (`?search=...`, `?theme=...`, `?focus=...`, `?view=...`), and iframe dashboard embedding:
 
 | Visualizer | Description | CLI Command |
-|---|---|---|
+| --- | --- | --- |
 | **Architecture Pipeline Map** | 6-stage lifecycle execution pipeline with live telemetry pulses, bezier dispatch wires, and slide-over AST code inspector drawer. | `graph_fy describe arch` |
 | **Mermaid Architectural Flowchart** | Dual-orientation (`↕ Vertical TD` / `↔ Horizontal LR`) flowchart with zoom toolbar, directly pasteable into GitHub markdown, PR reviews, and Obsidian. | `graph_fy describe arch --format mermaid` |
 | **Interactive D3 Knowledge Graph** | Community-clustered force-directed graph with god-node highlights, neighbor ego exploration, and deep-link query filters. | `graph_fy export html` |
@@ -38,21 +38,27 @@ Blind agent exploration is expensive and slow. Coding agents typically read hund
 | **Multi-View Unified Dashboard** | 4-pane responsive iframe layout embedding all visualizers in a unified synced container. | `graph_fy export dashboard` |
 
 ### Architecture Pipeline Map (`architecture.html`)
+
 ![Architecture Pipeline Map](screenshots/arch_map.png)
 
 ### Mermaid Flowchart (`↕ Vertical (TD)` & `↔ Horizontal (LR)`)
+
 ![Mermaid Architectural Flowchart](screenshots/mermaid_flowchart.png)
 
 ### Force-Directed D3 Knowledge Graph (`graph.html`)
+
 ![Interactive Knowledge Graph](screenshots/interactive_graph.png)
 
 ### Execution Callflow Matrix (`callflow.html`)
+
 ![Callflow Sequence](screenshots/callflow.png)
 
 ### Hierarchical Tree Explorer (`tree.html`)
+
 ![Symbol Tree Explorer](screenshots/tree_explorer.png)
 
 ### Multi-View Unified Dashboard (`dashboard.html`)
+
 ![Multi-View Dashboard](screenshots/multi_view_dashboard.png)
 
 ---
@@ -73,6 +79,7 @@ graph_fy .
 ```
 
 Outputs written to `graph_fy_out/`:
+
 - `graph.json` — Complete graph (nodes, edges, communities) for instant querying.
 - `index.db` — SQLite FTS5 BM25 search index with sub-token splitting.
 - `GRAPH_REPORT.md` — Plain-language architectural summary and god nodes.
@@ -87,7 +94,7 @@ Outputs written to `graph_fy_out/`:
 Why `graph_fy` represents a fundamental architectural evolution over original Graphify:
 
 | Dimension | Original Graphify | `graph_fy` (Our Implementation) |
-|---|---|---|
+| --- | --- | --- |
 | **Core Architecture** | Requires external LLMs / cloud API keys to extract entities and summarize chunks. | **100% Zero-LLM Local Compute**. Native tree-sitter AST, deterministic statistical graph algorithms, and SQLite FTS5 BM25. **Zero API keys, zero cloud costs.** |
 | **Agent Briefing Flow** | Reactive: agent searches blind, reads entire files into prompt context, and exhausts token limits. | **Proactive Zero-LLM Analysis Briefing**. `graph_fy context "<task>"` (MCP `get_agent_context`) builds an architectural map, Mermaid flow diagram, and exact skeletons **before** calling frontier models. |
 | **Token Reduction** | Monolithic file dumps; quickly fills context windows on medium/large repos. | **Multi-Tier Elision & Hub Compaction**. **99.9% token compression** measured across 5 real-world stress test workflows (839k raw tokens $\to$ 883 context tokens, **950.3x compression**). |
@@ -170,12 +177,12 @@ graph_fy --mcp                                # launch local MCP stdio server
 ### Benchmark Highlights: With Skill (`graph_fy`) vs Without Skill (Raw LLM)
 
 Benchmarked across 106 real-world software engineering scenarios (CVE blast radius, multi-repo migrations, concurrency leaks, anti-hallucination defense):
+
 - **98.6% Token Reduction**: 31,583 tokens with `graph_fy` vs 2,248,924 raw tokens (71x compaction).
 - **80.8% Fewer Round Trips**: 1-turn zero-shot deterministic briefing vs 5.2 exploratory tool turns.
 - **123.3x Latency Speedup**: 147.7ms local AST graph retrieval vs 16.6s multi-turn cloud LLM latency.
 - **100% Anti-Hallucination Grounding**: Deterministic rejection of phantom APIs (`Target Symbol Not Found`) vs 0% on raw models.
 - **100% Blast Radius Coverage**: Complete transitive reachability across downstream dependents and test suites.
-
 
 ---
 
@@ -201,4 +208,3 @@ uv run pytest tests/ -q
 ## Acknowledgements & Lineage
 
 `graph_fy` is an independent, 100% offline evolution inspired by and building upon the foundational AST extraction work of the original [Graphify](https://github.com/safishamsi/graphify) project created by **Safi Shamsi** and its contributors. We gratefully credit the original author and community for their pioneering work on multi-language graph extraction.
-

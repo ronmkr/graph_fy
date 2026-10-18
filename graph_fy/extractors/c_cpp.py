@@ -1,0 +1,350 @@
+"""C and C++ AST extractors."""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from graph_fy.extractors.base import _file_stem, _make_id, _read_text
+from graph_fy.extractors.models import LanguageConfig
+
+from graph_fy.extractors.resolution import _resolve_c_include_path
+
+
+def _get_c_func_name(node, source: bytes) -> str | None:
+    """Recursively unwrap declarator to find the innermost identifier (C)."""
+    if node.type == "identifier":
+        return _read_text(node, source)
+    decl = node.child_by_field_name("declarator")
+    if decl:
+        return _get_c_func_name(decl, source)
+    for child in node.children:
+        if child.type == "identifier":
+            return _read_text(child, source)
+    return None
+
+
+def _import_c(node, source: bytes, file_nid: str, stem: str, edges: list, str_path: str, scope_stack: list[str] | None = None) -> None:
+    for child in node.children:
+        if child.type in ("string_literal", "system_lib_string", "string"):
+            raw = _read_text(child, source).strip('"<> ')
+            # Quoted includes: try to resolve to a real file so the target ID
+            # matches the node ID _extract_generic creates for that file.
+            if child.type != "system_lib_string":
+                resolved = _resolve_c_include_path(raw, str_path)
+                if resolved is not None:
+                    tgt_nid = _make_id(str(resolved))
+                    edges.append({
+                        "source": file_nid,
+                        "target": tgt_nid,
+                        "relation": "imports",
+                        "context": "import",
+                        "confidence": "EXTRACTED",
+                        "source_file": str_path,
+                        "source_location": f"L{node.start_point[0] + 1}",
+                        "weight": 1.0,
+                        "target_file": str(resolved),
+                    })
+                    break
+            module_name = raw.split("/")[-1].split(".")[0]
+            if module_name:
+                tgt_nid = _make_id(module_name)
+                edges.append({
+                    "source": file_nid,
+                    "target": tgt_nid,
+                    "relation": "imports",
+                    "context": "import",
+                    "confidence": "EXTRACTED",
+                    "source_file": str_path,
+                    "source_location": f"L{node.start_point[0] + 1}",
+                    "weight": 1.0,
+                })
+            break
+
+
+_C_PRIMITIVE_TYPE_NODES = frozenset({
+    "primitive_type", "sized_type_specifier", "auto", "placeholder_type_specifier",
+})
+
+def _c_collect_type_refs(node, source: bytes, generic: bool, out: list[tuple[str, str]]) -> None:
+    """Walk a C type expression; append (name, role) tuples for user-defined types.
+    Skips primitive types and qualifiers; recognises type_identifier."""
+    if node is None or node.type in _C_PRIMITIVE_TYPE_NODES:
+        return
+    t = node.type
+    if t == "type_identifier":
+        text = _read_text(node, source)
+        if text:
+            out.append((text, "generic_arg" if generic else "type"))
+        return
+    if t in ("pointer_declarator", "reference_declarator", "array_declarator",
+             "type_qualifier", "type_descriptor", "abstract_pointer_declarator",
+             "abstract_reference_declarator", "abstract_array_declarator"):
+        for c in node.children:
+            if c.is_named:
+                _c_collect_type_refs(c, source, generic, out)
+
+def _cpp_collect_type_refs(node, source: bytes, generic: bool, out: list[tuple[str, str]]) -> None:
+    """Walk a C++ type expression; append (name, role) tuples.
+    Resolves qualified_identifier tails (std::string → string) and template_type
+    base + arguments (std::vector<HttpClient> → vector + HttpClient as generic_arg)."""
+    if node is None or node.type in _C_PRIMITIVE_TYPE_NODES:
+        return
+    t = node.type
+    if t == "type_identifier":
+        text = _read_text(node, source)
+        if text:
+            out.append((text, "generic_arg" if generic else "type"))
+        return
+    if t == "qualified_identifier":
+        name_node = node.child_by_field_name("name")
+        if name_node is not None:
+            _cpp_collect_type_refs(name_node, source, generic, out)
+        return
+    if t == "template_type":
+        name_node = node.child_by_field_name("name")
+        if name_node is not None:
+            text = _read_text(name_node, source)
+            if text:
+                out.append((text, "generic_arg" if generic else "type"))
+        args_node = node.child_by_field_name("arguments")
+        if args_node is not None:
+            for c in args_node.children:
+                if c.is_named:
+                    _cpp_collect_type_refs(c, source, True, out)
+        return
+    if t in ("type_descriptor", "pointer_declarator", "reference_declarator",
+             "array_declarator", "type_qualifier", "abstract_pointer_declarator",
+             "abstract_reference_declarator", "abstract_array_declarator"):
+        for c in node.children:
+            if c.is_named:
+                _cpp_collect_type_refs(c, source, generic, out)
+
+def _get_cpp_func_name(node, source: bytes) -> str | None:
+    """Recursively unwrap declarator to find the innermost identifier (C++)."""
+    if node.type == "identifier":
+        return _read_text(node, source)
+    if node.type in ("field_identifier", "destructor_name", "operator_name"):
+        return _read_text(node, source)
+    if node.type == "qualified_identifier":
+        # An out-of-class DEFINITION (`void Foo::bar() {}`) carries a
+        # qualified_identifier declarator. Retaining the `Foo::` qualifier makes
+        # _make_id(stem, "Foo::bar") normalize to the same id as the in-class
+        # member _make_id(class_nid, "bar"), so the decl in Foo.h and the def in
+        # Foo.cpp resolve to ONE method node instead of two (#1547). The full
+        # qualified text also handles nested scopes (`A::B::bar`). Free functions
+        # never have a qualified_identifier here, so their bare-name ids are
+        # unchanged; only qualified definitions shift onto their owning class.
+        return _read_text(node, source)
+    decl = node.child_by_field_name("declarator")
+    if decl:
+        return _get_cpp_func_name(decl, source)
+    for child in node.children:
+        if child.type == "identifier":
+            return _read_text(child, source)
+    return None
+
+def _cpp_declarator_name(node, source: bytes) -> str | None:
+    """Return the bare variable name from a C++ declaration declarator, unwrapping
+    pointer/reference/init wrappers (``*f``, ``&r``, ``f = Foo()``). Returns None
+    for anything that isn't a plain named local (arrays, function pointers,
+    structured bindings) so the type table never records a guessed receiver."""
+    t = node.type
+    if t == "identifier":
+        return _read_text(node, source)
+    if t in ("pointer_declarator", "reference_declarator", "init_declarator"):
+        inner = node.child_by_field_name("declarator")
+        if inner is None:
+            for c in node.children:
+                if c.type in ("identifier", "pointer_declarator",
+                              "reference_declarator"):
+                    inner = c
+                    break
+        if inner is not None:
+            return _cpp_declarator_name(inner, source)
+    return None
+
+def _cpp_local_var_types(body_node, source: bytes, table: dict[str, str]) -> None:
+    """Collect ``var -> ClassName`` from local variable declarations in a C++
+    function body, for receiver-type inference in the cross-file member-call pass
+    (#1547). Handles ``Foo f;``, ``Foo* f;``, ``Foo *f = ...;``, ``Foo f = Foo();``.
+
+    Only a class-like (``type_identifier``/``qualified_identifier``) type with a
+    single named declarator is recorded — PRECISION over recall: a built-in type
+    (``int x``), an ambiguous multi-declarator line, or an un-nameable declarator
+    contributes nothing rather than a guess. A qualified type ``ns::Foo`` records
+    its simple tail ``Foo`` so it keys to the type's definition node label.
+    """
+    stack = [body_node]
+    while stack:
+        n = stack.pop()
+        if n.type in ("function_definition", "lambda_expression"):
+            # Don't descend into a nested function/lambda: its locals are scoped
+            # away and would pollute this body's table.
+            if n is not body_node:
+                continue
+        if n.type == "declaration":
+            type_node = n.child_by_field_name("type")
+            if type_node is not None and type_node.type in (
+                "type_identifier", "qualified_identifier"
+            ):
+                type_name = _read_text(type_node, source).split("::")[-1].strip()
+                declarators = [
+                    c for c in n.children
+                    if c.type in ("identifier", "pointer_declarator",
+                                  "reference_declarator", "init_declarator")
+                ]
+                # A single declarator only: `Foo a, b;` is ambiguous to attribute
+                # to one receiver name cleanly, so skip multi-declarator lines.
+                if type_name and type_name[:1].isupper() and len(declarators) == 1:
+                    var = _cpp_declarator_name(declarators[0], source)
+                    if var and var not in table:
+                        table[var] = type_name
+        for c in n.children:
+            stack.append(c)
+
+
+_C_CONFIG = LanguageConfig(
+    ts_module="tree_sitter_c",
+    class_types=frozenset(),
+    function_types=frozenset({"function_definition"}),
+    import_types=frozenset({"preproc_include"}),
+    call_types=frozenset({"call_expression"}),
+    call_function_field="function",
+    call_accessor_node_types=frozenset({"field_expression"}),
+    call_accessor_field="field",
+    function_boundary_types=frozenset({"function_definition"}),
+    import_handler=_import_c,
+    resolve_function_name_fn=_get_c_func_name,
+)
+
+_CPP_CONFIG = LanguageConfig(
+    ts_module="tree_sitter_cpp",
+    class_types=frozenset({"class_specifier", "struct_specifier"}),
+    function_types=frozenset({"function_definition"}),
+    import_types=frozenset({"preproc_include"}),
+    call_types=frozenset({"call_expression"}),
+    call_function_field="function",
+    call_accessor_node_types=frozenset({"field_expression", "qualified_identifier"}),
+    call_accessor_field="field",
+    function_boundary_types=frozenset({"function_definition"}),
+    import_handler=_import_c,
+    resolve_function_name_fn=_get_cpp_func_name,
+)
+
+
+def extract_c(path: Path) -> dict:
+    """Extract functions and includes from a .c/.h file."""
+    from graph_fy.extractors.engine import _extract_generic
+    return _extract_generic(path, _C_CONFIG)
+
+
+_CPP_STRING_TEST_MACROS = (
+    "TEST_CASE", "TEST_CASE_TEMPLATE", "SCENARIO",
+)
+_CPP_STRING_TEST_RE = re.compile(
+    r'^[ \t]*(?:' + "|".join(_CPP_STRING_TEST_MACROS) + r')\s*\(\s*"((?:[^"\\]|\\.)+)"',
+    re.MULTILINE,
+)
+
+
+def _augment_cpp_string_tests(path: Path, result: dict) -> dict:
+    """Append callable nodes for doctest/Catch2 string-named test cases that
+    tree-sitter-cpp drops as ERROR nodes (issue #2594).
+    """
+    try:
+        source = path.read_text(errors="replace")
+    except OSError:
+        return result
+    matches = list(_CPP_STRING_TEST_RE.finditer(source))
+    if not matches:
+        return result
+
+    str_path = str(path)
+    stem = _file_stem(path)
+    file_nid = _make_id(str_path)
+    stem_collapse_id = _make_id(stem)
+    nodes = result.setdefault("nodes", [])
+    edges = result.setdefault("edges", [])
+    seen_ids = {n.get("id") for n in nodes}
+
+    for m in matches:
+        test_name = m.group(1)
+        line = source.count("\n", 0, m.start()) + 1
+        test_nid = _make_id(stem, test_name)
+        if test_nid == stem_collapse_id:
+            test_nid = _make_id(stem, "test", f"L{line}")
+        if test_nid in seen_ids:
+            continue
+        seen_ids.add(test_nid)
+        nodes.append({
+            "id": test_nid,
+            "label": f'"{test_name}"',
+            "file_type": "code",
+            "source_file": str_path,
+            "source_location": f"L{line}",
+        })
+        edges.append({
+            "source": file_nid,
+            "target": test_nid,
+            "relation": "contains",
+            "confidence": "EXTRACTED",
+            "source_file": str_path,
+            "source_location": f"L{line}",
+            "weight": 1.0,
+        })
+    return result
+
+
+_CPP_CLI_MARKER_RE = re.compile(
+    rb"\b(?:ref|value)\s+(?:class|struct)\b"
+    rb"|\binterface\s+class\b"
+    rb"|\bgcnew\b"
+    rb"|\[\s*(?:assembly|module)\s*:"
+)
+
+_CPP_CLI_CLASS_RE = re.compile(
+    rb"(?:\b(?:public|private|protected)\s+)?\b(?:ref|value)\s+(?=(?:class|struct)\b)"
+    rb"|(?:\b(?:public|private|protected)\s+)?\binterface\s+(?=class\b)"
+)
+
+_CPP_CLI_SUFFIX_UNAMBIGUOUS_RE = re.compile(rb"(?<=[A-Za-z0-9_>])[\^%](?=\s*[,)\]>;])")
+
+_CPP_CLI_SUFFIX_DECL_RE = re.compile(
+    rb"(\b[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+"   # System::String
+    rb"|\b[A-Z][A-Za-z0-9_]*[a-z][A-Za-z0-9_]*"                   # String, DataTable
+    rb"|\b[A-Z](?=[\^%])"                                        # T
+    rb"|\b(?:bool|char|wchar_t|short|int|long|float|double|unsigned|signed)"
+    rb"|>)"                                                      # List<int>^
+    rb"[\^%](?=\s+[A-Za-z_])"
+)
+
+_CPP_CLI_ATTR_RE = re.compile(rb"\[\s*(?:assembly|module)\s*:[^\[\]]*\]", re.S)
+
+
+def _blank_keeping_newlines(m: "re.Match[bytes]") -> bytes:
+    """Replace a match with spaces, but keep its line breaks."""
+    return re.sub(rb"[^\r\n]", b" ", m.group(0))
+
+
+def _normalize_cpp_cli(source: bytes) -> bytes | None:
+    """Rewrite C++/CLI spellings to standard C++ ones, or None if not C++/CLI."""
+    if not _CPP_CLI_MARKER_RE.search(source):
+        return None
+    out = _CPP_CLI_CLASS_RE.sub(_blank_keeping_newlines, source)
+    out = re.sub(rb"\bgcnew\b", b"new  ", out)
+    out = _CPP_CLI_SUFFIX_UNAMBIGUOUS_RE.sub(b" ", out)
+    out = _CPP_CLI_SUFFIX_DECL_RE.sub(rb"\1 ", out)
+    return _CPP_CLI_ATTR_RE.sub(_blank_keeping_newlines, out)
+
+
+def extract_cpp(path: Path) -> dict:
+    """Extract functions, classes, and includes from a .cpp/.cc/.cxx/.hpp file."""
+    from graph_fy.extractors.engine import _extract_generic
+    try:
+        source = path.read_bytes()
+    except OSError:
+        return _augment_cpp_string_tests(path, _extract_generic(path, _CPP_CONFIG))
+    result = _extract_generic(
+        path, _CPP_CONFIG, source_override=_normalize_cpp_cli(source) or source
+    )
+    return _augment_cpp_string_tests(path, result)

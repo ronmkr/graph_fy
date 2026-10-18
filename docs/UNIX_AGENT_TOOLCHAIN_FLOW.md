@@ -10,6 +10,7 @@
 ## 1. Executive Summary & Core Philosophy
 
 Monolithic, "do-everything" AI coding agents face three structural bottlenecks in real-world enterprise engineering:
+
 1. **The MCP Context Tax**: Injecting monolithic MCP schemas (80+ tools) consumes **4x to 32x more tokens** upfront before the model generates a single line of code.
 2. **Context Rot**: Feeding entire source files or unfiltered terminal output causes catastrophic attention degradation past 40k–50k tokens.
 3. **Hallucinated Tool Calls & Build Flags**: Expecting an LLM to guess compiler flags, build targets, or structural AST queries causes repetitive, expensive correction loops.
@@ -62,6 +63,7 @@ flowchart TD
 ---
 
 ### Stage 1: Specification & Invariant Contracts (Zero Code Phase)
+
 * **Goal**: Establish deterministic acceptance criteria before launching code generation.
 * **Tools**: Markdown (`spec.md`), Architecture Decision Records (`docs/adr/ADR-00X.md`), Matt Pocock's `/grill-me` pattern.
 * **Execution**:
@@ -72,9 +74,11 @@ flowchart TD
 ---
 
 ### Stage 2: Codebase Topology & Filesystem Isolation
+
 * **Goal**: Determine exact affected symbols and create an isolated sandbox for the agent.
 * **Tools**: `graph_fy`, `git worktree`.
 * **Execution**:
+
   ```bash
   # Step 2A: Query codebase topology (subsystems, god nodes, blast radius, Tier-1 skeletons)
   graph_fy context "implement invoice refund aggregate" > context_briefing.md
@@ -83,14 +87,17 @@ flowchart TD
   git worktree add ../.worktrees/feature-refund -b feature/invoice-refund
   cd ../.worktrees/feature-refund
   ```
+
 * **Why Worktrees?**: Worktrees isolate files completely. Multiple agents can run simultaneously on different features without branch collisions or port conflicts.
 
 ---
 
 ### Stage 3: Structural & Lexical Code Retrieval (No Whole-File Dumps)
+
 * **Goal**: Pinpoint exact symbol locations and AST patterns without reading 1,000-line source files.
 * **Tools**: `ast-grep` (`sg`), `ripgrep` (`rg`).
 * **Execution**:
+
   ```bash
   # Fast lexical search for string literals, route names, or env vars:
   rg "INVOICE_STATUS_PENDING" -g "!tests"
@@ -101,14 +108,17 @@ flowchart TD
   # Safe structural rewrite across multiple files without model hallucinations:
   ast-grep --rewrite 'calculateTax($$$ARGS)' -r 'calculateTaxWithExemptions($$$ARGS, DEFAULT_POLICY)'
   ```
+
 * **Unix Rule**: `ripgrep` finds *where* symbols live; `ast-grep` finds *how* syntax is structured. The agent reads only the matched snippets.
 
 ---
 
 ### Stage 4: Deterministic TDD & Zero-Dollar Verification
+
 * **Goal**: Catch 90% of syntax errors, broken imports, and failed tests locally with zero LLM API cost.
 * **Tools**: `just` (Command Contract), `ruff` / `biome` / `tsc --noEmit` / `spotless`.
 * **Execution**:
+
   ```bash
   # Single source of truth command contract:
   just test tests/domain/test_invoice.py
@@ -116,7 +126,9 @@ flowchart TD
   # Deterministic linter: Fixes formatting and syntax before agent self-corrects:
   just lint-fix
   ```
+
 * **The `justfile` Contract**: Eliminates model guessing of build targets:
+
   ```just
   # justfile
   test:
@@ -132,9 +144,11 @@ flowchart TD
 ---
 
 ### Stage 5: Output Slicing & Prompt Cache Defense
+
 * **Goal**: Prevent terminal log spam from evicting prompt caches and causing context rot.
 * **Tools**: `jq`, `tail`, `headroom` proxy.
 * **Execution**:
+
   ```bash
   # Pipe large JSON/API outputs through jq to extract only relevant fields:
   curl -s http://localhost:8080/health | jq '{status: .status, dependencies: .deps}'
@@ -145,14 +159,17 @@ flowchart TD
   # Run agent behind headroom proxy to freeze prompt cache prefixes:
   headroom run -- claude
   ```
+
 * **Token Impact**: Muting terminal logs preserves Anthropic 5-minute prompt cache blocks, dropping token costs by up to 90%.
 
 ---
 
 ### Stage 6: Incremental Knowledge Graph Sync & Context Reset
+
 * **Goal**: Keep repository AST index current and eliminate agent context bloat.
 * **Tools**: `graph_fy update .`, `/clear`.
 * **Execution**:
+
   ```bash
   # 1. Incrementally refresh knowledge graph (AST-only, 0 API tokens)
   graph_fy update .

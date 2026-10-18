@@ -893,29 +893,15 @@ def task_context(
                 if graph is None or target not in graph:
                     missing_explicit_symbols.append(target)
 
-    # 8. Assemble Prompt Context
+    # 8. Assemble Prompt Context with Deterministic Prefix for Prompt-Cache Priming
     lines: list[str] = [
+        "<!-- graph_fy:agent_context:v1 -->",
         "### graph_fy Pre-Agent Architectural Briefing",
         "> [!IMPORTANT]",
         "> Grounded AST Invariant: All symbols, signatures, and dependencies below are extracted directly from the verified AST. Do NOT hallucinate non-existent methods, APIs, or imports. If a symbol or parameter is not present here, inspect the indicated source file before making assumptions.",
-    ]
-    if missing_explicit_symbols:
-        lines.extend([
-            "> [!WARNING]",
-            f"> Target Symbol Not Found: The following symbol(s) mentioned in the task do not exist in the verified AST: {', '.join(sorted(missing_explicit_symbols))}.",
-            "> Grounded AST Invariant: Do NOT hallucinate implementations or APIs for these non-existent symbols. Verify source code before proceeding.",
-        ])
-    lines.extend([
-        f"**Task**: {task}",
         f"**Target Subsystem**: {subsystem_str}",
-        f"**Blast Radius Risk**: {risk_tier} (Risk Score: {risk_score:.2f}, {downstream_impact_count} downstream dependents)",
         f"**AST Analysis Confidence**: {confidence_tier}",
-    ])
-    if affected_tests:
-        lines.append(f"**Verification Targets (Tests)**: {', '.join(sorted(affected_tests)[:6])}")
-    if co_changed_files:
-        co_str = ", ".join(f"`{f}` ({int(freq*100)}% co-change)" for f, freq in co_changed_files)
-        lines.append(f"**Historically Co-Changed Files**: {co_str}")
+    ]
 
     char_budget = token_budget * 4
     current_chars = sum(len(l) + 1 for l in lines)
@@ -968,6 +954,25 @@ def task_context(
             block = f"{meta_hdr}\n"
             lines.append(block)
             current_chars += len(block)
+
+    # Query Impact & Verification Targets (Dynamic Tail)
+    lines.extend([
+        "\n#### Query Impact & Verification Targets:",
+        f"**Task**: {task}",
+        f"**Blast Radius Risk**: {risk_tier} (Risk Score: {risk_score:.2f}, {downstream_impact_count} downstream dependents)",
+    ])
+    if affected_tests:
+        lines.append(f"**Verification Targets (Tests)**: {', '.join(sorted(affected_tests)[:6])}")
+    if co_changed_files:
+        co_str = ", ".join(f"`{f}` ({int(freq*100)}% co-change)" for f, freq in co_changed_files)
+        lines.append(f"**Historically Co-Changed Files**: {co_str}")
+
+    if missing_explicit_symbols:
+        lines.extend([
+            "> [!WARNING]",
+            f"> Target Symbol Not Found: The following symbol(s) mentioned in the task do not exist in the verified AST: {', '.join(sorted(missing_explicit_symbols))}.",
+            "> Grounded AST Invariant: Do NOT hallucinate implementations or APIs for these non-existent symbols. Verify source code before proceeding.",
+        ])
 
     prompt_context = "\n".join(lines)
     briefing_tokens = max(1, len(prompt_context) // 4)

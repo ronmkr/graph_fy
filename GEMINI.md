@@ -5,6 +5,7 @@
 This repository uses graph_fy for codebase indexing, structural AST navigation, architectural flow visualization, and blast radius analysis located at `graph_fy_out/`.
 
 ### Core Rules for Gemini & Antigravity
+
 - **Pre-Agent Analysis Briefing (Zero-LLM First)**: Before asking frontier models or planning changes, run `graph_fy context "<task>"` (or call MCP tool `get_agent_context`). This generates a prompt-cache-friendly architectural briefing with:
   - Subsystem community classification and god nodes
   - Mermaid architectural flow diagram
@@ -21,12 +22,14 @@ This repository uses graph_fy for codebase indexing, structural AST navigation, 
 - **Incremental Graph Update**: Run `graph_fy update .` locally after editing code to keep the knowledge graph in sync (fast AST-only update, zero API cost).
 
 ### Ponytail: Anti-Overengineering ("The best code is the code you never wrote")
+
 - **YAGNI**: Challenge unnecessary abstractions, bloated wrappers, and speculative generality.
 - **Graph-First Code Reuse**: Before creating any new helper function, class, or utility, query `graph_fy query "<concept>"` or inspect the knowledge graph. Reuse existing code first!
 - **Standard Library First**: Always prefer native runtime/language standard library over adding third-party packages.
 - **Surgical Diffs**: Keep code modifications minimal, focused, and precise. Never refactor surrounding untouched code.
 
 ### Caveman: Terse, High-Signal Output (Token Conservation)
+
 - Cut conversational filler, pleasantries, preambles, apologies, and redundant restatements.
 - Output in dense, high-signal bullet points and concise technical fragments.
 - Preserve 100% technical fidelity: exact file paths, line ranges, symbol names, shell commands, and code diffs must always be verbatim and uncompressed.
