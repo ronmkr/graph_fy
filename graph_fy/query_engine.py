@@ -183,6 +183,7 @@ class GraphQueryEngine:
         token_budget: int = 1500,
         graph_path: str | None = None,
         include_diagram: bool = True,
+        include_bodies: bool | str = "auto",
     ) -> dict[str, Any]:
         """Generate deterministic pre-agent architectural briefing before LLM calls."""
         return _task_context(
@@ -192,6 +193,7 @@ class GraphQueryEngine:
             token_budget=token_budget,
             graph_path=graph_path,
             include_diagram=include_diagram,
+            include_bodies=include_bodies,
         )
 
     @staticmethod

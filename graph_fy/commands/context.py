@@ -15,6 +15,12 @@ def cmd_context(argv: list[str]) -> int:
     graph_paths: list[str] = []
     db_path = None
     include_diagram = "--no-diagram" not in argv
+    if any(arg in argv for arg in ("--include-bodies", "--hydrate-bodies", "--full-bodies")):
+        include_bodies: bool | str = True
+    elif "--no-bodies" in argv or "--no-hydrate" in argv:
+        include_bodies = False
+    else:
+        include_bodies = "auto"
 
     args = argv[2:]
     i = 0
@@ -80,7 +86,7 @@ def cmd_context(argv: list[str]) -> int:
     if not task_str and not sys.stdin.isatty():
         task_str = sys.stdin.read().strip()
     if not task_str:
-        print("Usage: graph_fy context \"<task description>\" [--root dir] [--graph file] [--budget N] [--no-diagram] [--json]", file=sys.stderr)
+        print("Usage: graph_fy context \"<task description>\" [--root dir] [--graph file] [--budget N] [--include-bodies] [--no-diagram] [--json]", file=sys.stderr)
         return 1
 
     if len(graph_paths) > 1:
@@ -93,6 +99,7 @@ def cmd_context(argv: list[str]) -> int:
             db_path=db_path,
             token_budget=budget,
             include_diagram=include_diagram,
+            include_bodies=include_bodies,
         )
     else:
         res = task_context(
@@ -102,6 +109,7 @@ def cmd_context(argv: list[str]) -> int:
             db_path=db_path,
             token_budget=budget,
             include_diagram=include_diagram,
+            include_bodies=include_bodies,
         )
 
     if "--json" in argv:
