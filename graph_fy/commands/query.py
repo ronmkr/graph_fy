@@ -29,6 +29,24 @@ def _enforce_graph_size_cap(gp: Path) -> None:
         sys.exit(1)
 
 
+def _run_fast_grep_and_exit(
+    question: str,
+    target: str = ".",
+    limit: int = 10,
+    as_json: bool = False,
+    use_skeleton: bool = False,
+) -> int:
+    from graph_fy.fast_query import fast_ast_grep, format_fast_hits
+    t0 = time.perf_counter()
+    hits = fast_ast_grep(question, target=target, limit=limit, include_code=not use_skeleton)
+    elapsed = time.perf_counter() - t0
+    if as_json:
+        print(_json.dumps({"query": question, "target": str(target), "count": len(hits), "elapsed_s": round(elapsed, 4), "hits": hits}, indent=2))
+    else:
+        print(format_fast_hits(question, hits, elapsed))
+    return 0
+
+
 def cmd_query(
     argv: list[str],
     default_graph_path_fn: Callable[[], str],
@@ -37,7 +55,7 @@ def cmd_query(
     """Handle `graph_fy query` command."""
     if len(argv) < 3:
         print(
-            'Usage: graph_fy query "<text>" [--limit N] [--hops N] [--dfs] [--context C] [--budget N] [--graph path] [--terse] [--caveman]',
+            'Usage: graph_fy query "<text>" [--limit N] [--hops N] [--dfs] [--context C] [--budget N] [--graph path] [--fast-grep [target]] [--terse] [--caveman]',
             file=sys.stderr,
         )
         return 1
@@ -47,7 +65,16 @@ def cmd_query(
     from networkx.readwrite import json_graph
     from graph_fy import querylog
 
-    question = argv[2]
+    is_fast_grep = False
+    fast_target = "."
+    if argv[2] in ("--fast-grep", "--fast"):
+        is_fast_grep = True
+        question = argv[3] if len(argv) > 3 else ""
+        args = argv[4:]
+    else:
+        question = argv[2]
+        args = argv[3:]
+
     use_dfs = "--dfs" in argv
     budget = 2000
     limit = 10
@@ -65,8 +92,6 @@ def cmd_query(
     parallel_queries: list[str] = []
     if as_rag_prompt:
         use_skeleton = True
-
-    args = argv[3:]
     i = 0
     while i < len(args):
         if args[i] in ("--terse", "--caveman"):
@@ -171,11 +196,45 @@ def cmd_query(
             rdir = Path(args[i].split("=", 1)[1])
             graph_paths.append(str(rdir / "graph_fy_out" / "graph.json" if (rdir / "graph_fy_out" / "graph.json").exists() else rdir / "graph.json"))
             i += 1
+        elif args[i] in ("--fast-grep", "--fast"):
+            is_fast_grep = True
+            if i + 1 < len(args) and not args[i + 1].startswith("-"):
+                fast_target = args[i + 1]
+                i += 2
+            else:
+                i += 1
+        elif args[i].startswith("--fast-grep="):
+            is_fast_grep = True
+            fast_target = args[i].split("=", 1)[1]
+            i += 1
+        elif args[i].startswith("--fast="):
+            is_fast_grep = True
+            fast_target = args[i].split("=", 1)[1]
+            i += 1
+        elif args[i] in ("--target", "-t") and i + 1 < len(args):
+            fast_target = args[i + 1]
+            i += 2
+        elif args[i].startswith("--target="):
+            fast_target = args[i].split("=", 1)[1]
+            i += 1
         elif is_parallel and not args[i].startswith("-"):
             parallel_queries.append(args[i])
             i += 1
+        elif not args[i].startswith("-"):
+            if is_fast_grep and fast_target == ".":
+                fast_target = args[i]
+            i += 1
         else:
             i += 1
+
+    if is_fast_grep:
+        return _run_fast_grep_and_exit(
+            question,
+            target=fast_target,
+            limit=limit,
+            as_json="--json" in argv,
+            use_skeleton=use_skeleton,
+        )
 
     if is_parallel:
         if batch_file and batch_file.exists():
@@ -216,7 +275,10 @@ def cmd_query(
     else:
         gp = Path(graph_paths[0] if graph_paths else graph_path).resolve()
         if not gp.exists():
-            print(f"error: graph file not found: {gp}", file=sys.stderr)
+            print(
+                f"error: graph file not found: {gp}\nTip: Use 'graph_fy query \"{question}\" --fast-grep' for unindexed sub-second AST search.",
+                file=sys.stderr,
+            )
             return 1
         if not gp.suffix == ".json":
             print("error: graph file must be a .json file", file=sys.stderr)

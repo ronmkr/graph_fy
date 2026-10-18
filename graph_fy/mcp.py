@@ -914,8 +914,9 @@ def get_code_skeleton(
     path: str,
     root_dir: str = ".",
     project_path: str | None = None,
+    symbol: str | None = None,
 ) -> dict[str, Any]:
-    """Extract code skeleton for a file using tree-sitter, eliding function bodies."""
+    """Extract code skeleton for a file or symbol using tree-sitter, eliding function bodies."""
     if project_path:
         root_dir = project_path
 
@@ -923,13 +924,39 @@ def get_code_skeleton(
     if not p.is_absolute():
         p = Path(root_dir) / p
 
-    from graph_fy.skeleton import skeletonize_file
+    from graph_fy.fast_query import skeletonize_single_file
 
-    skeleton = skeletonize_file(p)
+    res = skeletonize_single_file(p, symbol_name=symbol)
+    res["file"] = str(path)
+    return res
+
+
+def fast_ast_search(
+    query: str,
+    target: str = ".",
+    limit: int = 10,
+    root_dir: str = ".",
+    project_path: str | None = None,
+) -> dict[str, Any]:
+    """Fast unindexed lexical search + on-demand Tree-sitter AST extraction (<100ms)."""
+    if project_path:
+        root_dir = project_path
+    p = Path(target)
+    if not p.is_absolute():
+        p = Path(root_dir) / p
+
+    from graph_fy.fast_query import fast_ast_grep
+    import time
+
+    t0 = time.perf_counter()
+    hits = fast_ast_grep(query, target=p, limit=limit)
+    elapsed = time.perf_counter() - t0
     return {
-        "file": str(path),
-        "skeleton": skeleton,
-        "length": len(skeleton),
+        "query": query,
+        "target": str(target),
+        "count": len(hits),
+        "elapsed_s": round(elapsed, 4),
+        "hits": hits,
     }
 
 
@@ -1074,7 +1101,7 @@ def get_test_selection(
 
 GET_CODE_SKELETON_TOOL_SPEC = {
     "name": "get_code_skeleton",
-    "description": "Extract Tree-sitter interface skeleton of a file (signatures, types, docstrings; bodies elided).",
+    "description": "Extract Tree-sitter interface skeleton of a file or specific symbol (signatures, types, docstrings; bodies elided).",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -1082,8 +1109,37 @@ GET_CODE_SKELETON_TOOL_SPEC = {
                 "type": "string",
                 "description": "Source file path to extract skeleton for",
             },
+            "symbol": {
+                "type": "string",
+                "description": "Optional symbol name to extract skeleton for a specific class or function within the file",
+            },
         },
         "required": ["path"],
+    },
+}
+
+FAST_AST_SEARCH_TOOL_SPEC = {
+    "name": "fast_ast_search",
+    "description": "Sub-second (<100ms) unindexed lexical search and on-demand Tree-sitter AST extraction without requiring a pre-built graph.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Symbol name or pattern to search for",
+            },
+            "target": {
+                "type": "string",
+                "default": ".",
+                "description": "Directory or file to search",
+            },
+            "limit": {
+                "type": "integer",
+                "default": 10,
+                "description": "Maximum number of AST symbol results to return",
+            },
+        },
+        "required": ["query"],
     },
 }
 
@@ -1218,6 +1274,7 @@ CODEGRAPH_TOOL_SPECS = [
     REFINE_CONTEXT_TOOL_SPEC,
     GET_AGENT_CONTEXT_TOOL_SPEC,
     GET_TEST_SELECTION_TOOL_SPEC,
+    FAST_AST_SEARCH_TOOL_SPEC,
 ]
 
 
