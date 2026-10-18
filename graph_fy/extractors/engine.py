@@ -116,6 +116,8 @@ from graph_fy.extractors.python import (
     _python_underscore_salted_nid,
 )
 from graph_fy.extractors.javascript import (
+    _js_pre_scan_member_collisions,
+    _js_member_salted_nid,
     _js_collect_pattern_idents,
     _js_local_bound_names,
     _js_module_bound_names,
@@ -323,6 +325,10 @@ def _extract_generic(
     if config.ts_module == "tree_sitter_python":
         python_underscore_groups = _python_pre_scan_underscore_collisions(root, source, stem)
 
+    js_member_groups: dict[str, set[str]] = {}
+    if config.ts_module in ("tree_sitter_javascript", "tree_sitter_typescript"):
+        js_member_groups = _js_pre_scan_member_collisions(root, source, stem)
+
     def add_node(nid: str, label: str, line: int, *, node_type: str | None = None,
                  metadata: dict | None = None) -> None:
         if nid in seen_ids:
@@ -369,6 +375,8 @@ def _extract_generic(
         nid = _make_id(stem, ".".join(namespace_stack), name)
         if config.ts_module == "tree_sitter_python":
             nid = _python_underscore_salted_nid(nid, name, python_underscore_groups)
+        elif config.ts_module in ("tree_sitter_javascript", "tree_sitter_typescript"):
+            nid = _js_member_salted_nid(nid, name, js_member_groups)
         if nid in seen_ids:
             return nid
         nid = _make_id(name)
@@ -482,9 +490,15 @@ def _extract_generic(
                 class_name = "::".join(ruby_namespace + ruby_segments)
             class_nid = _make_id(stem, ".".join(namespace_stack), class_name)
             if config.ts_module == "tree_sitter_python" and parent_class_nid:
-                class_nid = _make_id(parent_class_nid, class_name)
+                class_nid = _python_underscore_salted_nid(
+                    _make_id(parent_class_nid, class_name), class_name, python_underscore_groups, kind="class"
+                )
             elif config.ts_module == "tree_sitter_python":
-                class_nid = _python_underscore_salted_nid(class_nid, class_name, python_underscore_groups)
+                class_nid = _python_underscore_salted_nid(
+                    class_nid, class_name, python_underscore_groups, kind="class"
+                )
+            elif config.ts_module in ("tree_sitter_javascript", "tree_sitter_typescript"):
+                class_nid = _js_member_salted_nid(class_nid, class_name, js_member_groups)
             line = node.start_point[0] + 1
             metadata = None
             ruby_reopened = (
@@ -552,7 +566,7 @@ def _extract_generic(
             # @Input, @Inject, @Entity, …). Decorators live only in class subtrees.
             if config.ts_module in ("tree_sitter_javascript", "tree_sitter_typescript"):
                 _ts_emit_decorator_edges(node, class_nid, stem, source,
-                                         ensure_named_node, add_edge)
+                                         ensure_named_node, add_edge, js_member_groups)
 
             if config.ts_module == "tree_sitter_swift" and any(
                 c.type == "extension" for c in node.children
@@ -1678,7 +1692,11 @@ def _extract_generic(
                 func_nid = _make_id(parent_class_nid, sanitized_name)
                 if config.ts_module == "tree_sitter_python":
                     func_nid = _python_underscore_salted_nid(
-                        func_nid, sanitized_name, python_underscore_groups
+                        func_nid, sanitized_name, python_underscore_groups, kind="method"
+                    )
+                elif config.ts_module in ("tree_sitter_javascript", "tree_sitter_typescript"):
+                    func_nid = _js_member_salted_nid(
+                        func_nid, sanitized_name, js_member_groups
                     )
                 ruby_method_metadata = None
                 if ruby_method_kind is not None:
@@ -1711,7 +1729,11 @@ def _extract_generic(
                 func_nid = _make_id(stem, sanitized_name)
                 if config.ts_module == "tree_sitter_python":
                     func_nid = _python_underscore_salted_nid(
-                        func_nid, sanitized_name, python_underscore_groups
+                        func_nid, sanitized_name, python_underscore_groups, kind="function"
+                    )
+                elif config.ts_module in ("tree_sitter_javascript", "tree_sitter_typescript"):
+                    func_nid = _js_member_salted_nid(
+                        func_nid, sanitized_name, js_member_groups
                     )
                 add_node(func_nid, f"{func_name}()", line)
                 add_edge(file_nid, func_nid, "contains", line)
@@ -3559,8 +3581,9 @@ def _extract_generic(
     # a call on a typed param (incl. inside a closure) resolve (#1630). The
     # constructor-injection entries are populated during the walk above and win on
     # a name clash (first-binding-wins in the helper).
+    ts_class_tables: dict[str, dict[str, str]] = {}
     if config.ts_module in ("tree_sitter_javascript", "tree_sitter_typescript"):
-        _ts_receiver_type_table(root, source, type_table)
+        _ts_receiver_type_table(root, source, type_table, ts_class_tables)
     if config.ts_module == "tree_sitter_swift":
         if type_table or swift_factory_bindings:
             result["swift_type_table"] = {"path": str_path, "table": type_table}
@@ -3569,9 +3592,13 @@ def _extract_generic(
                 result["swift_type_table"]["factory"] = {
                     k: list(v) for k, v in swift_factory_bindings.items()
                 }
-    elif type_table:
+    elif type_table or ts_class_tables:
         if config.ts_module in ("tree_sitter_javascript", "tree_sitter_typescript"):
-            result["ts_type_table"] = {"path": str_path, "table": type_table}
+            result["ts_type_table"] = {
+                "path": str_path,
+                "table": type_table,
+                "classes": ts_class_tables,
+            }
         elif config.ts_module == "tree_sitter_cpp":
             result["cpp_type_table"] = {"path": str_path, "table": type_table}
     return result

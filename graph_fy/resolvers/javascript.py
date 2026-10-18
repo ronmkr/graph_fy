@@ -8,9 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from graph_fy.extractors.base import _file_stem, _make_id, _read_text
-from graph_fy.extractors.models import (
-    LanguageConfig,
+from graph_fy.resolvers.common import _file_stem, _make_id, _read_text, _resolve_cached
+from graph_fy.resolvers.models import (
     _JS_CACHE_BYPASS_SUFFIXES,
     _NamespaceExportFact,
     _StarExportFact,
@@ -22,7 +21,6 @@ from graph_fy.extractors.models import (
     _SymbolUseFact,
     _WORKSPACE_PACKAGE_CACHE,
 )
-from graph_fy.resolvers.common import _resolve_cached
 
 _TSCONFIG_ALIAS_CACHE: dict[str, dict[str, list[str]]] = {}
 
@@ -558,7 +556,11 @@ def _package_entry_candidates(
             targets = _resolve_export_targets(exports.get(subpath_key), platform)
             if targets:
                 candidates = _exports_candidates(package_dir, targets, platform)
+                if candidates and any(_resolve_js_import_path(c).is_file() for c in candidates):
+                    return candidates
                 if candidates:
+                    candidates.append(package_dir / "src" / subpath)
+                    candidates.append(package_dir / subpath)
                     return candidates
             else:
                 for pattern, pattern_value in exports.items():
@@ -576,19 +578,27 @@ def _package_entry_candidates(
                                 candidates = _exports_candidates(
                                     package_dir, wildcard_targets, platform
                                 )
+                                if candidates and any(_resolve_js_import_path(c).is_file() for c in candidates):
+                                    return candidates
                                 if candidates:
+                                    candidates.append(package_dir / "src" / subpath)
+                                    candidates.append(package_dir / subpath)
                                     return candidates
         return [package_dir / subpath]
 
     exports = manifest_data.get("exports")
+    export_candidates: list[Path] = []
     if isinstance(exports, str):
-        return [package_dir / exports]
-    if isinstance(exports, dict):
+        export_candidates = [package_dir / exports]
+    elif isinstance(exports, dict):
         dot_targets = _resolve_export_targets(exports.get("."), platform)
         if dot_targets:
-            return _exports_candidates(package_dir, dot_targets, platform)
+            export_candidates = _exports_candidates(package_dir, dot_targets, platform)
 
-    candidates: list[Path] = []
+    if export_candidates and any(_resolve_js_import_path(c).is_file() for c in export_candidates):
+        return export_candidates
+
+    candidates: list[Path] = list(export_candidates)
     for key in ("svelte", "module", "main", "types"):
         value = manifest_data.get(key)
         if isinstance(value, str):

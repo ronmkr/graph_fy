@@ -4,9 +4,35 @@ from __future__ import annotations
 from pathlib import Path
 
 from graph_fy.extractors.base import _make_id, _read_text
+from graph_fy.extractors.java import _JAVA_BUILTIN_TYPES
 from graph_fy.extractors.models import LanguageConfig
 
 from graph_fy.security import sanitize_metadata
+
+
+_KOTLIN_BUILTIN_TYPES = frozenset({
+    # kotlin — scalars & core
+    "Any", "Unit", "Nothing", "Boolean", "Byte", "Short", "Int", "Long",
+    "Float", "Double", "Char", "String", "CharSequence", "Number",
+    "Comparable", "Enum", "Annotation", "Pair", "Triple", "Lazy",
+    "Function",
+    # kotlin — throwables
+    "Throwable", "Exception", "RuntimeException", "Error",
+    "IllegalArgumentException", "IllegalStateException", "NullPointerException",
+    "IndexOutOfBoundsException", "ClassCastException", "NumberFormatException",
+    "ArithmeticException", "UnsupportedOperationException",
+    "NoSuchElementException", "ConcurrentModificationException",
+    "StackOverflowError", "OutOfMemoryError", "AssertionError",
+    "InterruptedException",
+    # kotlin.collections
+    "Array", "List", "MutableList", "ArrayList", "Set", "MutableSet",
+    "HashSet", "LinkedHashSet", "Map", "MutableMap", "HashMap",
+    "LinkedHashMap", "Collection", "MutableCollection", "Iterable",
+    "MutableIterable", "Iterator", "MutableIterator", "ListIterator",
+    "MutableListIterator", "Sequence", "Comparator",
+    # kotlin.text
+    "Regex", "MatchResult", "StringBuilder",
+})
 
 
 def _import_kotlin(node, source: bytes, file_nid: str, stem: str, edges: list, str_path: str, scope_stack: list[str] | None = None) -> None:

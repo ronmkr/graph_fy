@@ -18,9 +18,9 @@ _FASTAPI_ROUTE_RE = re.compile(
     r"""@(?:app|router|api_router)\.(?:get|post|put|delete|patch|options|head)\s*\("""
 )
 
-# Pytest fixture definition: @pytest.fixture or @fixture
+# Pytest fixture definition: @pytest.fixture or @fixture or @pytest_asyncio.fixture
 _PYTEST_FIXTURE_DEF_RE = re.compile(
-    r"""@(?:pytest\.)?fixture\b"""
+    r"""@(?:pytest\.|pytest_asyncio\.)?fixture\b"""
 )
 
 # Pytest test function: def test_foo(param1, param2):
@@ -60,6 +60,91 @@ _REACT_CORE_BUILTINS: frozenset[str] = frozenset({
 _TEST_PARAM_IGNORE: frozenset[str] = frozenset({"self", "cls"})
 
 
+def _unwrap_fixture_type(type_str: str) -> str:
+    """Unwrap container types (Iterator, Generator, Optional) to get concrete returned class."""
+    if not type_str:
+        return "?"
+    type_str = type_str.strip()
+    type_str = re.sub(r"^(?:typing|collections\.abc|asyncio)\.", "", type_str)
+    m = re.match(r"^(?:Iterator|Generator|AsyncIterator|AsyncGenerator|Optional)\s*\[\s*([A-Za-z0-9_\.]+)", type_str)
+    if m:
+        inner = m.group(1).rsplit(".", 1)[-1]
+        return inner if inner[:1].isupper() else "?"
+    m2 = re.match(r"^[A-Za-z0-9_\.]+", type_str)
+    if m2:
+        cls_name = m2.group(0).rsplit(".", 1)[-1]
+        return cls_name if cls_name[:1].isupper() else "?"
+    return "?"
+
+
+def _infer_fixture_class_from_body(fn_node: Any, source_bytes: bytes) -> str:
+    """Infer single returned/yielded class from assignments and returns/yields in body."""
+    local_instantiations: dict[str, str] = {}
+    returns_and_yields: list[str] = []
+
+    def walk(n: Any) -> None:
+        if n.type == "assignment":
+            left = n.child_by_field_name("left")
+            right = n.child_by_field_name("right")
+            if left and right and left.type == "identifier" and right.type == "call":
+                fn_c = right.child_by_field_name("function")
+                if fn_c and fn_c.type == "identifier":
+                    var_name = source_bytes[left.start_byte:left.end_byte].decode("utf-8", errors="ignore")
+                    cls_name = source_bytes[fn_c.start_byte:fn_c.end_byte].decode("utf-8", errors="ignore")
+                    if cls_name[:1].isupper():
+                        local_instantiations[var_name] = cls_name
+        elif n.type in ("return_statement", "yield"):
+            for c in n.children:
+                if c.type == "call":
+                    fn_c = c.child_by_field_name("function")
+                    if fn_c and fn_c.type == "identifier":
+                        cls_name = source_bytes[fn_c.start_byte:fn_c.end_byte].decode("utf-8", errors="ignore")
+                        returns_and_yields.append(cls_name if cls_name[:1].isupper() else "?")
+                    else:
+                        returns_and_yields.append("?")
+                elif c.type == "identifier":
+                    ident = source_bytes[c.start_byte:c.end_byte].decode("utf-8", errors="ignore")
+                    if ident in local_instantiations:
+                        returns_and_yields.append(local_instantiations[ident])
+                    else:
+                        returns_and_yields.append("?")
+        for child in n.children:
+            walk(child)
+
+    walk(fn_node)
+    distinct = set(returns_and_yields) - {"?"}
+    if len(distinct) == 1 and "?" not in returns_and_yields:
+        return next(iter(distinct))
+    return "?"
+
+
+def _get_fixture_params(fn_def_node: Any, source_bytes: bytes) -> set[str]:
+    """Plain unannotated, non-default parameters of a test or fixture not locally rebound."""
+    params_node = fn_def_node.child_by_field_name("parameters")
+    if not params_node:
+        return set()
+    candidates: set[str] = set()
+    for p in params_node.children:
+        if p.type == "identifier":
+            name = source_bytes[p.start_byte:p.end_byte].decode("utf-8", errors="ignore")
+            if name not in _TEST_PARAM_IGNORE:
+                candidates.add(name)
+    rebound: set[str] = set()
+
+    def check_rebound(n: Any) -> None:
+        if n.type == "assignment":
+            left = n.child_by_field_name("left")
+            if left and left.type == "identifier":
+                rebound.add(source_bytes[left.start_byte:left.end_byte].decode("utf-8", errors="ignore"))
+        for c in n.children:
+            check_rebound(c)
+
+    body = fn_def_node.child_by_field_name("body")
+    if body:
+        check_rebound(body)
+    return candidates - rebound
+
+
 def _extract_python_frameworks_ast(path: Path, source_bytes: bytes, result: dict[str, Any]) -> bool:
     """Extract FastAPI and Pytest dependencies via Tree-sitter AST queries."""
     parser, lang_name = get_parser_for_path(".py")
@@ -78,11 +163,12 @@ def _extract_python_frameworks_ast(path: Path, source_bytes: bytes, result: dict
     file_nid = _make_id(str(path))
     str_path = str(path)
 
-    func_nodes: dict[str, dict[str, Any]] = {
-        str(n.get("label", "")): n
-        for n in nodes
-        if str(n.get("file_type", "")).lower() in ("function", "method", "def")
-    }
+    func_nodes: dict[str, dict[str, Any]] = {}
+    for n in nodes:
+        lbl = str(n.get("label", ""))
+        func_nodes[lbl] = n
+        if lbl.endswith("()"):
+            func_nodes[lbl[:-2]] = n
 
     def _find_enclosing_func_node(ast_node: Any) -> dict[str, Any] | None:
         curr = ast_node.parent
@@ -144,6 +230,41 @@ def _extract_python_frameworks_ast(path: Path, source_bytes: bytes, result: dict
                                     "source_location": f"L{line_num}",
                                     "weight": 1.0,
                                 })
+        elif ast_node.type == "decorated_definition":
+            is_fixture = False
+            for c in ast_node.children:
+                if c.type == "decorator":
+                    deco_text = source_bytes[c.start_byte:c.end_byte].decode("utf-8", errors="ignore")
+                    if _PYTEST_FIXTURE_DEF_RE.search(deco_text):
+                        is_fixture = True
+                        break
+            if is_fixture:
+                inner = ast_node.child_by_field_name("definition")
+                if inner and inner.type in ("function_definition", "async_function_definition"):
+                    name_node = inner.child_by_field_name("name")
+                    if name_node:
+                        fix_name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8", errors="ignore")
+                        rt_node = inner.child_by_field_name("return_type")
+                        if rt_node:
+                            rt_text = source_bytes[rt_node.start_byte:rt_node.end_byte].decode("utf-8", errors="ignore")
+                            cls_name = _unwrap_fixture_type(rt_text)
+                        else:
+                            cls_name = _infer_fixture_class_from_body(inner, source_bytes)
+                        fn_node = func_nodes.get(fix_name)
+                        if fn_node:
+                            fn_node["_py_fixture"] = cls_name
+                        result.setdefault("_py_fixtures", {})[fix_name] = {
+                            "class": cls_name,
+                            "nid": fn_node["id"] if fn_node else f"{file_nid}_{fix_name}",
+                            "file": str_path,
+                        }
+                        fix_params = _get_fixture_params(inner, source_bytes)
+                        if fix_params and fn_node:
+                            for rc in result.get("raw_calls", []):
+                                if rc.get("caller_nid") == fn_node["id"] and rc.get("is_member_call"):
+                                    if rc.get("receiver") in fix_params:
+                                        rc["_python_fixture_param"] = True
+                                        rc["lang"] = "python"
         elif ast_node.type in ("function_definition", "async_function_definition"):
             name_node = ast_node.child_by_field_name("name")
             if name_node:
@@ -173,6 +294,13 @@ def _extract_python_frameworks_ast(path: Path, source_bytes: bytes, result: dict
                                     "source_location": f"L{line_num}",
                                     "weight": 1.0,
                                 })
+                    fix_params = _get_fixture_params(ast_node, source_bytes)
+                    if fix_params and fn_node:
+                        for rc in result.get("raw_calls", []):
+                            if rc.get("caller_nid") == fn_node["id"] and rc.get("is_member_call"):
+                                if rc.get("receiver") in fix_params:
+                                    rc["_python_fixture_param"] = True
+                                    rc["lang"] = "python"
 
         for child in ast_node.children:
             _walk(child)
@@ -188,11 +316,12 @@ def _extract_python_frameworks_regex(path: Path, source_text: str, result: dict[
     file_nid = _make_id(str(path))
     str_path = str(path)
 
-    func_nodes: dict[str, dict[str, Any]] = {
-        str(n.get("label", "")): n
-        for n in nodes
-        if str(n.get("file_type", "")).lower() in ("function", "method", "def")
-    }
+    func_nodes: dict[str, dict[str, Any]] = {}
+    for n in nodes:
+        lbl = str(n.get("label", ""))
+        func_nodes[lbl] = n
+        if lbl.endswith("()"):
+            func_nodes[lbl[:-2]] = n
 
     # 1. FastAPI / Starlette Dependency Injection
     for match in _FASTAPI_DEPENDS_RE.finditer(source_text):
@@ -232,7 +361,35 @@ def _extract_python_frameworks_regex(path: Path, source_text: str, result: dict[
             "weight": 1.0,
         })
 
-    # 2. Pytest Test Fixtures
+    # 2. Pytest Test Fixtures (Definitions & Calls)
+    is_test_or_conftest = (
+        path.name.startswith("test_")
+        or path.name.endswith("_test.py")
+        or path.name == "conftest.py"
+    )
+    if is_test_or_conftest:
+        for match in re.finditer(
+            r'@(?:pytest\.|pytest_asyncio\.)?fixture\b[^\n]*\n(?:async\s+)?def\s+([A-Za-z0-9_]+)\s*\([^)]*\)(?:\s*->\s*([A-Za-z0-9_\[\], \.]+))?:',
+            source_text,
+        ):
+            fix_name = match.group(1)
+            rt_text = match.group(2)
+            cls_name = _unwrap_fixture_type(rt_text) if rt_text else "?"
+            if cls_name == "?":
+                pos = match.end()
+                body_snippet = source_text[pos:pos + 500]
+                m_ret = re.search(r'\breturn\s+([A-Z][A-Za-z0-9_]*)\s*\(', body_snippet)
+                if m_ret:
+                    cls_name = m_ret.group(1)
+            fn_node = func_nodes.get(fix_name)
+            if fn_node:
+                fn_node["_py_fixture"] = cls_name
+            result.setdefault("_py_fixtures", {})[fix_name] = {
+                "class": cls_name,
+                "nid": fn_node["id"] if fn_node else f"{file_nid}_{fix_name}",
+                "file": str_path,
+            }
+
     for match in _PYTEST_TEST_FUNC_RE.finditer(source_text):
         fn_name = match.group(1)
         params_str = match.group(2)
@@ -241,11 +398,16 @@ def _extract_python_frameworks_regex(path: Path, source_text: str, result: dict[
 
         fn_node = func_nodes.get(fn_name)
         src_id = fn_node["id"] if fn_node else file_nid
+        fix_params = set()
 
         for raw_param in params_str.split(","):
-            clean_param = raw_param.strip().split(":")[0].split("=")[0].strip()
+            raw_stripped = raw_param.strip()
+            if ":" in raw_stripped or "=" in raw_stripped:
+                continue
+            clean_param = raw_stripped
             if not clean_param or clean_param in _TEST_PARAM_IGNORE:
                 continue
+            fix_params.add(clean_param)
             edges.append({
                 "source": src_id,
                 "target": clean_param,
@@ -256,6 +418,13 @@ def _extract_python_frameworks_regex(path: Path, source_text: str, result: dict[
                 "source_location": f"L{line_num}",
                 "weight": 1.0,
             })
+
+        if fix_params and fn_node:
+            for rc in result.get("raw_calls", []):
+                if rc.get("caller_nid") == fn_node["id"] and rc.get("is_member_call"):
+                    if rc.get("receiver") in fix_params:
+                        rc["_python_fixture_param"] = True
+                        rc["lang"] = "python"
 
 
 def extract_python_frameworks(path: Path, source_text: str, result: dict[str, Any]) -> None:

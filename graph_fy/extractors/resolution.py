@@ -5,37 +5,46 @@ from pathlib import Path
 from typing import Any, Callable
 
 # Re-export all resolvers from graph_fy.resolvers
-from graph_fy.resolvers import (
+from graph_fy.resolvers.c_cpp import (
     _DECLDEF_HEADER_SUFFIXES,
     _DECLDEF_IMPL_SUFFIXES,
+    _decldef_class_stem,
+    _merge_decl_def_classes,
+    _resolve_c_include_path,
+    _source_stem,
+)
+from graph_fy.resolvers.common import (
+    _cached_realpath,
+    _cached_source_key,
+    _disambiguate_colliding_node_ids,
+    _get_process_cwd,
+    _is_type_like_definition,
+    _node_disambiguation_source_key,
+    _resolve_cached,
+    _source_key,
+)
+from graph_fy.resolvers.go import (
+    _go_import_path_for_file,
+    _resolve_go_type_references,
+)
+from graph_fy.resolvers.javascript import (
     _EXPORT_CONDITION_PRIORITY,
     _JS_INDEX_FILES,
     _JS_PRIMITIVE_TYPES,
     _JS_RESOLVE_EXTS,
     _PACKAGE_IMPORTS_CACHE,
-    _PHP_REPOINT_RELATIONS,
-    _PHP_SUPERTYPE_RELATIONS,
-    _PYTHON_WORKSPACE_ROOTS_CACHE,
     _TSCONFIG_ALIAS_CACHE,
     _TSCONFIG_BASEURL_CACHE,
     _VUE_SCRIPT_LANG_RE,
     _VUE_SCRIPT_RE,
     _WORKSPACE_MANIFEST_NAMES,
-    _cached_realpath,
-    _cached_source_key,
     _collect_js_symbol_resolution_facts,
-    _collect_python_symbol_resolution_facts,
     _contained_in_package,
-    _decldef_class_stem,
-    _disambiguate_colliding_node_ids,
     _exports_candidates,
     _find_js_config,
     _find_js_project_anchor,
     _find_workspace_root,
-    _get_process_cwd,
-    _go_import_path_for_file,
     _importer_platform,
-    _is_type_like_definition,
     _js_call_identifier,
     _js_default_export_name,
     _js_default_import_name,
@@ -54,55 +63,60 @@ from graph_fy.resolvers import (
     _load_workspace_packages,
     _match_subpath_import,
     _match_tsconfig_alias,
-    _merge_decl_def_classes,
-    _node_disambiguation_source_key,
     _package_entry_candidates,
     _parse_js_tree,
-    _parse_python_tree,
-    _parse_python_tree_cached,
-    _pascal_class_stem_cache,
-    _pascal_project_root,
-    _pascal_resolve_class,
-    _pascal_resolve_unit,
-    _pascal_unit_cache,
-    _php_fqn_from_raw,
     _platform_variants,
     _pnpm_workspace_globs,
-    _probe_python_module_candidate,
-    _python_call_identifier,
-    _python_import_from_module,
-    _python_imported_names,
-    _python_top_level_function_bodies,
-    _python_workspace_package_roots,
     _read_json_config,
     _read_tsconfig_aliases,
-    _resolve_c_include_path,
-    _resolve_cached,
-    _resolve_cross_file_java_imports,
     _resolve_export_target,
     _resolve_export_targets,
-    _resolve_go_type_references,
-    _resolve_java_type_references,
     _resolve_js_import_path,
     _resolve_js_import_target,
     _resolve_js_module_path,
-    _resolve_lua_import_target,
     _resolve_package_import,
-    _resolve_php_type_references,
-    _resolve_python_module_path,
-    _resolve_python_namespace_dir,
     _resolve_tsconfig_alias,
     _resolve_workspace_import,
-    _source_key,
-    _source_stem,
     _strip_jsonc,
     _ts_collect_type_refs,
     _ts_heritage_clause_entries,
     _ts_walk_class_members,
     _vue_mask_non_script,
     _walk_js_tree,
-    _walk_python_tree,
     _workspace_globs,
+)
+from graph_fy.resolvers.jvm import (
+    _resolve_cross_file_java_imports,
+    _resolve_java_type_references,
+)
+from graph_fy.resolvers.lua import _resolve_lua_import_target
+from graph_fy.resolvers.pascal import (
+    _pascal_class_stem_cache,
+    _pascal_project_root,
+    _pascal_resolve_class,
+    _pascal_resolve_unit,
+    _pascal_unit_cache,
+)
+from graph_fy.resolvers.php import (
+    _PHP_REPOINT_RELATIONS,
+    _PHP_SUPERTYPE_RELATIONS,
+    _php_fqn_from_raw,
+    _resolve_php_type_references,
+)
+from graph_fy.resolvers.python import (
+    _PYTHON_WORKSPACE_ROOTS_CACHE,
+    _collect_python_symbol_resolution_facts,
+    _parse_python_tree,
+    _parse_python_tree_cached,
+    _probe_python_module_candidate,
+    _python_call_identifier,
+    _python_import_from_module,
+    _python_imported_names,
+    _python_top_level_function_bodies,
+    _python_workspace_package_roots,
+    _resolve_python_module_path,
+    _resolve_python_namespace_dir,
+    _walk_python_tree,
 )
 
 from graph_fy.extractors.base import (
@@ -374,6 +388,9 @@ def _apply_symbol_resolution_facts(
         if key in seen:
             return key
         seen.add(key)
+        origins = export_origins.get(key)
+        if origins and len(origins) > 1:
+            return key  # Ambiguous re-export chain: do not guess by last-write-wins (#2034)
         origin = named_exports_by_file.get(target_path, {}).get(imported_name)
         if origin is not None:
             return resolve_exported_origin(origin[0], origin[1], seen)
@@ -462,6 +479,21 @@ def _apply_symbol_resolution_facts(
         target_id = symbol_nodes.get((origin_path, origin_symbol))
         if target_id is None:
             continue
+        # Drop the dangling provisional barrel-named import edge once resolved through a barrel (#41, #4486)
+        resolved_barrel_path = _resolve_cached(import_fact.target_path)
+        if origin_path != resolved_barrel_path:
+            barrel_stem = _file_stem(import_fact.target_path)
+            barrel_target = _make_id(barrel_stem, import_fact.imported_name)
+            if barrel_target not in owned_ids:
+                edges[:] = [
+                    e for e in edges
+                    if not (
+                        e.get("source") == source_id
+                        and e.get("relation") == "imports"
+                        and e.get("target") == barrel_target
+                    )
+                ]
+                existing_edges.discard((source_id, barrel_target, "imports", "import"))
         add_edge(
             source_id,
             target_id,

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from graph_fy.extractors.base import _file_stem, _make_id
+from graph_fy.resolvers.common import _file_stem, _make_id
 
 
 _pascal_unit_cache: dict[str, dict[str, str]] = {}

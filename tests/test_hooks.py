@@ -7,7 +7,16 @@ import textwrap
 from types import SimpleNamespace
 from pathlib import Path
 import pytest
-from graph_fy.hooks import install, uninstall, status, _hooks_dir, _HOOK_MARKER, _CHECKOUT_MARKER
+from graph_fy.hooks import (
+    install,
+    uninstall,
+    status,
+    _hooks_dir,
+    _HOOK_MARKER,
+    _CHECKOUT_MARKER,
+    _MERGE_MARKER,
+    _REWRITE_MARKER,
+)
 
 
 def _make_git_repo(tmp_path: Path) -> Path:
@@ -120,7 +129,29 @@ def test_status_shows_both_hooks(tmp_path):
     result = status(repo)
     assert "post-commit" in result
     assert "post-checkout" in result
-    assert result.count("installed") >= 2
+    assert "post-merge" in result
+    assert "post-rewrite" in result
+    assert result.count("installed") >= 4
+
+
+def test_install_creates_post_merge_and_rewrite_hooks(tmp_path):
+    repo = _make_git_repo(tmp_path)
+    install(repo)
+    merge_hook = repo / ".git" / "hooks" / "post-merge"
+    rewrite_hook = repo / ".git" / "hooks" / "post-rewrite"
+    assert merge_hook.exists()
+    assert _MERGE_MARKER in merge_hook.read_text()
+    assert rewrite_hook.exists()
+    assert _REWRITE_MARKER in rewrite_hook.read_text()
+
+
+def test_uninstall_removes_post_merge_and_rewrite_hooks(tmp_path):
+    repo = _make_git_repo(tmp_path)
+    install(repo)
+    uninstall(repo)
+    assert not (repo / ".git" / "hooks" / "post-merge").exists()
+    assert not (repo / ".git" / "hooks" / "post-rewrite").exists()
+
 
 
 

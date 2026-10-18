@@ -3,6 +3,7 @@ from __future__ import annotations
 
 
 from pathlib import Path
+import hashlib
 from graph_fy.extractors.base import _LANGUAGE_BUILTIN_GLOBALS, _file_stem, _make_id, _read_text
 
 
@@ -109,11 +110,57 @@ def extract_rust(path: Path) -> dict:
             edge["context"] = context
         edges.append(edge)
 
+    case_groups: dict[str, set[str]] = {}
+
+    def _scan_rust_declarations(node, parent_impl: str | None = None) -> None:
+        t = node.type
+        if t in ("function_item", "function_signature_item", "struct_item", "enum_item",
+                 "trait_item", "type_item", "const_item", "static_item"):
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                name = _read_text(name_node, source)
+                if name and any(c.isalnum() for c in name):
+                    base = parent_impl or stem
+                    case_groups.setdefault(_make_id(base, name), set()).add(name)
+            if t not in ("function_item", "function_signature_item"):
+                for child in node.children:
+                    _scan_rust_declarations(child, parent_impl)
+            return
+
+        if t == "impl_item":
+            type_node = node.child_by_field_name("type")
+            impl_base = None
+            if type_node:
+                type_name = _read_text(type_node, source).strip()
+                if type_name:
+                    bare_type = type_name.split("<")[0].strip()
+                    bare_type = bare_type.rsplit("::", 1)[-1]
+                    if bare_type:
+                        impl_base = _make_id(stem, bare_type)
+            for child in node.children:
+                _scan_rust_declarations(child, impl_base)
+            return
+
+        for child in node.children:
+            _scan_rust_declarations(child, parent_impl)
+
+    _scan_rust_declarations(root)
+
+    def symbol_nid(plain_nid: str, name: str) -> str:
+        names = case_groups.get(plain_nid) or set()
+        if len(names) < 2:
+            return plain_nid
+        upper = [n for n in names if n[:1].isupper()]
+        if len(upper) == 1 and name == upper[0]:
+            return plain_nid
+        salt = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
+        return _make_id(plain_nid, salt)
+
     file_nid = _make_id(str(path))
     add_node(file_nid, path.name, 1)
 
     def ensure_named_node(name: str, line: int) -> str:
-        nid = _make_id(stem, name)
+        nid = symbol_nid(_make_id(stem, name), name)
         if nid in seen_ids:
             return nid
         nid = _make_id(name)
@@ -171,11 +218,11 @@ def extract_rust(path: Path) -> dict:
                     return
                 line = node.start_point[0] + 1
                 if parent_impl_nid:
-                    func_nid = _make_id(parent_impl_nid, func_name)
+                    func_nid = symbol_nid(_make_id(parent_impl_nid, func_name), func_name)
                     add_node(func_nid, f".{func_name}()", line)
                     add_edge(parent_impl_nid, func_nid, "method", line)
                 else:
-                    func_nid = _make_id(stem, func_name)
+                    func_nid = symbol_nid(_make_id(stem, func_name), func_name)
                     add_node(func_nid, f"{func_name}()", line)
                     add_edge(file_nid, func_nid, "contains", line)
                 emit_param_return_refs(node, func_nid, line)
@@ -197,11 +244,11 @@ def extract_rust(path: Path) -> dict:
                     return
                 line = node.start_point[0] + 1
                 if parent_impl_nid:
-                    func_nid = _make_id(parent_impl_nid, func_name)
+                    func_nid = symbol_nid(_make_id(parent_impl_nid, func_name), func_name)
                     add_node(func_nid, f".{func_name}()", line)
                     add_edge(parent_impl_nid, func_nid, "method", line)
                 else:
-                    func_nid = _make_id(stem, func_name)
+                    func_nid = symbol_nid(_make_id(stem, func_name), func_name)
                     add_node(func_nid, f"{func_name}()", line)
                     add_edge(file_nid, func_nid, "contains", line)
                 emit_param_return_refs(node, func_nid, line)
@@ -214,7 +261,7 @@ def extract_rust(path: Path) -> dict:
                 if not item_name or not any(c.isalnum() for c in item_name):
                     return
                 line = node.start_point[0] + 1
-                item_nid = _make_id(stem, item_name)
+                item_nid = symbol_nid(_make_id(stem, item_name), item_name)
                 add_node(item_nid, item_name, line)
                 add_edge(file_nid, item_nid, "contains", line)
                 if t == "trait_item":
@@ -343,11 +390,11 @@ def extract_rust(path: Path) -> dict:
                     return
                 line = node.start_point[0] + 1
                 if parent_impl_nid:
-                    item_nid = _make_id(parent_impl_nid, item_name)
+                    item_nid = symbol_nid(_make_id(parent_impl_nid, item_name), item_name)
                     add_node(item_nid, f".{item_name}", line)
                     add_edge(parent_impl_nid, item_nid, "contains", line)
                 else:
-                    item_nid = _make_id(stem, item_name)
+                    item_nid = symbol_nid(_make_id(stem, item_name), item_name)
                     add_node(item_nid, item_name, line)
                     add_edge(file_nid, item_nid, "contains", line)
                 type_node = node.child_by_field_name("type")

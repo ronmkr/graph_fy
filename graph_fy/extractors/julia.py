@@ -1,8 +1,7 @@
 """julia — moved verbatim from graph_fy/extract.py."""
 from __future__ import annotations
 
-from graph_fy.extractors.base import _file_stem, _make_id, _read_text
-from graph_fy.extractors.engine import _semantic_reference_edge
+from graph_fy.extractors.base import _file_stem, _make_id, _read_text, _semantic_reference_edge
 from pathlib import Path
 
 

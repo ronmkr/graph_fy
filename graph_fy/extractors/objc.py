@@ -1,9 +1,9 @@
 """objc — moved verbatim from graph_fy/extract.py."""
 from __future__ import annotations
 
-from graph_fy.extractors.base import _file_stem, _make_id, _read_text
-from graph_fy.extractors.engine import _cpp_declarator_name, _semantic_reference_edge
-from graph_fy.extractors.resolution import _resolve_c_include_path
+from graph_fy.extractors.base import _file_stem, _make_id, _read_text, _semantic_reference_edge
+from graph_fy.extractors.c_cpp import _cpp_declarator_name
+from graph_fy.resolvers.c_cpp import _resolve_c_include_path
 from pathlib import Path
 from typing import Any
 import re

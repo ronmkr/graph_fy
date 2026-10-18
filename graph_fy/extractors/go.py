@@ -142,7 +142,10 @@ def extract_go(path: Path) -> dict:
     add_node(file_nid, path.name, 1)
 
     def ensure_named_node(name: str, line: int) -> str:
-        nid = _make_id(pkg_scope, name)
+        nid = symbol_nid(_make_id(pkg_scope, name), name)
+        if nid in seen_ids:
+            return nid
+        nid = symbol_nid(_make_id(stem, name), name)
         if nid in seen_ids:
             return nid
         nid = _make_id(name)
@@ -257,6 +260,15 @@ def extract_go(path: Path) -> dict:
             found = _plain_symbol_nid(node)
             if found:
                 case_groups.setdefault(found[0], set()).add(found[1])
+                case_groups.setdefault(_make_id(pkg_scope, found[1]), set()).add(found[1])
+            return
+        if node.type == "type_spec":
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                tname = _read_text(name_node, source)
+                if tname and tname.strip("_. "):
+                    case_groups.setdefault(_make_id(pkg_scope, tname), set()).add(tname)
+                    case_groups.setdefault(_make_id(stem, tname), set()).add(tname)
             return
         for child in node.children:
             _scan_declarations(child)
@@ -336,7 +348,7 @@ def extract_go(path: Path) -> dict:
                 if not type_name or not type_name.strip("_. "):
                     continue
                 line = child.start_point[0] + 1
-                type_nid = _make_id(pkg_scope, type_name)
+                type_nid = symbol_nid(_make_id(pkg_scope, type_name), type_name)
                 add_node(type_nid, type_name, line)
                 add_edge(file_nid, type_nid, "contains", line)
                 # Type body: struct fields (with embeds) or interface embedding.

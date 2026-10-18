@@ -811,11 +811,12 @@ def _doc_twin_remap(nodes: list) -> dict[str, str]:
     return remap
 
 
-def build_from_json(extraction: dict, *, directed: bool = False, root: str | Path | None = None) -> nx.Graph:
+def build_from_json(extraction: dict, *, directed: bool = False, root: str | Path | None = None, multigraph: bool = False) -> nx.Graph:
     """Build a NetworkX graph from an extraction dict.
 
     directed=True produces a DiGraph that preserves edge direction (source→target).
     directed=False (default) produces an undirected Graph for backward compatibility.
+    multigraph=True preserves parallel edges across different relations.
     root: if given, absolute source_file paths from semantic subagents are made
         relative to root so all nodes share a consistent path key (#932).
     """
@@ -892,6 +893,13 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
     try:
         from graph_fy.cross_resolve import resolve_cross_format_dependencies
         resolve_cross_format_dependencies(extraction.get("nodes", []), extraction.get("edges", []))
+    except Exception:
+        pass
+
+    # Cross-language FFI resolution (Rust <-> C/C++, PyO3, pybind11, wasm-bindgen) (#25)
+    try:
+        from graph_fy.ffi_resolve import resolve_ffi_boundaries
+        resolve_ffi_boundaries(extraction.get("nodes", []), extraction.get("edges", []))
     except Exception:
         pass
 
@@ -982,7 +990,11 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
                     _doc_remap.get(n, n) if _hashable(n) else n for n in he["nodes"]
                 ]
 
-    G: nx.Graph = nx.DiGraph() if directed else nx.Graph()
+    is_multi = multigraph or bool(extraction.get("multigraph"))
+    if is_multi:
+        G: nx.Graph = nx.MultiDiGraph() if directed else nx.MultiGraph()
+    else:
+        G: nx.Graph = nx.DiGraph() if directed else nx.Graph()
     for node in extraction.get("nodes", []):
         # Skip dict nodes with a missing or non-hashable id (e.g. a list emitted
         # by a buggy LLM extraction) so NetworkX add_node never raises
@@ -1352,15 +1364,24 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
         # entirely. Alphabetical order carries no meaning; keeping the specific
         # fact does. The reverse (specific arriving after generic) still
         # overwrites, so the outcome no longer depends on edge order at all.
-        if G.has_edge(src, tgt):
-            existing_rel = edge_data(G, src, tgt).get("relation")
-            if (
-                attrs.get("relation") in _GENERIC_RELATIONS
-                and existing_rel is not None
-                and existing_rel not in _GENERIC_RELATIONS
-            ):
-                continue
-        G.add_edge(src, tgt, **attrs)
+        if G.is_multigraph():
+            rel_key = attrs.get("relation") or ""
+            G.add_edge(src, tgt, key=rel_key, **attrs)
+        else:
+            if G.has_edge(src, tgt):
+                existing = edge_data(G, src, tgt)
+                existing_rel = existing.get("relation")
+                rels = existing.setdefault("relations", [existing_rel] if existing_rel else [])
+                new_rel = attrs.get("relation")
+                if new_rel and new_rel not in rels:
+                    rels.append(new_rel)
+                if (
+                    attrs.get("relation") in _GENERIC_RELATIONS
+                    and existing_rel is not None
+                    and existing_rel not in _GENERIC_RELATIONS
+                ):
+                    continue
+            G.add_edge(src, tgt, **attrs)
     hyperedges = extraction.get("hyperedges", [])
     if hyperedges:
         # Relativize hyperedge source_file the same way nodes and edges are
@@ -1416,6 +1437,9 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
                 f"will be emptied on the next export.",
                 file=sys.stderr,
             )
+    built_commit = extraction.get("built_at_commit") or (extraction.get("graph") or {}).get("built_at_commit")
+    if built_commit:
+        G.graph["built_at_commit"] = built_commit
     # Runs LAST, after the alias-competition above (which relies on file-node
     # labels still being bare basenames): give colliding-basename file nodes a
     # directory-qualified display label so lookup/discovery can disambiguate

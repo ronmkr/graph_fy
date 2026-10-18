@@ -339,6 +339,64 @@ def _resolve_python_member_calls(
             "weight": 1.0,
         })
 
+    # Pytest fixtures index (#45, #4332, #4333): path -> {fixture_name: {"class": cls, "nid": nid, "file": sf}}
+    fixtures_by_path: dict[str, dict[str, dict[str, Any]]] = {}
+    for result in per_file:
+        py_fixtures = result.get("_py_fixtures")
+        if not py_fixtures:
+            for n in result.get("nodes", []):
+                py_fix = n.get("_py_fixture")
+                if py_fix:
+                    lbl = str(n.get("label", "")).rstrip("()")
+                    if lbl:
+                        py_fixtures = py_fixtures or {}
+                        py_fixtures[lbl] = {
+                            "class": py_fix,
+                            "nid": n.get("id"),
+                            "file": n.get("source_file", ""),
+                        }
+        if py_fixtures:
+            sf = result.get("source_file") or (result.get("nodes") and result["nodes"][0].get("source_file")) or ""
+            if sf:
+                fixtures_by_path[str(Path(sf).resolve())] = py_fixtures
+                fixtures_by_path[str(Path(sf))] = py_fixtures
+                fixtures_by_path[sf] = py_fixtures
+    for n in all_nodes:
+        py_fix = n.get("_py_fixture")
+        sf = n.get("source_file")
+        if py_fix and sf:
+            lbl = str(n.get("label", "")).rstrip("()")
+            if lbl:
+                entry = {
+                    "class": py_fix,
+                    "nid": n.get("id"),
+                    "file": sf,
+                }
+                for k in (str(Path(sf).resolve()), str(Path(sf)), sf):
+                    fixtures_by_path.setdefault(k, {})[lbl] = entry
+
+    def _find_fixture(caller_sf: str, fix_name: str) -> dict[str, Any] | None:
+        if not caller_sf:
+            return None
+        p = Path(caller_sf)
+        # 1. Check same test file
+        for k in (str(p), str(p.resolve()), caller_sf):
+            if k in fixtures_by_path and fix_name in fixtures_by_path[k]:
+                return fixtures_by_path[k][fix_name]
+        # 2. Check conftest.py in same directory and parent directories
+        curr = p.parent
+        visited = set()
+        while curr and curr not in visited:
+            visited.add(curr)
+            cand = curr / "conftest.py"
+            for k in (str(cand), str(cand.resolve())):
+                if k in fixtures_by_path and fix_name in fixtures_by_path[k]:
+                    return fixtures_by_path[k][fix_name]
+            if curr.parent == curr:
+                break
+            curr = curr.parent
+        return None
+
     for rc in all_raw_calls:
         if not rc.get("is_member_call"):
             continue
@@ -354,6 +412,50 @@ def _resolve_python_member_calls(
             if len(class_nids) != 1:  # absent or ambiguous -> bail (god-node guard)
                 continue
             _emit_call(caller, method_index.get((class_nids[0], _key(callee))), rc)
+        elif rc.get("_python_fixture_param"):
+            # Fixture arm (#45, #4332, #4333): a member call on a pytest fixture parameter
+            # is typed from the fixture's returned class according to pytest scoping.
+            caller_sf = rc.get("source_file", "")
+            if not caller_sf:
+                caller_node = node_by_id.get(caller)
+                if caller_node:
+                    caller_sf = caller_node.get("source_file", "")
+            fix_info = _find_fixture(caller_sf, receiver)
+            if not fix_info or fix_info.get("class") in (None, "", "?"):
+                # Untyped fixture shadows anything higher up; emit nothing
+                continue
+            cls_name = fix_info["class"]
+            class_nids = class_def_nids.get(_key(cls_name), [])
+            target_class_nid = None
+            if len(class_nids) == 1:
+                target_class_nid = class_nids[0]
+            elif len(class_nids) > 1:
+                # Disambiguate to the class visible from the fixture's file
+                fix_file = fix_info.get("file", "")
+                fix_filenode = file_of_node.get(fix_info.get("nid", ""))
+                candidates = [
+                    cn for cn in class_nids
+                    if (fix_filenode and file_of_node.get(cn) == fix_filenode)
+                    or (fix_filenode and cn in imported_by_filenode.get(fix_filenode, set()))
+                    or (fix_file and node_by_id.get(cn, {}).get("source_file") == fix_file)
+                ]
+                if len(candidates) == 1:
+                    target_class_nid = candidates[0]
+            if target_class_nid:
+                method_nid = method_index.get((target_class_nid, _key(callee)))
+                if method_nid and method_nid != caller and (caller, method_nid) not in existing_pairs:
+                    existing_pairs.add((caller, method_nid))
+                    all_edges.append({
+                        "source": caller,
+                        "target": method_nid,
+                        "relation": "calls",
+                        "context": "call",
+                        "confidence": "INFERRED",
+                        "confidence_score": 0.85,
+                        "source_file": rc.get("source_file", ""),
+                        "source_location": rc.get("source_location"),
+                        "weight": 1.0,
+                    })
         else:
             # Module arm (#1883): a lowercase receiver may be an imported module.
             # Resolve it against the modules imported into the caller's own file
@@ -373,6 +475,14 @@ def _resolve_python_member_calls(
             if len(children) != 1:  # absent or ambiguous callable -> bail
                 continue
             _emit_call(caller, children[0], rc)
+
+    for e in all_edges:
+        if e.get("relation") == "depends_on" and e.get("context") == "pytest_fixture":
+            tgt = e.get("target")
+            if tgt and node_by_id.get(tgt) is None:
+                fix_info = _find_fixture(e.get("source_file", ""), tgt)
+                if fix_info and fix_info.get("nid"):
+                    e["target"] = fix_info["nid"]
 
 
 def _resolve_typescript_member_calls(
@@ -400,10 +510,13 @@ def _resolve_typescript_member_calls(
     a false call edge is worse than a missing one (the C++ resolver's bar).
     """
     type_table_by_file: dict[str, dict[str, str]] = {}
+    classes_by_file: dict[str, dict[str, dict[str, str]]] = {}
     for result in per_file:
         tt = result.get("ts_type_table")
         if tt and tt.get("path"):
             type_table_by_file[tt["path"]] = tt.get("table", {})
+            if "classes" in tt:
+                classes_by_file[tt["path"]] = tt["classes"]
     if not type_table_by_file:
         return
 
@@ -443,6 +556,19 @@ def _resolve_typescript_member_calls(
             owner_file = file_of_node.get(e.get("source"))
             if owner_file is not None:
                 file_of_node.setdefault(e.get("target"), owner_file)
+    # Track owning class of each method/closure for class-scoped field resolution (#4294)
+    class_of_method: dict[str, str] = {}
+    for e in all_edges:
+        if e.get("relation") == "method":
+            owner = e.get("source")
+            target = e.get("target")
+            if owner is not None and target is not None:
+                class_of_method[target] = owner
+    for e in all_edges:
+        if e.get("relation") in ("defines", "contains") and e.get("source") in class_of_method:
+            target = e.get("target")
+            if target is not None:
+                class_of_method.setdefault(target, class_of_method[e["source"]])
     # ``imports`` targets are the imported symbol nodes; ``imports_from`` targets
     # are module file nodes. A symbol id never collides with a file id, so one
     # set serves both origin checks below.
@@ -469,7 +595,15 @@ def _resolve_typescript_member_calls(
             type_qualified = True  # the receiver names the type in source
         else:
             type_qualified = False
-            type_name = type_table_by_file.get(rc.get("source_file", ""), {}).get(receiver)
+            src_f = rc.get("source_file", "")
+            type_name = None
+            caller_cls_nid = class_of_method.get(caller)
+            if caller_cls_nid:
+                cls_node = node_by_id.get(caller_cls_nid)
+                if cls_node and cls_node.get("label"):
+                    type_name = classes_by_file.get(src_f, {}).get(cls_node["label"], {}).get(receiver)
+            if not type_name:
+                type_name = type_table_by_file.get(src_f, {}).get(receiver)
         if not type_name:
             continue
         # A builtin global receiver type (Date, Promise, Map, ...) must not resolve

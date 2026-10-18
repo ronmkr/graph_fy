@@ -1,6 +1,7 @@
 """JavaScript and TypeScript AST extractor."""
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from graph_fy.extractors.base import _LANGUAGE_BUILTIN_GLOBALS, _file_stem, _make_id, _read_text
@@ -418,33 +419,113 @@ def _dynamic_import_js(node, source: bytes, caller_nid: str, str_path: str, edge
     return True
 
 
-def _ts_receiver_type_table(root, source: bytes, table: dict[str, str]) -> None:
-    """Add TS/JS receiver bindings to ``table`` (name -> TypeName), for member-call
-    resolution beyond the constructor-injected `this.field` case (#1630):
+def _ts_receiver_type_table(
+    root,
+    source: bytes,
+    table: dict[str, str],
+    class_tables: dict[str, dict[str, str]] | None = None,
+) -> None:
+    """Add TS/JS receiver bindings to ``table`` (name -> TypeName) and ``class_tables``,
+    for member-call resolution beyond constructor parameter properties (#1630, #4473):
 
+      * class field definitions: ``svc: Svc``, ``private db = new Database()``;
+      * method/accessor/static-block assignments: ``this.cache = new CacheService()``;
       * local ``const/let/var x = new Foo()`` -> ``x: Foo`` (Pattern A);
-      * a type-annotated parameter ``(svc: Svc)`` -> ``svc: Svc`` (Pattern B), so a
-        call on the param — including inside a returned closure — resolves.
+      * type-annotated parameters ``(svc: Svc)`` -> ``svc: Svc`` (Pattern B).
 
-    File-scoped, first-binding-wins (merged into the constructor-injection table,
-    which is populated first and therefore wins on a name clash). Only a bare
-    ``type_identifier`` (a single class/interface name) is recorded — an array,
-    union, generic, qualified, or predefined type is skipped (precision over
-    recall, matching the receiver-typed resolvers for Swift/C#/C++)."""
+    Class-scoped field types are stored in ``class_tables[class_name]`` with inheritance
+    resolution (subclass inherits base class fields), preventing collisions between
+    classes sharing field names (#4294)."""
     def _bare_type_ident(type_annotation):
-        # type_annotation -> ": T"; accept only a single type_identifier child.
-        idents = [c for c in type_annotation.children if c.type == "type_identifier"]
+        if type_annotation is None:
+            return None
+        idents = [c for c in type_annotation.children if c.type in ("type_identifier", "identifier")]
         others = [c for c in type_annotation.children
-                  if c.is_named and c.type not in ("type_identifier",)]
+                  if c.is_named and c.type not in ("type_identifier", "identifier")]
         if len(idents) == 1 and not others:
             return _read_text(idents[0], source)
         return None
+
+    direct_fields: dict[str, dict[str, str]] = {}
+    heritage_map: dict[str, list[str]] = {}
 
     stack = [root]
     while stack:
         n = stack.pop()
         t = n.type
-        if t == "variable_declarator":
+        if t in ("class_declaration", "class"):
+            name_n = n.child_by_field_name("name")
+            if name_n is not None:
+                cls_name = _read_text(name_n, source)
+                cls_fields = direct_fields.setdefault(cls_name, {})
+                for child in n.children:
+                    if child.type == "class_heritage":
+                        for hc in child.children:
+                            if hc.type == "extends_clause":
+                                for sub in hc.children:
+                                    if sub.type in ("type_identifier", "identifier"):
+                                        heritage_map.setdefault(cls_name, []).append(_read_text(sub, source))
+                body = n.child_by_field_name("body")
+                if body is not None:
+                    for m in body.children:
+                        if m.type in ("public_field_definition", "field_definition", "property_definition"):
+                            fname_n = m.child_by_field_name("name")
+                            ann_n = m.child_by_field_name("type")
+                            val_n = m.child_by_field_name("value")
+                            if fname_n is not None:
+                                fname = _read_text(fname_n, source)
+                                ftype = _bare_type_ident(ann_n) if ann_n is not None else None
+                                if not ftype and val_n is not None and val_n.type == "new_expression":
+                                    ctor = val_n.child_by_field_name("constructor")
+                                    if ctor is not None and ctor.type in ("identifier", "type_identifier"):
+                                        ftype = _read_text(ctor, source)
+                                if fname and ftype:
+                                    cls_fields[fname] = ftype
+                        elif m.type in ("method_definition", "class_static_block"):
+                            param_types: dict[str, str] = {}
+                            params = m.child_by_field_name("parameters")
+                            if params is not None:
+                                for p in params.children:
+                                    if p.type in ("required_parameter", "optional_parameter"):
+                                        p_name = p.child_by_field_name("pattern")
+                                        p_type = p.child_by_field_name("type")
+                                        if p_name is not None and p_type is not None:
+                                            tname = _bare_type_ident(p_type)
+                                            if tname:
+                                                p_str = _read_text(p_name, source)
+                                                param_types[p_str] = tname
+                                                has_mod = any(
+                                                    x.type in ("accessibility_modifier", "readonly")
+                                                    for x in p.children
+                                                )
+                                                if has_mod:
+                                                    cls_fields[p_str] = tname
+                            mbody = m.child_by_field_name("body") or m
+                            mstack = [mbody]
+                            while mstack:
+                                curr = mstack.pop()
+                                if curr.type == "assignment_expression":
+                                    left = curr.child_by_field_name("left")
+                                    right = curr.child_by_field_name("right")
+                                    if left is not None and left.type == "member_expression":
+                                        obj = left.child_by_field_name("object")
+                                        prop = left.child_by_field_name("property")
+                                        if obj is not None and obj.type == "this" and prop is not None:
+                                            pname = _read_text(prop, source)
+                                            ptype = None
+                                            if right is not None:
+                                                if right.type == "new_expression":
+                                                    ctor = right.child_by_field_name("constructor")
+                                                    if ctor is not None and ctor.type in ("identifier", "type_identifier"):
+                                                        ptype = _read_text(ctor, source)
+                                                elif right.type in ("identifier", "property_identifier"):
+                                                    rname = _read_text(right, source)
+                                                    ptype = param_types.get(rname)
+                                            if pname and ptype and pname not in cls_fields:
+                                                cls_fields[pname] = ptype
+                                for child in curr.children:
+                                    mstack.append(child)
+        elif t == "variable_declarator":
             name_n = n.child_by_field_name("name")
             value = n.child_by_field_name("value")
             if (name_n is not None and name_n.type == "identifier"
@@ -465,6 +546,30 @@ def _ts_receiver_type_table(root, source: bytes, table: dict[str, str]) -> None:
                     table[name] = tname
         for c in n.children:
             stack.append(c)
+
+    def _fields_up_chain(cls_name: str, seen: set | None = None) -> dict[str, str]:
+        if seen is None:
+            seen = set()
+        if cls_name in seen:
+            return {}
+        seen.add(cls_name)
+        merged: dict[str, str] = {}
+        for base in heritage_map.get(cls_name, []):
+            for k, v in _fields_up_chain(base, seen).items():
+                merged.setdefault(k, v)
+        for k, v in direct_fields.get(cls_name, {}).items():
+            merged[k] = v
+        return merged
+
+    all_class_tables: dict[str, dict[str, str]] = {}
+    for cls in direct_fields:
+        all_class_tables[cls] = _fields_up_chain(cls)
+        for fld, ftype in all_class_tables[cls].items():
+            if fld not in table:
+                table[fld] = ftype
+
+    if class_tables is not None:
+        class_tables.update(all_class_tables)
 
 def _find_require_call(value_node):
     """Return the call_expression node if `value_node` is a `require(...)` call
@@ -1230,8 +1335,71 @@ def _ts_descendant_decorators(node) -> list:
     rec(node, True)
     return out
 
+
+def _js_member_salted_nid(plain_nid: str, name: str, groups: dict[str, set[str]]) -> str:
+    """Resolve a JS/TS class member's real node id against the collision map."""
+    names = groups.get(plain_nid)
+    if not names or len(names) < 2:
+        return plain_nid
+    public = [n for n in names if not n.startswith(("_", "$", "#"))]
+    if len(public) == 1 and name == public[0]:
+        return plain_nid
+    salt = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
+    return _make_id(plain_nid, salt)
+
+
+def _js_pre_scan_member_collisions(root_node, source: bytes, stem: str) -> dict[str, set[str]]:
+    """Pre-scan a JS/TS module for symbol collisions caused by prefix stripping (#4475)."""
+    groups: dict[str, set[str]] = {}
+
+    def _record(plain_nid: str, name: str) -> None:
+        groups.setdefault(plain_nid, set()).add(name)
+
+    classes: list[tuple[str, object]] = []
+
+    def _collect(node):
+        for child in node.children:
+            ctype = child.type
+            if ctype == "export_statement":
+                _collect(child)
+                continue
+            if ctype in ("function_declaration", "generator_function_declaration"):
+                name_node = child.child_by_field_name("name")
+                if name_node is not None:
+                    name = _read_text(name_node, source)
+                    if name:
+                        _record(_make_id(stem, name), name)
+            elif ctype in ("class_declaration", "abstract_class_declaration", "interface_declaration", "class"):
+                name_node = child.child_by_field_name("name")
+                body = child.child_by_field_name("body")
+                if name_node is not None and body is not None:
+                    class_name = _read_text(name_node, source)
+                    if class_name:
+                        _record(_make_id(stem, class_name), class_name)
+                        classes.append((class_name, body))
+            elif ctype in ("internal_module", "module", "statement_block", "ambient_declaration"):
+                _collect(child)
+
+    _collect(root_node)
+    module_groups = {nid: names for nid, names in groups.items() if len(names) >= 2}
+
+    for class_name, body in classes:
+        class_nid = _js_member_salted_nid(_make_id(stem, class_name), class_name, module_groups)
+        for member in body.children:
+            if member.type in ("method_definition", "method_signature", "abstract_method_signature"):
+                name_node = member.child_by_field_name("name")
+                if name_node is None:
+                    continue
+                name = _read_text(name_node, source)
+                if name:
+                    _record(_make_id(class_nid, name), name)
+
+    return {nid: names for nid, names in groups.items() if len(names) >= 2}
+
+
 def _ts_emit_decorator_edges(class_node, class_nid: str, stem: str, source: bytes,
-                             ensure_named_node, add_edge) -> None:
+                             ensure_named_node, add_edge,
+                             member_groups: dict[str, set[str]] | None = None) -> None:
     """Emit `references` edges (context="decorator") from a class and its members
     to the symbols of the TS decorators applied to them.
 
@@ -1283,11 +1451,13 @@ def _ts_emit_decorator_edges(class_node, class_nid: str, stem: str, source: byte
             if sib is not None and sib.type == "method_definition":
                 mname = _ts_method_name(sib, source)
                 if mname:
-                    owner = _make_id(class_nid, mname)
+                    plain = _make_id(class_nid, mname)
+                    owner = _js_member_salted_nid(plain, mname, member_groups or {})
             emit(member, owner)
         elif mt == "method_definition":
             mname = _ts_method_name(member, source)
-            m_nid = _make_id(class_nid, mname) if mname else class_nid
+            plain = _make_id(class_nid, mname) if mname else class_nid
+            m_nid = _js_member_salted_nid(plain, mname, member_groups or {}) if mname else class_nid
             for deco in _ts_descendant_decorators(member):
                 emit(deco, m_nid)
         else:

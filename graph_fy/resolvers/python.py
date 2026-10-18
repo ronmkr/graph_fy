@@ -5,14 +5,13 @@ import functools
 from pathlib import Path
 from typing import Any
 
-from graph_fy.extractors.base import _file_stem, _make_id, _read_text
-from graph_fy.extractors.models import (
+from graph_fy.resolvers.common import _file_stem, _make_id, _read_text, _resolve_cached
+from graph_fy.resolvers.models import (
     _SymbolExportFact,
     _SymbolImportFact,
     _SymbolResolutionFacts,
     _SymbolUseFact,
 )
-from graph_fy.resolvers.common import _resolve_cached
 
 _PYTHON_WORKSPACE_ROOTS_CACHE: dict[str, list[Path]] = {}
 
