@@ -446,10 +446,14 @@ def refine_query(
         elif (root_path / "graph_fy_out" / "graph.json").exists():
             graph_path = root_path / "graph_fy_out" / "graph.json"
     if db_path is None:
-        if (root_path / "graph_fy_out" / "index.db").exists():
-            db_path = root_path / "graph_fy_out" / "index.db"
+        if (root_path / "graph_fy_out" / "graph.db").exists():
+            db_path = root_path / "graph_fy_out" / "graph.db"
         elif (root_path / "graph_fy_out" / "index.db").exists():
             db_path = root_path / "graph_fy_out" / "index.db"
+        elif (root_path / "graph.db").exists():
+            db_path = root_path / "graph.db"
+        elif (root_path / "index.db").exists():
+            db_path = root_path / "index.db"
 
     if not code_draft or not code_draft.strip():
         return {
@@ -600,16 +604,29 @@ def task_context(
         elif (root_path / "graph.json").exists():
             graph_path = root_path / "graph.json"
     if db_path is None:
-        if graph_path is not None and (Path(graph_path).parent / "index.db").exists():
+        if graph_path is not None and (Path(graph_path).parent / "graph.db").exists():
+            db_path = Path(graph_path).parent / "graph.db"
+        elif graph_path is not None and (Path(graph_path).parent / "index.db").exists():
             db_path = Path(graph_path).parent / "index.db"
-        elif graph is None and (root_path / "graph_fy_out" / "index.db").exists():
+        elif (root_path / "graph_fy_out" / "graph.db").exists():
+            db_path = root_path / "graph_fy_out" / "graph.db"
+        elif (root_path / "graph_fy_out" / "index.db").exists():
             db_path = root_path / "graph_fy_out" / "index.db"
-        elif graph is None and (root_path / "index.db").exists():
+        elif (root_path / "graph.db").exists():
+            db_path = root_path / "graph.db"
+        elif (root_path / "index.db").exists():
             db_path = root_path / "index.db"
 
     if graph is None and graph_path is not None and Path(graph_path).exists():
         try:
             graph = load_node_link_graph(graph_path)
+        except Exception:
+            graph = None
+    elif graph is None and db_path is not None and Path(db_path).exists():
+        try:
+            from graph_fy.storage_sqlite import SqliteGraphStore
+            with SqliteGraphStore(db_path) as store:
+                graph = store.to_networkx()
         except Exception:
             graph = None
 
@@ -676,6 +693,9 @@ def task_context(
             if any(term in c_text for term in filter_terms):
                 grounded_candidates.append(c)
         candidates = grounded_candidates
+
+    _CODE_EXTS = {".rs", ".py", ".ts", ".js", ".tsx", ".jsx", ".java", ".go", ".c", ".cpp", ".h", ".hpp", ".cs", ".sol", ".kt"}
+    candidates.sort(key=lambda c: 0 if Path(str(c.get("source_path", ""))).suffix.lower() in _CODE_EXTS else 1)
 
     if not candidates:
         did_you_mean = suggest_close_symbols(significant_terms or raw_terms, graph=graph, db_path=db_path)

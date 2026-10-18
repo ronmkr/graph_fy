@@ -145,9 +145,10 @@ def query_parallel(
     resolved_gp = Path(graph_path).resolve() if graph_path else None
     resolved_db = Path(db_path).resolve() if db_path else None
     if resolved_db is None and resolved_gp:
-        candidate_db = resolved_gp.parent / "index.db"
-        if candidate_db.exists():
-            resolved_db = candidate_db
+        if (resolved_gp.parent / "graph.db").exists():
+            resolved_db = resolved_gp.parent / "graph.db"
+        elif (resolved_gp.parent / "index.db").exists():
+            resolved_db = resolved_gp.parent / "index.db"
 
     worker_count = min(max_workers, len(clean_queries), 8)
     results: list[dict[str, Any]] = []

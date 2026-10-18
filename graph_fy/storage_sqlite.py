@@ -62,6 +62,40 @@ CREATE TABLE IF NOT EXISTS hyperedge_members (
     PRIMARY KEY (hyperedge_id, node_id)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_hyperedge_members_node ON hyperedge_members(node_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+    node_id UNINDEXED,
+    title,
+    headings,
+    tags,
+    body,
+    source_path UNINDEXED,
+    tokenize='porter unicode61'
+);
+
+CREATE TABLE IF NOT EXISTS node_metadata (
+    node_id TEXT PRIMARY KEY,
+    label TEXT,
+    source_path TEXT,
+    source_location TEXT,
+    file_type TEXT,
+    node_kind TEXT,
+    pagerank REAL,
+    degree INTEGER,
+    content TEXT
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS indexed_terms (
+    term TEXT PRIMARY KEY,
+    doc_count INTEGER DEFAULT 1
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS file_stats (
+    path TEXT PRIMARY KEY,
+    size INTEGER,
+    mtime_ns INTEGER,
+    content_hash TEXT
+) WITHOUT ROWID;
 """
 
 
@@ -122,6 +156,7 @@ class SqliteGraphStore:
         *,
         commit: str | None = None,
         clear_existing: bool = True,
+        build_fts: bool = True,
     ) -> None:
         """Persist NetworkX graph directly to SQLite tables with zero JSON deserialization overhead."""
         cur = self.conn.cursor()
@@ -230,10 +265,192 @@ class SqliteGraphStore:
                     member_rows,
                 )
 
+            # FTS5 unified search indexing
+            if build_fts:
+                self.populate_fts(G, cur=cur)
+
             self.conn.commit()
+
+            # Ensure backward compatibility symlink: index.db -> graph.db
+            if build_fts and self.db_path.name == "graph.db":
+                idx_compat = self.db_path.parent / "index.db"
+                if not idx_compat.exists() or (idx_compat.is_symlink() and not idx_compat.exists()):
+                    try:
+                        if idx_compat.is_symlink():
+                            idx_compat.unlink()
+                        idx_compat.symlink_to(self.db_path.name)
+                    except OSError:
+                        pass
+                elif idx_compat.exists() and not idx_compat.is_symlink() and idx_compat != self.db_path:
+                    try:
+                        idx_compat.unlink()
+                        idx_compat.symlink_to(self.db_path.name)
+                    except OSError:
+                        pass
         except Exception:
             self.conn.rollback()
             raise
+
+    def populate_fts(
+        self,
+        G: nx.Graph,
+        cur: sqlite3.Cursor | None = None,
+        node_contents: dict[str, str] | None = None,
+    ) -> None:
+        """Populate FTS5 virtual table, node metadata, and indexed terms inside this unified database."""
+        from collections import Counter
+        from graph_fy.retrieval_index import (
+            _extract_terms_from_text,
+            _prepare_node_document,
+            compute_pagerank,
+        )
+
+        c = cur or self.conn.cursor()
+        c.execute("DELETE FROM nodes_fts;")
+        c.execute("DELETE FROM node_metadata;")
+        c.execute("DELETE FROM indexed_terms;")
+
+        pagerank: dict[Any, float] = {}
+        if len(G) > 0:
+            pagerank = compute_pagerank(G)
+        degrees = dict(G.degree())
+
+        fts_rows = []
+        meta_rows = []
+
+        for node_id, data in G.nodes(data=True):
+            pr = float(pagerank.get(node_id, 0.0))
+            deg = int(degrees.get(node_id, 0))
+            fts_row, meta_row = _prepare_node_document(
+                node_id,
+                data,
+                node_contents=node_contents,
+                pagerank_val=pr,
+                degree_val=deg,
+            )
+            fts_rows.append(fts_row)
+            meta_rows.append(meta_row)
+
+        c.executemany(
+            "INSERT INTO nodes_fts (node_id, title, headings, tags, body, source_path) VALUES (?, ?, ?, ?, ?, ?);",
+            fts_rows,
+        )
+        c.executemany(
+            """
+            INSERT INTO node_metadata
+            (node_id, label, source_path, source_location, file_type, node_kind, pagerank, degree, content)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            meta_rows,
+        )
+
+        term_counter: Counter[str] = Counter()
+        for nid_str, title, headings_val, tags_val, body_val, _ in fts_rows:
+            combined = f"{nid_str} {title} {headings_val} {tags_val} {body_val}"
+            node_terms = _extract_terms_from_text(combined)
+            for t in node_terms:
+                term_counter[t] += 1
+
+        term_rows = [(term, count) for term, count in term_counter.items()]
+        c.executemany(
+            "INSERT OR IGNORE INTO indexed_terms (term, doc_count) VALUES (?, ?);",
+            term_rows,
+        )
+
+        try:
+            c.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('optimize');")
+        except sqlite3.Error:
+            pass
+
+    def fts_search(
+        self,
+        query_text: str,
+        *,
+        limit: int = 10,
+        synonyms: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Execute FTS5 search directly over unified graph.db with BM25 ranking."""
+        from graph_fy.retrieval_index import _clean_fts_query
+        match_expr = _clean_fts_query(query_text, synonyms=synonyms)
+        if not match_expr:
+            return []
+
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT m.node_id, m.label, m.source_path, m.source_location, m.file_type, m.node_kind,
+                   m.pagerank, m.degree, m.content, f.rank AS bm25_rank
+            FROM nodes_fts f
+            JOIN node_metadata m ON m.node_id = f.node_id
+            WHERE nodes_fts MATCH ?
+            ORDER BY f.rank
+            LIMIT ?;
+            """,
+            (match_expr, limit),
+        )
+        results = []
+        for row in cur.fetchall():
+            results.append(dict(row))
+        return results
+
+    def unified_fts_and_bfs(
+        self,
+        query_text: str,
+        *,
+        max_hops: int = 2,
+        limit: int = 10,
+        direction: str = "outward",
+    ) -> dict[str, Any]:
+        """Single-query full-text search + recursive CTE graph traversal without Python deserialization."""
+        from graph_fy.retrieval_index import _clean_fts_query
+        match_expr = _clean_fts_query(query_text)
+        if not match_expr:
+            return {"seeds": [], "traversal": []}
+
+        cur = self.conn.cursor()
+        if direction == "inward":
+            cte_join = "e.source_id, t.depth + 1, t.seed_rank FROM edges e JOIN traversal t ON e.target_id = t.id"
+        else:
+            cte_join = "e.target_id, t.depth + 1, t.seed_rank FROM edges e JOIN traversal t ON e.source_id = t.id"
+
+        query = f"""
+        WITH RECURSIVE seeds AS (
+            SELECT f.node_id, f.rank AS seed_rank
+            FROM nodes_fts f
+            WHERE nodes_fts MATCH ?
+            ORDER BY f.rank
+            LIMIT ?
+        ),
+        traversal(id, depth, seed_rank) AS (
+            SELECT node_id, 0, seed_rank FROM seeds
+            UNION
+            SELECT {cte_join}
+            WHERE t.depth < ?
+        )
+        SELECT n.id, n.label, n.kind, n.source_file, n.start_line, n.end_line, n.pagerank, n.metadata_json,
+               t.depth, t.seed_rank
+        FROM traversal t
+        JOIN nodes n ON n.id = t.id
+        ORDER BY t.depth ASC, t.seed_rank ASC;
+        """
+        cur.execute(query, (match_expr, limit, max_hops))
+        rows = cur.fetchall()
+        seeds = []
+        traversed = []
+        for r in rows:
+            d = dict(r)
+            if d.get("metadata_json"):
+                try:
+                    d.update(json.loads(d.pop("metadata_json")))
+                except Exception:
+                    d.pop("metadata_json", None)
+            else:
+                d.pop("metadata_json", None)
+            if d.get("depth") == 0:
+                seeds.append(d)
+            traversed.append(d)
+
+        return {"seeds": seeds, "traversal": traversed}
 
     # --- Query API ---
 

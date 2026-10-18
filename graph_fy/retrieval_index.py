@@ -68,10 +68,22 @@ def compute_pagerank(
 
 
 def get_default_index_path(root: Path | str | None = None) -> Path:
-    """Return the default SQLite FTS5 index path."""
+    """Return the default SQLite FTS5 index path, preferring unified graph.db."""
     if root is not None:
-        return Path(root) / graph_fy_OUT / "index.db"
-    return out_path("index.db")
+        p_graph = Path(root) / graph_fy_OUT / "graph.db"
+        if p_graph.exists():
+            return p_graph
+        p_idx = Path(root) / graph_fy_OUT / "index.db"
+        if p_idx.exists():
+            return p_idx
+        return p_graph
+    p_graph = out_path("graph.db")
+    if p_graph.exists():
+        return p_graph
+    p_idx = out_path("index.db")
+    if p_idx.exists():
+        return p_idx
+    return p_graph
 
 
 def split_subtokens(text: str) -> list[str]:
@@ -399,6 +411,21 @@ def _prepare_node_document(
     return fts_row, meta_row
 
 
+def _is_relational_graph_db(p: Path) -> bool:
+    """Check if database path contains relational graph tables (nodes/edges)."""
+    if not p.exists():
+        return False
+    if p.name == "graph.db":
+        return True
+    try:
+        with sqlite3.connect(str(p), timeout=5.0) as check_conn:
+            cur = check_conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='nodes';")
+            return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
 def build_index(
     G: nx.Graph,
     db_path: Path | str | None = None,
@@ -408,6 +435,7 @@ def build_index(
     """Build a SQLite FTS5 full-text index for all nodes in the graph G.
 
     Precomputes PageRank and node degrees for static centrality scoring.
+    When targeting unified graph.db, preserves existing relational tables.
     """
     path = Path(db_path) if db_path is not None else get_default_index_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -419,8 +447,8 @@ def build_index(
 
     degrees = dict(G.degree())
 
-    # Create fresh database schema
-    if path.exists():
+    is_relational = _is_relational_graph_db(path)
+    if path.exists() and not is_relational:
         try:
             path.unlink()
         except OSError:
@@ -429,13 +457,17 @@ def build_index(
     conn = sqlite3.connect(str(path), timeout=30.0)
     try:
         cur = conn.cursor()
-        cur.execute("PRAGMA synchronous = OFF;")
-        cur.execute("PRAGMA journal_mode = MEMORY;")
+        if is_relational:
+            cur.execute("PRAGMA journal_mode = WAL;")
+            cur.execute("PRAGMA synchronous = NORMAL;")
+        else:
+            cur.execute("PRAGMA synchronous = OFF;")
+            cur.execute("PRAGMA journal_mode = MEMORY;")
 
         # Create FTS5 virtual table with weighted columns and Porter stemmer
         cur.execute(
             """
-            CREATE VIRTUAL TABLE nodes_fts USING fts5(
+            CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
                 node_id UNINDEXED,
                 title,
                 headings,
@@ -450,7 +482,7 @@ def build_index(
         # Metadata table
         cur.execute(
             """
-            CREATE TABLE node_metadata (
+            CREATE TABLE IF NOT EXISTS node_metadata (
                 node_id TEXT PRIMARY KEY,
                 label TEXT,
                 source_path TEXT,
@@ -472,6 +504,10 @@ def build_index(
             );
             """
         )
+
+        cur.execute("DELETE FROM nodes_fts;")
+        cur.execute("DELETE FROM node_metadata;")
+        cur.execute("DELETE FROM indexed_terms;")
 
         fts_rows = []
         meta_rows = []
@@ -516,9 +552,29 @@ def build_index(
         )
 
         # Optimize FTS index
-        cur.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('optimize');")
+        try:
+            cur.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('optimize');")
+        except sqlite3.Error:
+            pass
         conn.commit()
     finally:
         conn.close()
+
+    # Ensure backward compatibility symlink: index.db -> graph.db
+    if path.name == "graph.db":
+        idx_compat = path.parent / "index.db"
+        if not idx_compat.exists() or (idx_compat.is_symlink() and not idx_compat.exists()):
+            try:
+                if idx_compat.is_symlink():
+                    idx_compat.unlink()
+                idx_compat.symlink_to(path.name)
+            except OSError:
+                pass
+        elif idx_compat.exists() and not idx_compat.is_symlink() and idx_compat != path:
+            try:
+                idx_compat.unlink()
+                idx_compat.symlink_to(path.name)
+            except OSError:
+                pass
 
     return path

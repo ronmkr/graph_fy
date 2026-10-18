@@ -258,6 +258,24 @@ def cmd_query(
 
     _t0 = time.perf_counter()
 
+    def _has_fts_index(p: Path) -> bool:
+        if (p.parent / "index.db").exists():
+            return True
+        g_db = p.parent / "graph.db"
+        if not g_db.exists():
+            return False
+        try:
+            import sqlite3
+            with sqlite3.connect(str(g_db), timeout=2.0) as conn:
+                c = conn.cursor()
+                c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='nodes_fts';")
+                if not c.fetchone():
+                    return False
+                c.execute("SELECT 1 FROM nodes_fts LIMIT 1;")
+                return c.fetchone() is not None
+        except Exception:
+            return False
+
     _is_legacy_text = bool(
         (not (as_rag_prompt or use_skeleton))
         and (
@@ -267,7 +285,7 @@ def cmd_query(
             or force_text
             or "who calls " in question.lower()
         )
-        or not (gp.parent / "index.db").exists()
+        or not _has_fts_index(gp)
     )
     if _is_legacy_text:
         _mode = "dfs" if use_dfs else "bfs"
@@ -321,7 +339,7 @@ def cmd_query(
                 print(f"\n[verbose] Could not estimate token savings: {exc}")
     else:
         from graph_fy.retrieval import query as _retrieval_query
-        idx_path = gp.parent / "index.db"
+        idx_path = gp.parent / "graph.db" if (gp.parent / "graph.db").exists() else gp.parent / "index.db"
         results = _retrieval_query(
             question,
             graph=G,

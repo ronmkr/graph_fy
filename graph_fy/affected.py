@@ -32,6 +32,8 @@ DEFAULT_AFFECTED_RELATIONS = (
     "calls_ffi",
     "imports_native",
     "connects_signal_slot",
+    "covered_by_test",
+    "covers",
 )
 
 
