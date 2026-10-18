@@ -582,6 +582,7 @@ def task_context(
     token_budget: int = 1500,
     graph_path: Path | str | None = None,
     include_diagram: bool = True,
+    include_bodies: bool | str = "auto",
     limit: int = 6,
 ) -> dict[str, Any]:
     """Generate a holistic, deterministic pre-agent architectural briefing.
@@ -962,8 +963,27 @@ def task_context(
             lines.append(diag_block)
             current_chars += len(diag_block)
 
-    lines.append("\n#### Targeted Symbol Skeletons (Tier 1 AST):")
-    for c in candidates:
+    # Determine whether candidates qualify for progressive body hydration (#49)
+    should_hydrate = (
+        include_bodies is True
+        or str(include_bodies).lower() in ("true", "1", "always", "yes")
+        or (
+            str(include_bodies).lower() in ("auto", "none")
+            and len(candidates) <= 3
+            and any(
+                keyword in task.lower()
+                for keyword in (
+                    "fix", "bug", "implement", "logic", "algorithm", "race",
+                    "deadlock", "leak", "loop", "inspect", "handle", "how does",
+                    "why", "crash", "error", "exception", "body", "code"
+                )
+            )
+        )
+    )
+
+    lines.append("\n#### Targeted Symbol Skeletons & Hydrated AST:")
+    hydrated_symbols: list[str] = []
+    for idx, c in enumerate(candidates):
         if current_chars >= char_budget:
             break
         nid = c.get("node_id", "")
@@ -974,8 +994,39 @@ def task_context(
         callers = c.get("callers", [])
         callees = c.get("callees", [])
 
+        # Progressive body hydration for primary focus symbols (Issue #49)
+        full_body = ""
+        is_hydrated = False
+        if should_hydrate and idx < 2 and spath and not str(spath).lower().endswith((".md", ".txt", ".rst", ".doc", ".pdf")):
+            target_f = root_path / spath if not Path(spath).is_absolute() else Path(spath)
+            if not target_f.exists() and graph_path:
+                cand_f = Path(graph_path).parent.parent / spath
+                if cand_f.exists():
+                    target_f = cand_f
+            if target_f.exists():
+                lnum = 1
+                if sloc:
+                    m = re.search(r"\d+", str(sloc))
+                    if m:
+                        lnum = int(m.group())
+                try:
+                    full_body = get_symbol_code_from_file(target_f, lnum, skeletonize=False)
+                except Exception:
+                    full_body = ""
+
+        # Check if full body fits in remaining budget (preserving 300 chars for downstream impact)
+        code_to_render = skel
+        if full_body and current_chars + len(full_body) + 300 <= char_budget:
+            code_to_render = full_body
+            is_hydrated = True
+            hydrated_symbols.append(nid)
+
+        c["is_hydrated"] = is_hydrated
+
         meta_parts = [f"// Symbol: {lbl} ({spath}:{sloc})"]
-        if nid:
+        if is_hydrated:
+            meta_parts.append(f'// [Hydrated AST Body: get_symbol_implementation("{nid}")]')
+        elif nid:
             meta_parts.append(f'// [On-Demand Body: get_symbol_implementation("{nid}")]')
         if callers:
             c_str = ", ".join(callers[:5]) + (f" (+{len(callers)-5} more)" if len(callers) > 5 else "")
@@ -984,18 +1035,18 @@ def task_context(
             meta_parts.append(f"// Callees: {', '.join(callees[:5])}")
 
         meta_hdr = "\n".join(meta_parts)
-        if skel:
+        if code_to_render:
             if str(spath).lower().endswith((".md", ".txt", ".rst", ".doc", ".pdf")):
-                dlines = [dl for dl in skel.splitlines() if dl.strip()]
+                dlines = [dl for dl in code_to_render.splitlines() if dl.strip()]
                 skel_preview = "\n".join(dlines[:3]) + ("\n..." if len(dlines) > 3 else "")
                 block = f"{meta_hdr}\n{skel_preview}\n"
             else:
-                block = f"{meta_hdr}\n{skel}\n"
+                block = f"{meta_hdr}\n{code_to_render}\n"
             if current_chars + len(block) <= char_budget:
                 lines.append(block)
                 current_chars += len(block)
             else:
-                sig = compact_signature(skel)
+                sig = compact_signature(skel or code_to_render)
                 block = f"{meta_hdr}\n{sig}\n"
                 lines.append(block)
                 current_chars += len(block)
@@ -1048,6 +1099,7 @@ def task_context(
         "historically_co_changed": co_changed_files,
         "hotspots": hotspot_files,
         "architecture_diagram": mermaid_diagram,
+        "hydrated_symbols": hydrated_symbols,
         "raw_tokens": raw_tokens,
         "briefing_tokens": briefing_tokens,
         "compression_ratio": compression_ratio,

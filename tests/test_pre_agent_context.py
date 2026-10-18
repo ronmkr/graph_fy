@@ -257,5 +257,68 @@ def test_task_context_prompt_cache_prefix_priming(sample_task_graph):
     assert len(prefix1) > 200
 
 
+def test_task_context_progressive_body_hydration_explicit_flag(sample_task_graph):
+    """Verify include_bodies=True inlines verified function body (Issue #49)."""
+    G, db_path, root = sample_task_graph
+    res = task_context("route dispatch", graph=G, db_path=db_path, root_dir=root, include_bodies=True)
+
+    assert len(res["hydrated_symbols"]) > 0
+    assert "router.Router.route" in res["hydrated_symbols"] or "router.Router" in res["hydrated_symbols"]
+    # The real function body (return True) is inlined directly in prompt_context
+    assert "return True" in res["prompt_context"]
+    assert "Hydrated AST Body" in res["prompt_context"]
+
+
+def test_task_context_progressive_body_hydration_auto_keyword(sample_task_graph):
+    """Verify auto hydration activates on algorithmic/bug tasks with <=3 candidates."""
+    G, db_path, root = sample_task_graph
+    # Query with algorithmic keywords "fix bug in logic"
+    res = task_context("fix bug in route dispatch logic", graph=G, db_path=db_path, root_dir=root)
+
+    assert len(res["hydrated_symbols"]) > 0
+    assert "return True" in res["prompt_context"]
+    assert "Hydrated AST Body" in res["prompt_context"]
+
+
+def test_task_context_progressive_body_hydration_disabled(sample_task_graph):
+    """Verify include_bodies=False strictly preserves compact Tier 1 skeletons."""
+    G, db_path, root = sample_task_graph
+    res = task_context("fix bug in route dispatch logic", graph=G, db_path=db_path, root_dir=root, include_bodies=False)
+
+    assert len(res["hydrated_symbols"]) == 0
+    assert "return True" not in res["prompt_context"]
+    assert "On-Demand Body" in res["prompt_context"]
+
+
+def test_task_context_body_hydration_budget_guard(sample_task_graph):
+    """Verify tight token budget safely falls back to Tier 1 skeleton without overflowing."""
+    G, db_path, root = sample_task_graph
+    res = task_context("route dispatch", graph=G, db_path=db_path, root_dir=root, token_budget=40, include_bodies=True)
+
+    # Under 40-token budget, full body is suppressed due to budget guard
+    assert len(res["hydrated_symbols"]) == 0
+    assert "return True" not in res["prompt_context"]
+
+
+def test_cli_context_include_bodies(sample_task_graph, monkeypatch, capsys):
+    """Verify CLI graph_fy context --include-bodies --json emits hydrated symbols."""
+    from graph_fy.commands.context import cmd_context
+
+    G, db_path, root = sample_task_graph
+    cmd_context([
+        "graph_fy",
+        "context",
+        "route dispatch",
+        f"--root={root}",
+        f"--db={db_path}",
+        "--include-bodies",
+        "--json",
+    ])
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert "hydrated_symbols" in data
+    assert len(data["hydrated_symbols"]) > 0
+
+
 
 

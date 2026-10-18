@@ -606,6 +606,7 @@ def _build_server(graph_path: str):
                         "task": {"type": "string", "description": "Coding task or architectural inquiry description"},
                         "token_budget": {"type": "integer", "default": 1500, "description": "Maximum token budget for returned briefing"},
                         "include_diagram": {"type": "boolean", "default": True, "description": "Whether to include Mermaid flow diagram"},
+                        "include_bodies": {"type": "boolean", "default": False, "description": "Whether to progressively hydrate full verified AST function/method bodies for primary focus symbols"},
                     },
                     "required": ["task"],
                 },
@@ -978,8 +979,9 @@ def _build_server(graph_path: str):
             raise ToolError("Missing required argument: 'task'")
         budget = int(arguments.get("token_budget", 1500))
         include_diagram = bool(arguments.get("include_diagram", True))
+        include_bodies = arguments.get("include_bodies", False)
         root = str(Path(active_graph_path).parent.parent) if Path(active_graph_path).parent.name == "graph_fy_out" else str(Path(active_graph_path).parent)
-        res = get_agent_context(task=task, root_dir=root, token_budget=budget, graph=G, include_diagram=include_diagram)
+        res = get_agent_context(task=task, root_dir=root, token_budget=budget, graph=G, include_diagram=include_diagram, include_bodies=include_bodies)
         return json.dumps(res, indent=2)
 
     def _tool_get_test_selection(arguments: dict) -> str:

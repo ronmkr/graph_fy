@@ -1027,6 +1027,7 @@ def get_agent_context(
     graph: nx.Graph | None = None,
     graph_path: str | None = None,
     include_diagram: bool = True,
+    include_bodies: bool | str = "auto",
 ) -> dict:
     """Generate a holistic, deterministic pre-agent architectural briefing before LLM calls."""
     from graph_fy.query_engine import GraphQueryEngine
@@ -1037,6 +1038,7 @@ def get_agent_context(
         token_budget=token_budget,
         graph_path=graph_path,
         include_diagram=include_diagram,
+        include_bodies=include_bodies,
     )
 
 
@@ -1164,6 +1166,11 @@ GET_AGENT_CONTEXT_TOOL_SPEC = {
                 "type": "boolean",
                 "default": True,
                 "description": "Whether to include a Mermaid architectural flow diagram",
+            },
+            "include_bodies": {
+                "type": "boolean",
+                "default": False,
+                "description": "Whether to progressively hydrate full verified AST function/method bodies for primary focus symbols instead of eliding to Tier 1 skeletons",
             },
         },
         "required": ["task"],

@@ -121,6 +121,7 @@ Why `graph_fy` represents a fundamental architectural evolution over original Gr
 ```bash
 # Pre-Agent Zero-LLM Briefings & Agent Context
 graph_fy context "router request dispatch"    # zero-LLM architectural briefing for LLM agents
+graph_fy context "fix memory leak in worker" --include-bodies # inline full verified AST function bodies
 graph_fy test-select --since HEAD~1           # minimal affected tests from git diff with ready-to-run runner commands
 graph_fy coverage coverage.xml                # ingest Cobertura/LCOV/.coverage to attach test-to-code edges
 graph_fy diff HEAD                            # diff-scoped blast radius & 1-hop callers for review
