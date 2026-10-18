@@ -1746,8 +1746,8 @@ def cmd_build(
                 from graph_fy.build import build as _build_bare
                 _bare_G = _build_bare([merged], root=target)
                 from graph_fy.retrieval import build_index as _build_fts_index
-                _build_fts_index(_bare_G, graph_fy_out / "index.db")
-                print(f"[graph_fy extract] wrote {graph_fy_out / 'index.db'} (FTS5 search index)")
+                _build_fts_index(_bare_G, graph_fy_out / "graph.db")
+                print(f"[graph_fy extract] wrote {graph_fy_out / 'graph.db'} (unified graph + FTS5 search index)")
             except Exception as _idx_err:
                 print(f"[graph_fy extract] warning: could not build FTS5 index: {_idx_err}", file=sys.stderr)
             cost = _estimate_cost(
@@ -1959,8 +1959,8 @@ def cmd_build(
         # Build SQLite FTS5 search index
         try:
             from graph_fy.retrieval import build_index as _build_fts_index
-            _build_fts_index(G, graph_fy_out / "index.db")
-            print(f"[graph_fy extract] wrote {graph_fy_out / 'index.db'} (FTS5 search index)")
+            _build_fts_index(G, graph_fy_out / "graph.db")
+            print(f"[graph_fy extract] wrote {graph_fy_out / 'graph.db'} (unified graph + FTS5 search index)")
         except Exception as _idx_err:
             print(f"[graph_fy extract] warning: could not build FTS5 index: {_idx_err}", file=sys.stderr)
 

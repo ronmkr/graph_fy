@@ -33,6 +33,7 @@ from graph_fy.retrieval_index import (
     split_subtokens,
     _clean_fts_query,
     _extract_terms_from_text,
+    _is_relational_graph_db,
     _prepare_node_document,
 )
 from graph_fy.retrieval_format import (
@@ -136,14 +137,20 @@ def query(
     eff_root = Path(root) if root is not None else Path(".")
     if db_path is not None:
         idx_path = Path(db_path)
+    elif graph_path is not None and (Path(graph_path).parent / "graph.db").exists():
+        idx_path = Path(graph_path).parent / "graph.db"
     elif graph_path is not None and (Path(graph_path).parent / "index.db").exists():
         idx_path = Path(graph_path).parent / "index.db"
+    elif (eff_root / "graph_fy_out" / "graph.db").exists():
+        idx_path = eff_root / "graph_fy_out" / "graph.db"
     elif (eff_root / "graph_fy_out" / "index.db").exists():
         idx_path = eff_root / "graph_fy_out" / "index.db"
+    elif (eff_root / "graph.db").exists():
+        idx_path = eff_root / "graph.db"
     elif (eff_root / "index.db").exists():
         idx_path = eff_root / "index.db"
     else:
-        idx_path = get_default_index_path()
+        idx_path = get_default_index_path(eff_root)
 
     if synonyms is None:
         try:
@@ -170,11 +177,33 @@ def query(
                 graph = load_node_link_graph(gp)
             except Exception:
                 graph = nx.Graph()
+        elif idx_path.exists() and _is_relational_graph_db(idx_path):
+            try:
+                from graph_fy.storage_sqlite import SqliteGraphStore
+                with SqliteGraphStore(idx_path) as store:
+                    graph = store.to_networkx()
+            except Exception:
+                graph = nx.Graph()
         else:
             graph = nx.Graph()
 
-    # If FTS index does not exist, build it now
-    if not idx_path.exists():
+    # If FTS index does not exist or has not been populated, build it now
+    needs_build = not idx_path.exists()
+    if not needs_build and _is_relational_graph_db(idx_path):
+        try:
+            with sqlite3.connect(str(idx_path), timeout=2.0) as _chk:
+                _c = _chk.cursor()
+                _c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='nodes_fts';")
+                if not _c.fetchone():
+                    needs_build = True
+                else:
+                    _c.execute("SELECT 1 FROM nodes_fts LIMIT 1;")
+                    if not _c.fetchone():
+                        needs_build = True
+        except Exception:
+            pass
+
+    if needs_build:
         if len(graph) == 0:
             return []
         build_index(graph, idx_path)

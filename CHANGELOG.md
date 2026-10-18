@@ -2,6 +2,23 @@
 
 Full release notes with details on each version: [GitHub Releases](https://github.com/ronmkr/graph_fy/releases)
 
+## 0.3.1 (Unreleased)
+
+- Feature: Test-to-Code Coverage Ingestion & Native Test Selector (Milestone 12, Step 12.1 [#27](https://github.com/ronmkr/graph_fy/issues/27)):
+  - **Coverage Ingest Engine** (`graph_fy/coverage_ingest.py`): Ingests `coverage.xml` (Cobertura), `lcov.info` (C++/Rust/JS), and `.coverage` (Python coverage.py SQLite database). Automatically maps executed line intervals to enclosing AST function nodes, calculates function line coverage percentages, and injects bidirectional `covered_by_test` and `covers` edges.
+  - **Native Test Selector** (`graph_fy/commands/test_select.py`): CLI command `graph_fy test-select --since <ref>` mapping git diff hunks directly to modified AST functions, executing reverse-BFS traversal to identify the minimal set of affected unit and integration tests (prioritizing direct coverage edges, 1-hop callers, and transitive dependencies).
+  - **Ready-to-Run Test Commands**: Automatically generates copy-pasteable test execution commands tailored to project ecosystems (`pytest`, `cargo`, `vitest`, `jest`, `npm`, `go`, `mvn`, `gradle`).
+  - **MCP Test Selection Tool** (`get_test_selection`): Exposes test selection directly to coding agents via MCP with parameter overrides for `--since`, `--coverage`, and `--runner`.
+  - **Coverage CLI** (`graph_fy coverage <file>`): Ingests coverage artifacts and reports overall repository line coverage, decorated nodes, and attached test-to-code edges.
+- Refactor: Database Consolidation into Single Unified SQLite Database ([#48](https://github.com/ronmkr/graph_fy/issues/48)):
+  - **Unified `graph.db` Architecture**: Consolidated separate database sprawl (`index.db` FTS5 search index and `graph.db` relational graph store) into a single canonical SQLite database (`graph_fy_out/graph.db`) in WAL mode.
+  - **Single-Transaction Indexing**: Integrated FTS5 virtual table (`nodes_fts`), metadata table (`node_metadata`), and indexed vocabulary (`indexed_terms`) directly into `SqliteGraphStore.save_graph()`, eliminating duplicate node serialization and separate locks.
+  - **Single-Query FTS + Recursive CTE Traversal** (`unified_fts_and_bfs`): Native SQL join connecting FTS5 BM25 seed ranking directly to recursive Common Table Expression (CTE) graph traversals at C-speed without Python deserialization hops.
+  - **Transparent Backward Compatibility**: All query engines (`retrieval.py`, `retrieval_context.py`, `commands/query.py`, `multi_repo.py`) automatically query `graph.db` first with seamless fallback to `index.db`, while `build_index` and `save_graph` automatically create a backward-compatible symlink (`index.db -> graph.db`).
+- Benchmark: Large-Scale Rust Concurrency Evaluation (`tokio-rs/tokio`, 188k LOC across 13 crates):
+  - Head-to-head 3-way empirical evaluation on 811 Rust source files across 5 real-world concurrency scenarios comparing: (1) Raw LLM / Grep, (2) Upstream Graphify v0.9.92, and (3) `graph_fy`.
+  - Delivered 95.9% token reduction (4,493 vs 110,268 tokens), 1 turn vs 15 turns, 100% anti-hallucination rate on adversarial phantom queries, and complete struct layouts and trait signatures.
+
 ## 0.3.0 (2026-10-19)
 
 - Feature: Build System & UI Extractors (Milestone 11, Step 11.4 [#26](https://github.com/ronmkr/graph_fy/issues/26)):

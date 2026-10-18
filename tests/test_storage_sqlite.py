@@ -252,3 +252,124 @@ def test_query_engine_sqlite_integration(tmp_path):
     nodes, edges = GraphQueryEngine.k_hop_ego_sqlite("root_fn", db_path=out_db, max_depth=1, directed=True)
     assert len(nodes) == 2
     assert len(edges) == 1
+
+
+def test_sqlite_store_fts_search(temp_db):
+    """Verify BM25 search over unified SQLite database with porter stemming and token expansion."""
+    G = nx.DiGraph()
+    G.add_node("auth_service", label="AuthService", file_type="class", docstring="Handles user token validation and session management.")
+    G.add_node("payment_gateway", label="StripeGateway", file_type="class", docstring="Processes credit card payments and refunds.")
+    G.add_node("user_model", label="UserModel", file_type="class", docstring="Database entity representing a registered system user.")
+    G.add_edge("auth_service", "user_model", relation="uses")
+
+    temp_db.save_graph(G)
+
+    # Search for "auth" -> should match AuthenticationService
+    results = temp_db.fts_search("auth")
+    assert len(results) >= 1
+    assert results[0]["node_id"] == "auth_service"
+    assert "bm25_rank" in results[0]
+
+    # Search for "tokens" -> should match docstring
+    results_token = temp_db.fts_search("tokens")
+    assert len(results_token) >= 1
+    assert results_token[0]["node_id"] == "auth_service"
+
+    # Search for "payment"
+    results_pay = temp_db.fts_search("payment")
+    assert len(results_pay) >= 1
+    assert results_pay[0]["node_id"] == "payment_gateway"
+
+
+def test_sqlite_store_unified_fts_and_bfs(temp_db):
+    """Verify single-SQL FTS seed + recursive CTE traversal."""
+    G = nx.DiGraph()
+    G.add_node("api_handler", label="handle_login()", file_type="function", docstring="HTTP POST endpoint for user login")
+    G.add_node("auth_service", label="validate_credentials()", file_type="function", docstring="Validates username and password against database")
+    G.add_node("db_pool", label="query_user()", file_type="function", docstring="Low-level SQL query executor for user records")
+
+    G.add_edge("api_handler", "auth_service", relation="calls")
+    G.add_edge("auth_service", "db_pool", relation="calls")
+
+    temp_db.save_graph(G)
+
+    # Outward traversal from "login" seed
+    res = temp_db.unified_fts_and_bfs("login", max_hops=2, direction="outward")
+    assert len(res["seeds"]) >= 1
+    assert res["seeds"][0]["id"] == "api_handler"
+    traversed_ids = [t["id"] for t in res["traversal"]]
+    assert "api_handler" in traversed_ids
+    assert "auth_service" in traversed_ids
+    assert "db_pool" in traversed_ids
+
+    # Inward traversal from "SQL" seed
+    res_in = temp_db.unified_fts_and_bfs("SQL", max_hops=2, direction="inward")
+    assert len(res_in["seeds"]) >= 1
+    assert res_in["seeds"][0]["id"] == "db_pool"
+    in_traversed_ids = [t["id"] for t in res_in["traversal"]]
+    assert "db_pool" in in_traversed_ids
+    assert "auth_service" in in_traversed_ids
+
+
+def test_build_index_preserves_relational_tables(tmp_path):
+    """Verify build_index on graph.db preserves nodes/edges and sets up backward-compatible symlink."""
+    import sqlite3
+    from graph_fy.retrieval_index import build_index
+
+    graph_db_file = tmp_path / "graph.db"
+    store = SqliteGraphStore(graph_db_file)
+    G = nx.DiGraph()
+    G.add_node("node_x", label="NodeX", file_type="class")
+    G.add_node("node_y", label="NodeY", file_type="class")
+    G.add_edge("node_x", "node_y", relation="inherits")
+    store.save_graph(G, build_fts=False)
+    store.close()
+
+    # Verify relational tables exist before build_index
+    with sqlite3.connect(str(graph_db_file)) as conn:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM nodes;")
+        assert c.fetchone()[0] == 2
+        c.execute("SELECT COUNT(*) FROM edges;")
+        assert c.fetchone()[0] == 1
+
+    # Run build_index targeting graph.db
+    build_index(G, db_path=graph_db_file)
+
+    # Verify relational tables are still intact
+    with sqlite3.connect(str(graph_db_file)) as conn:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM nodes;")
+        assert c.fetchone()[0] == 2
+        c.execute("SELECT COUNT(*) FROM edges;")
+        assert c.fetchone()[0] == 1
+        c.execute("SELECT COUNT(*) FROM nodes_fts;")
+        assert c.fetchone()[0] == 2
+
+    # Verify backward-compatibility symlink index.db exists and works
+    compat_index = tmp_path / "index.db"
+    assert compat_index.exists()
+    with sqlite3.connect(str(compat_index)) as conn:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM nodes_fts;")
+        assert c.fetchone()[0] == 2
+
+
+def test_retrieval_query_operates_on_unified_graph_db(tmp_path):
+    """Verify retrieval.query runs smoothly when only graph.db exists."""
+    from graph_fy.export import to_sqlite
+    from graph_fy.retrieval import query
+
+    G = nx.DiGraph()
+    G.add_node("token_verifier", label="verify_token()", file_type="function", docstring="Cryptographic JWT token validation")
+    G.add_node("jwt_parser", label="parse_jwt()", file_type="function", docstring="Extracts payload claims from JWT string")
+    G.add_edge("token_verifier", "jwt_parser", relation="calls")
+
+    out_db = tmp_path / "graph.db"
+    to_sqlite(G, out_db)
+
+    results = query("JWT validation", graph=G, db_path=out_db)
+    assert len(results) >= 1
+    found_ids = {r["node_id"] for r in results}
+    assert "token_verifier" in found_ids or "jwt_parser" in found_ids
+

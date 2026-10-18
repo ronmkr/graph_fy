@@ -610,6 +610,19 @@ def _build_server(graph_path: str):
                     "required": ["task"],
                 },
             ),
+            types.Tool(
+                name="get_test_selection",
+                description="Select the minimal subset of unit/integration tests affected by a git diff or code modification and output ready-to-run test execution commands.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "since": {"type": "string", "default": "HEAD~1", "description": "Git ref to diff against"},
+                        "coverage_file": {"type": "string", "description": "Optional path to coverage artifact (coverage.xml, lcov.info, .coverage)"},
+                        "runner": {"type": "string", "default": "auto", "description": "Test runner override (pytest, cargo, vitest, jest, npm, go, mvn, gradle)"},
+                        "max_tests": {"type": "integer", "default": 50, "description": "Maximum number of affected tests to return"},
+                    },
+                },
+            ),
         ]
         # Multi-project support: every tool accepts an optional project_path.
         # Injected here (rather than repeated in 11 literal schemas) so the set
@@ -969,6 +982,16 @@ def _build_server(graph_path: str):
         res = get_agent_context(task=task, root_dir=root, token_budget=budget, graph=G, include_diagram=include_diagram)
         return json.dumps(res, indent=2)
 
+    def _tool_get_test_selection(arguments: dict) -> str:
+        from graph_fy.mcp import get_test_selection
+        since = str(arguments.get("since", "HEAD~1"))
+        cov_file = arguments.get("coverage_file")
+        runner = str(arguments.get("runner", "auto"))
+        max_tests = int(arguments.get("max_tests", 50))
+        root = str(Path(active_graph_path).parent.parent) if Path(active_graph_path).parent.name == "graph_fy_out" else str(Path(active_graph_path).parent)
+        res = get_test_selection(since=since, root_dir=root, coverage_file=cov_file, runner=runner, max_tests=max_tests, graph=G)
+        return json.dumps(res, indent=2)
+
     _handlers = {
         "query_graph": _tool_query_graph,
         "get_node": _tool_get_node,
@@ -993,6 +1016,7 @@ def _build_server(graph_path: str):
         "get_diff_context": _tool_get_diff_context,
         "refine_context": _tool_refine_context,
         "get_agent_context": _tool_get_agent_context,
+        "get_test_selection": _tool_get_test_selection,
     }
 
     def _load_community_labels() -> dict[int, str]:

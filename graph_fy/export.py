@@ -453,7 +453,7 @@ def to_sqlite(
     p = Path(output_path)
     store = SqliteGraphStore(p)
     try:
-        store.save_graph(G, commit=built_at_commit)
+        store.save_graph(G, commit=built_at_commit, build_fts=False)
         return True
     finally:
         store.close()

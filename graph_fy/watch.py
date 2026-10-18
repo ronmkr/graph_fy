@@ -1288,7 +1288,7 @@ def _rebuild_code(
                 json.dumps({str(k): v for k, v in cur_sigs.items()}), encoding="utf-8")
             try:
                 from graph_fy.retrieval import build_index as _build_fts_index
-                _build_fts_index(G, out / "index.db")
+                _build_fts_index(G, out / "graph.db")
             except Exception:
                 pass
 
@@ -1647,7 +1647,7 @@ def patch_graph_in_memory(
 
     out.mkdir(parents=True, exist_ok=True)
     graph_json_path = out / "graph.json"
-    index_db_path = out / "index.db"
+    graph_db_path = out / "graph.db"
 
     labels = None
     labels_file = out / ".graph_fy_labels.json"
@@ -1664,7 +1664,7 @@ def patch_graph_in_memory(
 
     try:
         from graph_fy.retrieval import build_index
-        build_index(G, index_db_path)
+        build_index(G, graph_db_path)
     except Exception as exc:
         logger.debug("Failed to build FTS index during patch: %s", exc)
 

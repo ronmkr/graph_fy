@@ -129,6 +129,12 @@ def dispatch_command(cmd: str) -> None:
     elif cmd == "diff":
         from graph_fy.commands.diff import cmd_diff
         sys.exit(cmd_diff(sys.argv))
+    elif cmd in ("test-select", "test_select"):
+        from graph_fy.commands.test_select import cmd_test_select
+        sys.exit(cmd_test_select(sys.argv))
+    elif cmd in ("coverage", "ingest-coverage"):
+        from graph_fy.commands.test_select import cmd_coverage
+        sys.exit(cmd_coverage(sys.argv))
     elif cmd == "refine":
         from graph_fy.commands.refine import cmd_refine
         sys.exit(cmd_refine(sys.argv))

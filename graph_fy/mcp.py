@@ -1040,6 +1040,36 @@ def get_agent_context(
     )
 
 
+def get_test_selection(
+    since: str = "HEAD~1",
+    root_dir: str = ".",
+    coverage_file: str | None = None,
+    runner: str = "auto",
+    max_tests: int = 50,
+    graph: nx.Graph | None = None,
+    graph_path: str | None = None,
+) -> dict:
+    """Select the minimal subset of tests affected by git changes."""
+    from graph_fy.commands.test_select import select_affected_tests
+    from graph_fy.affected import load_graph
+    if graph is None:
+        gp = Path(graph_path) if graph_path else Path(root_dir) / "graph_fy_out" / "graph.json"
+        if not gp.exists():
+            gp = Path(root_dir) / "graph.json"
+        if gp.exists():
+            graph = load_graph(gp)
+        else:
+            return {"error": "Knowledge graph not found", "selected_tests": []}
+    return select_affected_tests(
+        graph=graph,
+        since=since,
+        root_dir=root_dir,
+        coverage_file=coverage_file,
+        runner=runner,
+        max_tests=max_tests,
+    )
+
+
 GET_CODE_SKELETON_TOOL_SPEC = {
     "name": "get_code_skeleton",
     "description": "Extract Tree-sitter interface skeleton of a file (signatures, types, docstrings; bodies elided).",
@@ -1140,6 +1170,35 @@ GET_AGENT_CONTEXT_TOOL_SPEC = {
     },
 }
 
+GET_TEST_SELECTION_TOOL_SPEC = {
+    "name": "get_test_selection",
+    "description": "Select the minimal subset of unit/integration tests affected by a git diff or code modification and output ready-to-run test execution commands.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "since": {
+                "type": "string",
+                "default": "HEAD~1",
+                "description": "Git ref to diff against (e.g. HEAD~1, origin/main, HEAD)",
+            },
+            "coverage_file": {
+                "type": "string",
+                "description": "Optional path to coverage artifact (coverage.xml, lcov.info, .coverage)",
+            },
+            "runner": {
+                "type": "string",
+                "default": "auto",
+                "description": "Test runner override (pytest, cargo, vitest, jest, npm, go, mvn, gradle)",
+            },
+            "max_tests": {
+                "type": "integer",
+                "default": 50,
+                "description": "Maximum number of affected tests to return",
+            },
+        },
+    },
+}
+
 CODEGRAPH_TOOL_SPECS = [
     FIND_DEFINITIONS_TOOL_SPEC,
     GET_CALLERS_TOOL_SPEC,
@@ -1151,6 +1210,7 @@ CODEGRAPH_TOOL_SPECS = [
     GET_DIFF_CONTEXT_TOOL_SPEC,
     REFINE_CONTEXT_TOOL_SPEC,
     GET_AGENT_CONTEXT_TOOL_SPEC,
+    GET_TEST_SELECTION_TOOL_SPEC,
 ]
 
 

@@ -81,8 +81,7 @@ graph_fy .
 Outputs written to `graph_fy_out/`:
 
 - `graph.json` — Complete graph (nodes, edges, communities) for instant querying.
-- `graph.db` — ACID SQLite WAL relational database with clustered tables and recursive CTEs for sub-millisecond blast-radius traversals.
-- `index.db` — SQLite FTS5 BM25 search index with sub-token splitting.
+- `graph.db` — Unified ACID SQLite WAL database with clustered tables, recursive CTEs for sub-millisecond blast-radius traversals, and integrated FTS5 BM25 search index (auto-symlinks `index.db` for backward compatibility).
 - `GRAPH_REPORT.md` — Plain-language architectural summary and god nodes.
 - `graph.html` — Force-directed interactive visualizer.
 - `architecture.html` — Interactive repo architecture pipeline diagram (`graph_fy describe`).
@@ -122,6 +121,8 @@ Why `graph_fy` represents a fundamental architectural evolution over original Gr
 ```bash
 # Pre-Agent Zero-LLM Briefings & Agent Context
 graph_fy context "router request dispatch"    # zero-LLM architectural briefing for LLM agents
+graph_fy test-select --since HEAD~1           # minimal affected tests from git diff with ready-to-run runner commands
+graph_fy coverage coverage.xml                # ingest Cobertura/LCOV/.coverage to attach test-to-code edges
 graph_fy diff HEAD                            # diff-scoped blast radius & 1-hop callers for review
 graph_fy diff --github-pr "https://github.com/org/repo/pull/42" # analyze PR diff & blast radius directly
 graph_fy refine --code "def handle(req): ..." # resolve missing types and dependencies from draft code
