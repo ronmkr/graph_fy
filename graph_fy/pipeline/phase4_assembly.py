@@ -129,6 +129,13 @@ def assemble_graph(
     for e in all_edges:
         e["_origin"] = "ast"
 
+    # Inject temporal coupling co-changes and churn annotations from git history
+    try:
+        from graph_fy.git_history import inject_git_temporal_edges
+        inject_git_temporal_edges(all_nodes, all_edges, root, file_node_id_fn=file_node_id_fn)
+    except Exception:
+        pass
+
     for _item in (*all_nodes, *all_edges):
         _sf = _item.get("source_file")
         if _sf and "\\" in str(_sf):

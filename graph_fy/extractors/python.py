@@ -24,7 +24,7 @@ _PYTHON_TYPE_CONTAINERS = frozenset({
 _PYTHON_ANNOTATION_NOISE = frozenset({
     # scalar builtins
     "str", "int", "float", "bool", "bytes", "bytearray", "complex", "object",
-    "True", "False",
+    "True", "False", "Self",
     # unittest.mock
     "MagicMock", "Mock", "AsyncMock", "NonCallableMock",
     "NonCallableMagicMock", "PropertyMock", "patch", "sentinel",
@@ -36,6 +36,7 @@ _PYTHON_DECORATOR_NOISE = frozenset({
     "singledispatch", "singledispatchmethod", "total_ordering",
     "contextmanager", "asynccontextmanager", "overload", "override",
     "final", "no_type_check", "runtime_checkable", "dataclass",
+    "setter", "getter", "deleter",
 })
 
 

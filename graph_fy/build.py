@@ -228,6 +228,16 @@ def _fold_edge_aliases(edge: dict) -> None:
         if edge.get("confidence_score") is None:
             edge["confidence_score"] = float(_conf)
         edge["confidence"] = "INFERRED"
+    elif isinstance(_conf, str):
+        _norm = _conf.strip().upper()
+        if _norm in ("HIGH", "CONFIRMED"):
+            edge["confidence"] = "EXTRACTED"
+        elif _norm in ("MEDIUM", "MED", "MODERATE", "INFERRED"):
+            edge["confidence"] = "INFERRED"
+        elif _norm in ("LOW", "AMBIGUOUS", "AMBIG"):
+            edge["confidence"] = "AMBIGUOUS"
+        elif _norm == "EXTRACTED":
+            edge["confidence"] = "EXTRACTED"
     if not edge.get("confidence") and edge.get("confidence_score") is not None:
         edge["confidence"] = "INFERRED"
 
@@ -1470,6 +1480,9 @@ def build(
                     n["source_file"] = _norm_source_file(n["source_file"], _root)
                 if "definition_file" in n:
                     n["definition_file"] = _norm_source_file(n["definition_file"], _root)
+        for e in combined.get("edges", []):
+            if isinstance(e, dict):
+                _fold_edge_aliases(e)
         combined["nodes"], combined["edges"] = deduplicate_entities(
             combined["nodes"], combined["edges"], communities={},
             dedup_llm_backend=dedup_llm_backend, root=_root,

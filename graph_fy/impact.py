@@ -404,6 +404,24 @@ def compute_impact(
         confidence_rating = "HIGH_CONFIDENCE"
         confidence_score = 1.0
 
+    # Historical Churn Hotspots
+    hotspots: list[dict[str, Any]] = []
+    seen_hotspot_ids: set[str] = set()
+    for nid in all_evaluated:
+        ndata = graph.nodes.get(nid, {})
+        c_count = int(ndata.get("commit_count") or 0)
+        c_churn = int(ndata.get("churn_30d") or 0)
+        if (c_count >= 5 or c_churn >= 20) and nid not in seen_hotspot_ids:
+            seen_hotspot_ids.add(nid)
+            hotspots.append({
+                "id": nid,
+                "label": ndata.get("label", nid),
+                "source_file": ndata.get("source_file", ""),
+                "commit_count": c_count,
+                "churn_30d": c_churn,
+                "primary_authors": ndata.get("primary_authors", []),
+            })
+
     return {
         "target": target,
         "target_nodes": targets,
@@ -418,6 +436,7 @@ def compute_impact(
         "affected_iac": affected_iac,
         "communities_crossed": sorted(communities),
         "god_nodes_impacted": god_impacted,
+        "hotspots": hotspots,
         "risk_score": total_score,
         "risk_tier": tier,
         "explanation": " ".join(explanations),
@@ -503,6 +522,13 @@ def format_impact_report(impact_data: dict[str, Any], terse: bool = False) -> st
         lines.append(f"\nGod Nodes Impacted ({len(gods)}):")
         for g in gods:
             lines.append(f"  ! {g['label']} [{g['source_file']}]")
+
+    if impact_data.get("hotspots"):
+        hotspots = impact_data["hotspots"]
+        lines.append(f"\nHigh-Churn Hotspots ({len(hotspots)}):")
+        for h in hotspots[:10]:
+            author_str = f", author: {h['primary_authors'][0]}" if h.get("primary_authors") else ""
+            lines.append(f"  * {h['label']} ({h['commit_count']} commits, {h['churn_30d']} lines churn/30d{author_str}) [{h['source_file']}]")
 
     if impact_data.get("downstream_nodes"):
         nodes = impact_data["downstream_nodes"]

@@ -435,6 +435,7 @@ def _collision_rank(node: dict, root: Path | None = None) -> tuple:
     label_penalty = 1 if not label or not any(c.isalnum() for c in label) else 0
     return (
         not _defines_id(node),  # definers (False) sort before references (True)
+        not bool(node.get("source_file")),  # located nodes (False) beat sourceless stubs (True) (#4492)
         _lifecycle_penalty(rank_path),  # active paths beat archived ones (#2532)
         label_penalty,          # real names beat non-alphanumeric punctuation
         len(label),             # shorter, more canonical label first
