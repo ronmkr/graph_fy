@@ -1,0 +1,737 @@
+:root {
+      --md-primary: #0b57d0;
+      --md-primary-container: #d3e3fd;
+      --md-on-primary-container: #041e49;
+      --md-surface: #ffffff;
+      --md-surface-dim: #f8f9fa;
+      --md-surface-container: #f1f3f4;
+      --md-on-surface: #1f1f1f;
+      --md-on-surface-variant: #444746;
+      --md-outline: #747775;
+      --md-border: #dadce0;
+
+      --bg: #f8f9fa;
+      --surface: #ffffff;
+      --card: #ffffff;
+      --card-hover: #fdfdfd;
+      --border: #dadce0;
+      --border-accent: #1a73e8;
+      --text: #202124;
+      --text-sub: #3c4043;
+      --muted: #5f6368;
+      --accent: #0b57d0;
+      --accent-subtle: #e8f0fe;
+      --success: #137333;
+      --success-bg: #e6f4ea;
+      --warning: #b06000;
+      --warning-bg: #fef7e0;
+      --error: #c5221f;
+      --error-bg: #fce8e6;
+    }
+    [data-theme="dark"] {
+      --md-primary: #8ab4f8;
+      --md-surface: #1e1e1e;
+      --md-surface-dim: #121212;
+      --md-surface-container: #282828;
+      --md-on-surface: #e8eaed;
+      --md-on-surface-variant: #bdc1c6;
+      --md-border: #333333;
+
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --card: #1e1e1e;
+      --card-hover: #252525;
+      --border: #333333;
+      --border-accent: #8ab4f8;
+      --text: #e8eaed;
+      --text-sub: #bdc1c6;
+      --muted: #9aa0a6;
+      --accent: #8ab4f8;
+      --accent-subtle: #1f2b3e;
+      --success: #81c995;
+      --success-bg: #133820;
+      --warning: #fdd663;
+      --warning-bg: #382d00;
+      --error: #f28b82;
+      --error-bg: #3e1614;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --md-surface: #1e1e1e;
+        --md-surface-dim: #121212;
+        --md-surface-container: #282828;
+        --md-on-surface: #e8eaed;
+        --md-on-surface-variant: #bdc1c6;
+        --md-border: #333333;
+
+        --bg: #121212;
+        --surface: #1e1e1e;
+        --card: #1e1e1e;
+        --card-hover: #252525;
+        --border: #333333;
+        --border-accent: #8ab4f8;
+        --text: #e8eaed;
+        --text-sub: #bdc1c6;
+        --muted: #9aa0a6;
+        --accent: #8ab4f8;
+        --accent-subtle: #1f2b3e;
+        --success: #81c995;
+        --success-bg: #133820;
+        --warning: #fdd663;
+        --warning-bg: #382d00;
+        --error: #f28b82;
+        --error-bg: #3e1614;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--md-primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Google Material Top App Bar */
+    .app-header {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 1px 2px 0 rgba(60,64,67,0.1), 0 2px 6px 2px rgba(60,64,67,0.05);
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .gnav-bar {
+      width: 100%;
+      max-width: 1360px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .brand-badge {
+      background: #0b57d0;
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-family: "Roboto Mono", monospace;
+    }
+    .brand-title {
+      font-size: 1.2rem;
+      font-weight: 500;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+    .search-bar {
+      flex: 1;
+      max-width: 480px;
+      position: relative;
+    }
+    .search-input {
+      width: 100%;
+      background: #f1f3f4;
+      border: 1px solid transparent;
+      border-radius: 24px;
+      padding: 9px 16px 9px 40px;
+      color: var(--text);
+      font-size: 13.5px;
+      outline: none;
+      transition: all 0.2s;
+    }
+    .search-input:focus {
+      background: #ffffff;
+      border-color: #dadce0;
+      box-shadow: 0 1px 3px rgba(60,64,67,0.25);
+    }
+    .search-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-size: 13px;
+      pointer-events: none;
+    }
+    .view-tabs {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .view-tab-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--md-on-surface-variant);
+      padding: 7px 16px;
+      font-size: 13.5px;
+      font-weight: 500;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .view-tab-btn:hover {
+      background: #f1f3f4;
+      color: var(--text);
+    }
+    .view-tab-btn.active {
+      background: var(--md-primary-container);
+      color: var(--md-on-primary-container);
+      font-weight: 600;
+    }
+
+    .container {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 28px 24px 60px;
+    }
+
+    /* Material Hero Statement & Stat Strip */
+    .hero-studio {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 2px rgba(60,64,67,0.06);
+    }
+    .hero-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      background: var(--accent-subtle);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-family: "Roboto Mono", monospace;
+      margin-bottom: 12px;
+    }
+    .pulse-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      display: inline-block;
+    }
+    .hero-title {
+      font-size: 1.75rem;
+      font-weight: 500;
+      color: var(--text);
+      letter-spacing: -0.01em;
+      margin-bottom: 8px;
+    }
+    .hero-lead {
+      font-size: 14.5px;
+      color: var(--text-sub);
+      max-width: 880px;
+      line-height: 1.6;
+      margin-bottom: 20px;
+    }
+    .stat-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    @media (max-width: 860px) {
+      .stat-strip { grid-template-columns: repeat(2, 1fr); }
+    }
+    .stat-cell {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+    }
+    .stat-val {
+      font-size: 26px;
+      font-weight: 600;
+      color: var(--md-primary);
+      line-height: 1.1;
+      font-family: "Google Sans", Roboto, sans-serif;
+    }
+    .stat-lbl {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-top: 4px;
+    }
+
+    /* Stage Pill Pipeline Ribbon (Material Filter Chips) */
+    .pipeline-ribbon {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 10px;
+      margin-bottom: 24px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+    .stage-pill {
+      flex: 1 1 0px;
+      min-width: 145px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+      transition: all 0.15s;
+      box-shadow: 0 1px 2px rgba(60,64,67,0.04);
+    }
+    .stage-pill:hover {
+      background: var(--card-hover);
+      border-color: #c4c7c5;
+    }
+    .stage-pill.active {
+      background: var(--md-primary-container);
+      border-color: var(--md-primary);
+      color: var(--md-on-primary-container);
+      box-shadow: 0 1px 3px rgba(60,64,67,0.12);
+    }
+    .stage-pill-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .stage-pill-title {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+    }
+    .stage-pill.active .stage-pill-title {
+      color: var(--md-on-primary-container);
+      font-weight: 600;
+    }
+    .stage-pill-badge {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--accent);
+      background: var(--accent-subtle);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: "Roboto Mono", monospace;
+      flex-shrink: 0;
+    }
+
+    /* Main View Panes */
+    .view-pane { display: none; }
+    .view-pane.active { display: block; }
+
+    /* Stage Deep-Dive Section (Material Container) */
+    .stage-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 2px rgba(60,64,67,0.06);
+    }
+    .stage-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+      margin-bottom: 20px;
+      gap: 16px;
+    }
+    .stage-title {
+      font-size: 1.35rem;
+      font-weight: 500;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .stage-desc {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 4px;
+      max-width: 800px;
+    }
+
+    /* Step Sequence Cards (Material Outlined Cards) */
+    .stage-section, .step-card, h1, h2, h3, [id] {
+      scroll-margin-top: 70px;
+    }
+    .steps-timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .step-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 20px;
+      transition: all 0.15s;
+      box-shadow: 0 1px 2px rgba(60,64,67,0.04);
+    }
+    .step-card:hover {
+      border-color: #b0b4b8;
+      box-shadow: 0 2px 6px rgba(60,64,67,0.12);
+    }
+    .step-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      gap: 12px;
+    }
+    .step-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .step-num-badge {
+      background: #e8f0fe;
+      color: #1967d2;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: "Roboto Mono", monospace;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .step-role-badge {
+      background: #f1f3f4;
+      color: var(--md-on-surface-variant);
+      font-size: 11.5px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .step-title {
+      font-size: 1.05rem;
+      font-weight: 500;
+      color: var(--text);
+    }
+    .step-desc {
+      font-size: 13.5px;
+      color: var(--muted);
+      margin-bottom: 12px;
+      line-height: 1.5;
+    }
+    .step-contracts {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+      font-size: 12px;
+    }
+    .contract-pill {
+      background: #f8f9fa;
+      border: 1px solid var(--border);
+      padding: 3px 10px;
+      border-radius: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .contract-pill strong { color: var(--text); }
+
+    /* Symbol Chips */
+    .symbol-chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .symbol-chip {
+      background: #f8f9fa;
+      border: 1px solid var(--border);
+      color: var(--md-primary);
+      padding: 4px 12px;
+      border-radius: 16px;
+      font-family: "Roboto Mono", monospace;
+      font-size: 12px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .symbol-chip:hover {
+      background: #e8f0fe;
+      border-color: var(--md-primary);
+    }
+
+    /* Material Action Buttons */
+    .pill-btn {
+      background: var(--card);
+      border: 1px solid var(--md-outline);
+      color: var(--md-primary);
+      padding: 7px 18px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .pill-btn:hover {
+      background: var(--card-hover);
+    }
+    .pill-btn-primary {
+      background: var(--md-primary);
+      border: 1px solid var(--md-primary);
+      color: #ffffff;
+      padding: 7px 20px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s;
+      box-shadow: 0 1px 2px rgba(60,64,67,0.2);
+    }
+    .pill-btn-primary:hover {
+      background: #0842a0;
+      box-shadow: 0 1px 3px rgba(60,64,67,0.3);
+    }
+
+    /* SVG Canvas Container */
+    .svg-viewport-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      overflow: auto;
+      position: relative;
+      min-height: 640px;
+      box-shadow: 0 1px 2px rgba(60,64,67,0.06);
+    }
+    /* Mermaid Diagram Viewport */
+    .mermaid-viewport {
+      overflow: auto;
+      background: #08080d;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      min-height: 480px;
+      max-height: 800px;
+      position: relative;
+      cursor: grab;
+      touch-action: none;
+    }
+    .mermaid-viewport.is-dragging {
+      cursor: grabbing;
+    }
+    .mermaid-viewport svg {
+      max-width: none !important;
+      height: auto !important;
+      transform-origin: 50% 0;
+      transition: transform 120ms ease;
+    }
+    .pill-btn-toggle.active {
+      background: var(--md-primary) !important;
+      color: #ffffff !important;
+      border-color: var(--md-primary) !important;
+    }
+    .svg-controls {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(60,64,67,0.15);
+    }
+    .svg-btn {
+      background: transparent;
+      border: none;
+      color: var(--md-on-surface-variant);
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: all 0.15s;
+    }
+    .svg-btn:hover {
+      background: #f1f3f4;
+      color: var(--md-primary);
+    }
+
+    /* Flow Animations */
+    @keyframes flowDash {
+      to {
+        stroke-dashoffset: -20;
+      }
+    }
+    .flow-wire {
+      animation: flowDash 1.4s linear infinite;
+    }
+    .flow-wire.intra-wire {
+      animation: flowDash 1.8s linear infinite;
+    }
+    .flow-paused .flow-wire {
+      animation-play-state: paused !important;
+    }
+    .svg-step-card {
+      transition: transform 0.18s ease;
+    }
+    .svg-step-card:hover .step-card-bg {
+      stroke: var(--md-primary) !important;
+      fill: #f1f5f9 !important;
+    }
+
+    /* Execution Matrix Table (Material Data Table) */
+    .matrix-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+    }
+    .matrix-table th {
+      background: #f8f9fa;
+      color: var(--md-on-surface-variant);
+      text-align: left;
+      padding: 12px 16px;
+      border-bottom: 2px solid var(--border);
+      font-family: "Google Sans", Roboto, sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .matrix-table td {
+      padding: 12px 16px;
+      border-bottom: 1px solid #e0e0e0;
+      vertical-align: top;
+      color: var(--text);
+    }
+    .matrix-table tr:hover td {
+      background: #f8fafd;
+    }
+
+    /* Slide-over AST Inspector Drawer (Material Side Sheet) */
+    .drawer-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.32);
+      z-index: 99;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .drawer-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .drawer {
+      position: fixed;
+      top: 0;
+      right: -660px;
+      width: 100%;
+      max-width: 620px;
+      height: 100vh;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      box-shadow: -2px 0 16px rgba(60,64,67,0.15);
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      transition: right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .drawer.open {
+      right: 0;
+    }
+    .drawer-header {
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface);
+    }
+    .drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+    .drawer-close {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+    .drawer-close:hover {
+      background: #f1f3f4;
+      color: var(--text);
+    }
+    .code-block {
+      background: #f8f9fa;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      font-family: "Roboto Mono", monospace;
+      font-size: 12.5px;
+      color: #202124;
+      overflow-x: auto;
+      line-height: 1.5;
+      margin: 10px 0 18px;
+      white-space: pre-wrap;
+    }
+    .drawer-sec-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--md-on-surface-variant);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 18px 0 6px;
+    }
+    .drawer-call-list {
+      list-style: none;
+      font-size: 13px;
+    }
+    .drawer-call-list li {
+      padding: 8px 12px;
+      margin-bottom: 6px;
+      background: #f8f9fa;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
