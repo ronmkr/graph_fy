@@ -214,4 +214,3 @@ Every feature, refactor, or bug fix MUST transition through these sequential pha
 - Standard library first, strict YAGNI, surgical diffs.
 - Dense technical bullets, exact invariant verification status, zero conversational filler.
 ```
-

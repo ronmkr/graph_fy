@@ -45,7 +45,7 @@ Comparative benchmark of **With Skill (`graph_fy`)** vs **Without Skill (Naive /
 | `MIG-002` | API Breaking Changes & Migration | Flask 3.0 Removal of before_first_requ.. | 181 tok / 186ms / 1t | 18,500 tok / 16.0s / 5t | **99.0%** | **86x** | **PASS** |
 | `MIG-003` | API Breaking Changes & Migration | Deprecation of safe_str_cmp in favor o.. | 173 tok / 172ms / 1t | 18,500 tok / 16.0s / 5t | **99.1%** | **93x** | **PASS** |
 | `MIG-004` | API Breaking Changes & Migration | Flask-SQLAlchemy 3.0 Migration from Qu.. | 162 tok / 156ms / 1t | 18,500 tok / 16.0s / 5t | **99.1%** | **103x** | **PASS** |
-| `MIG-005` | API Breaking Changes & Migration | Deprecation of werkzeug.__version__ Mo.. | 300 tok / 185ms / 1t | 18,500 tok / 16.0s / 5t | **98.4%** | **87x** | **PASS** |
+| `MIG-005` | API Breaking Changes & Migration | Deprecation of werkzeug.**version** Mo.. | 300 tok / 185ms / 1t | 18,500 tok / 16.0s / 5t | **98.4%** | **87x** | **PASS** |
 | `MIG-006` | API Breaking Changes & Migration | Removal of flask.Markup and Migration .. | 156 tok / 170ms / 1t | 18,500 tok / 16.0s / 5t | **99.2%** | **94x** | **PASS** |
 | `CROSS-001` | Cross-Repo Resolution | Flask-Login Session Authentication cal.. | 164 tok / 187ms / 1t | 37,000 tok / 22.4s / 7t | **99.6%** | **120x** | **PASS** |
 | `CROSS-002` | Cross-Repo Resolution | Flask-Migrate Binding Alembic Environm.. | 176 tok / 178ms / 1t | 27,750 tok / 19.2s / 6t | **99.4%** | **108x** | **PASS** |

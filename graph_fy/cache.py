@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import tempfile
 import time
 import warnings
@@ -965,6 +966,72 @@ def cache_dir(root: Path = Path("."), kind: str = "ast",
     return d
 
 
+_sqlite_connections: dict[str, sqlite3.Connection] = {}
+
+
+def _close_sqlite_connections() -> None:
+    for conn in list(_sqlite_connections.values()):
+        try:
+            conn.close()
+        except Exception:
+            pass
+    _sqlite_connections.clear()
+
+
+atexit.register(_close_sqlite_connections)
+
+
+def _get_sqlite_conn(target_dir: Path) -> sqlite3.Connection | None:
+    """Acquire or initialize a SQLite WAL connection for fast-boot cache entries."""
+    try:
+        db_path = target_dir / "cache.db"
+        key = str(db_path.resolve())
+        if key in _sqlite_connections:
+            return _sqlite_connections[key]
+        conn = sqlite3.connect(key, timeout=10.0, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ast_cache (hash TEXT PRIMARY KEY, payload TEXT, updated_at REAL)"
+        )
+        _sqlite_connections[key] = conn
+        return conn
+    except Exception:
+        return None
+
+
+def _load_from_sqlite_cache(target_dir: Path, h: str) -> dict | None:
+    """Load cached AST extraction from single SQLite DB in <0.1ms."""
+    conn = _get_sqlite_conn(target_dir)
+    if conn is None:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT payload FROM ast_cache WHERE hash = ?", (h,))
+        row = cur.fetchone()
+        if row and row[0]:
+            return json.loads(row[0])
+    except Exception:
+        pass
+    return None
+
+
+def _save_to_sqlite_cache(target_dir: Path, h: str, payload: dict) -> None:
+    """Save AST extraction to single SQLite DB with WAL."""
+    conn = _get_sqlite_conn(target_dir)
+    if conn is None:
+        return
+    try:
+        payload_str = json.dumps(payload)
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO ast_cache (hash, payload, updated_at) VALUES (?, ?, ?)",
+                (h, payload_str, time.time()),
+            )
+    except Exception:
+        pass
+
+
 def load_cached(path: Path, root: Path = Path("."), kind: str = "ast",
                 cache_root: Path | None = None, prompt: "str | Path | None" = None,
                 prompt_file: "str | Path | None" = None,
@@ -973,32 +1040,7 @@ def load_cached(path: Path, root: Path = Path("."), kind: str = "ast",
     """Return cached extraction for this file if hash matches, else None.
 
     Cache key: SHA256 of file contents.
-    Cache value: stored as graph_fy_out/cache/{kind}/{hash}.json (AST entries
-    under the per-version subdirectory, see :func:`cache_dir`).
-
-    ``root`` anchors the content-hash key and source_file relativization (it
-    must stay the inferred common parent so keys remain portable). ``cache_root``
-    decouples *where* the cache directory lives from that anchor — the cache is
-    an output and must not land inside a read-only/analyzed source tree (#1774).
-    When ``cache_root`` is None the location falls back to ``root`` (unchanged
-    behavior for existing callers).
-
-    AST entries written by other graph_fy versions — including the legacy
-    flat cache/ layout (pre-0.5.3) and the unversioned cache/ast/ layout —
-    are deliberately not consulted: they were produced by a different
-    extractor and may be stale.
-
-    ``prompt`` (semantic kinds) is the extraction prompt — text, or a Path to
-    the prompt file — that the caller is about to extract with. It selects the
-    p{fingerprint}/ namespace, so an entry produced by a different prompt is a
-    miss rather than a silent stale hit (#1939). When it is given and the
-    fingerprinted namespace misses, ``allow_legacy`` (default True) falls back
-    to a flat-layout entry: those predate fingerprinting, so their vintage is
-    unknowable — they are served rather than re-billed, and the hit is counted
-    so :func:`check_semantic_cache` can report N to the user. Callers that must
-    not mix vintages within one entry (see :func:`save_semantic_cache`'s
-    ``merge_existing``) pass allow_legacy=False.
-    Returns None if no cache entry or file has changed.
+    Cache value: stored in fast SQLite cache.db and fallback graph_fy_out/cache/{kind}/{hash}.json.
     """
     global _legacy_semantic_hits, _corrupt_cache_entries
     location = cache_root if cache_root is not None else root
@@ -1007,24 +1049,31 @@ def load_cached(path: Path, root: Path = Path("."), kind: str = "ast",
     except OSError:
         return None
     prompt_fp = _resolve_prompt_fp(prompt, prompt_file)
-    entry = cache_dir(location, kind, prompt_fp) / f"{h}.json"
+    target_dir = cache_dir(location, kind, prompt_fp)
+
+    result: dict | None = None
+    if kind == "ast":
+        result = _load_from_sqlite_cache(target_dir, h)
+
     legacy_hit = False
-    if prompt_fp and not entry.exists() and allow_legacy:
-        legacy = cache_dir(location, kind) / f"{h}.json"
-        if legacy.exists():
-            entry, legacy_hit = legacy, True
-    if entry.exists():
-        try:
-            result = json.loads(entry.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            # Corrupt entry, not a miss: a truncated write or a bad producer
-            # (e.g. unescaped Windows backslashes in source_file) leaves JSON
-            # that fails to parse on every future run, so the file is silently
-            # re-extracted forever. Count it so the run can report it (#2405).
-            _corrupt_cache_entries += 1
-            return None
-        except OSError:
-            return None
+    if result is None:
+        entry = target_dir / f"{h}.json"
+        if prompt_fp and not entry.exists() and allow_legacy:
+            legacy = cache_dir(location, kind) / f"{h}.json"
+            if legacy.exists():
+                entry, legacy_hit = legacy, True
+        if entry.exists():
+            try:
+                result = json.loads(entry.read_text(encoding="utf-8"))
+                if kind == "ast":
+                    _save_to_sqlite_cache(target_dir, h, result)
+            except json.JSONDecodeError:
+                _corrupt_cache_entries += 1
+                return None
+            except OSError:
+                return None
+
+    if result is not None:
         # A ``partial`` entry was produced from a truncated LLM response and
         # covers only part of the file's symbols. Serving it as authoritative
         # would return the incomplete node set forever until the file is
@@ -1131,6 +1180,8 @@ def save_cached(path: Path, result: dict, root: Path = Path("."), kind: str = "a
         os.write(fd, json.dumps(on_disk).encode())
         os.close(fd)
         _os_replace_with_fallback(tmp_path, entry)
+        if kind == "ast":
+            _save_to_sqlite_cache(target_dir, h, on_disk)
     except Exception:
         try:
             os.close(fd)

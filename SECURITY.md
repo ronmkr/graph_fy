@@ -20,7 +20,7 @@ Report security vulnerabilities via GitHub private vulnerability reporting. Plea
 ### Threat Surface
 
 | Vector | Mitigation |
-|--------|-----------|
+| -------- | ----------- |
 | SSRF via URL fetch | `security.validate_url()` allows only `http` and `https` schemes, blocks private/loopback/link-local IPs, and blocks cloud metadata endpoints. Redirect targets are re-validated. All fetch paths including tweet oEmbed go through `safe_fetch()`. |
 | Oversized downloads | `safe_fetch()` streams responses and aborts at 50 MB. `safe_fetch_text()` aborts at 10 MB. |
 | Non-2xx HTTP responses | `safe_fetch()` raises `HTTPError` on non-2xx status codes - error pages are not silently treated as content. |

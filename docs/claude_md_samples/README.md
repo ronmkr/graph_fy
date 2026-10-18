@@ -20,8 +20,10 @@ This directory contains standalone, copy-pasteable sample `CLAUDE.md` files conf
 
 1. Choose the sample matching your workflow.
 2. Copy the file into your project root as `CLAUDE.md`:
+
    ```bash
    cp docs/claude_md_samples/CLAUDE_case1_unix_toolchain.md ./CLAUDE.md
    ```
+
 3. Customize project-specific commands in the `justfile` or test runner sections.
 4. Launch your agent session (e.g., `headroom wrap claude` or `claude`).

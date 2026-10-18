@@ -5,6 +5,7 @@
 ---
 
 ## 1. The $10 Budget Law: Radical Token Efficiency
+
 The best code is the code you never wrote. The best token is the token you never spent.
 
 - **Read Nothing You Don't Need**:
@@ -23,6 +24,7 @@ The best code is the code you never wrote. The best token is the token you never
 ---
 
 ## 2. Radical Simplicity (Ponytail & YAGNI)
+
 - **Standard Library First**:
   - Python: `pathlib`, `json`, `dataclasses`, `collections`, `urllib.request`.
   - TypeScript: Native `fetch`, `URL`, `Map`, `Set`, `Record`.
@@ -38,6 +40,7 @@ The best code is the code you never wrote. The best token is the token you never
 ---
 
 ## 3. Context Reset Hygiene (The 30k Token Rule)
+
 - When a single vertical ticket is implemented and tests pass:
   1. Record completed state in `tasks.md`.
   2. Tell the user: `Task complete. Tests green. Run /clear to reset context.`
@@ -46,16 +49,20 @@ The best code is the code you never wrote. The best token is the token you never
 ---
 
 ## 4. Git & Filesystem Rules
+
 - Work in an isolated worktree when possible:
+
   ```bash
   git worktree add ../.worktrees/<task> -b feature/<task>
   ```
+
 - **Git Safety Contract**: CRITICAL: NEVER run `git commit`, `git push`, `git checkout`, or `git switch` unless explicitly instructed with the exact phrase `"Commit these changes"`.
 - After code modifications: run `graph_fy update .` (0-cost AST sync).
 
 ---
 
 ## 5. Caveman Output (Zero Filler)
+
 - Ban all conversational filler:
   - NO: "I'd be glad to help with that!"
   - NO: "Here is what I plan to do..."

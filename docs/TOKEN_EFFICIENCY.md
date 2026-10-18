@@ -24,6 +24,7 @@ flowchart TD
 ```
 
 Three core leaks drive token explosion:
+
 1. **Exploratory Blind Reads**: Reading whole files just to understand function signatures and call hierarchies.
 2. **Runtime Tool Output Noise**: Piping hundreds of lines of passing unit tests, build traces, or verbose JSON dicts into the LLM context.
 3. **Prompt Cache Invalidation**: Modifying messages or changing ordering inside previously-cached prompt prefixes, converting a 90% cache read discount into a 25% write penalty.
@@ -43,6 +44,7 @@ Three core leaks drive token explosion:
 ## 3. Tool-by-Tool Guide
 
 ### A. `graph_fy`: Upstream Structural Intelligence (Zero-LLM)
+
 * **What it does**: Parses 30+ languages locally into an AST knowledge graph. Computes Leiden communities, PageRank, God nodes, bidirectional execution flow (callers/callees), and downstream blast radius.
 * **Token Savings**: **90–95%**. Replaces 10–20 raw file reads with a targeted 1,500-token briefing.
 * **Core Commands & MCP Tools**:
@@ -53,6 +55,7 @@ Three core leaks drive token explosion:
   * `graph_fy update .`: Fast, zero-API-cost incremental update after editing code.
 
 ### B. `headroom`: Runtime In-Flight Proxy & Prompt Cache Protector
+
 * **What it does**: Runs as a local HTTP proxy (`127.0.0.1:8787`) or wrapper (`headroom wrap claude`). Intercepts model calls to Anthropic, OpenAI, and Gemini.
 * **Token Savings**: **60–80%** on tool calls and prompts.
 * **Core Capabilities**:
@@ -62,6 +65,7 @@ Three core leaks drive token explosion:
   * **Failure Learning (`headroom learn`)**: Mines session transcripts for command errors and loops, writing targeted lessons to `AGENTS.md` / `GEMINI.md`.
 
 ### C. `oraios/serena`: Semantic Symbol Navigation (LSP + Tree-Sitter)
+
 * **What it does**: Acts as an "IDE for your agent" via MCP. Understands language server semantics (LSP) across 40+ languages.
 * **Token Savings**: **70–85%**. Eliminates blind string searching and whole-file rewrites.
 * **Core Capabilities**:
@@ -69,6 +73,7 @@ Three core leaks drive token explosion:
   * Atomic symbol-level refactoring without needing to read or overwrite the entire file.
 
 ### D. `ponytail`: Anti-Overengineering Guardrail
+
 * **What it does**: Mental model and behavioral prompt enforcing radical simplicity and the shortest path that works.
 * **Core Rules**:
   * **YAGNI**: Question speculative generality, helper bloat, and premature wrappers.
@@ -76,6 +81,7 @@ Three core leaks drive token explosion:
   * **Surgical Diffs**: Modify only the necessary lines. Never refactor surrounding untouched code.
 
 ### E. `caveman`: High-Signal, Zero-Filler Output
+
 * **What it does**: Cuts conversational pleasantries, preambles, apologies, and restatements.
 * **Core Rules**:
   * Dense, high-signal bullet points.
@@ -86,43 +92,57 @@ Three core leaks drive token explosion:
 ## 4. End-to-End Workflow: The 10x AI Engineer Setup
 
 ### Step 1: Pre-Task Briefing (Zero-LLM First)
+
 Before writing prompts or having the agent read code:
+
 ```bash
 # Generate deterministic briefing: subsystem community, blast radius, callers, callees, skeletons
 graph_fy context "add webhook verification endpoint"
 ```
+
 Or in an agent session, invoke MCP tool:
+
 ```json
 get_agent_context(task="add webhook verification endpoint")
 ```
 
 ### Step 2: On-Demand Implementation Expansion (Native CCR)
+
 * Review the Tier-1 AST skeleton in the briefing.
 * If you need the exact implementation of a specific symbol, retrieve only that node instead of reading the file:
+
 ```json
 get_symbol_implementation(node_id_or_symbol="webhook_verify_signature")
 ```
 
 ### Step 3: Run Runtime Optimization Proxy
+
 Wrap your agent CLI to compress runtime noise and protect prompt caching:
+
 ```bash
 # Launch Claude Code, Antigravity, or Cursor behind Headroom proxy
 headroom wrap claude
 ```
 
 ### Step 4: Blast Radius Check Before Editing
+
 Before applying changes, verify downstream risk:
+
 ```json
 get_impact_analysis(target_symbol="process_webhook")
 ```
+
 * Identifies affected test files and downstream callers.
 * Run **only** the affected test targets instead of the entire test suite.
 
 ### Step 5: Keep Knowledge Graph Synced (AST-Only)
+
 After editing code:
+
 ```bash
 graph_fy update .
 ```
+
 Takes ~1–2 seconds, updates graph topology locally with zero network calls and zero LLM cost.
 
 ---
@@ -132,11 +152,13 @@ Takes ~1–2 seconds, updates graph topology locally with zero network calls and
 How to build an enterprise-grade application (Java, TypeScript, Python, Go, Rust) where **Claude writes all the code** and you provide **only specs and docs**, staying strictly within a **$10 budget**:
 
 ### A. The $10 Economics
+
 * **Unoptimized Turn**: 80k input + 2k output = ~$0.30–$0.50/turn (burns out in ~20 turns).
 * **Optimized Turn**: 50k cached input ($0.015) + 200 output tokens ($0.003) = **~$0.018–$0.022/turn**.
 * **Total Capacity**: **$10 yields ~450–500 productive turns**.
 
 ### B. Dev Setup (Tools to Install)
+
 ```bash
 # 1. Runtime In-Flight Proxy & Prompt Cache Freezer
 pip install headroom-ai
@@ -149,6 +171,7 @@ uv tool install -p 3.13 serena-agent && serena init
 ```
 
 ### C. Connect MCP Servers to Claude (`mcp.json`)
+
 ```json
 {
   "mcpServers": {
@@ -165,13 +188,16 @@ uv tool install -p 3.13 serena-agent && serena init
 ```
 
 ### D. Always Run Inside Headroom Wrapper
+
 ```bash
 headroom wrap claude
 ```
+
 * Freezes prompt cache prefixes for the 90% read discount.
 * Filters noisy build logs (Maven, Gradle, Cargo, npm) down to errors only.
 
 ### E. Universal Agent Rules (`AGENTS.md` / `CLAUDE.md`)
+
 ```markdown
 ## 1. Caveman Mode (Token Minimization)
 - Zero conversational pleasantries. Output ONLY code diffs and shell commands.
@@ -197,6 +223,7 @@ headroom wrap claude
 ```
 
 ### F. Spec-Driven Daily Routine
+
 1. Drop feature spec in `docs/specs/<feature>.md`.
 2. Prompt Claude: *"Implement `docs/specs/<feature>.md`. Adhere strictly to AGENTS.md rules."*
 3. Claude extracts AST interfaces, writes tests, implements, and syncs graph autonomously (~$0.03–$0.05 per feature).
@@ -207,15 +234,15 @@ headroom wrap claude
 
 | Capability | `graph_fy` | `headroom` | `serena` | `RTK / snip` |
 | :--- | :---: | :---: | :---: | :---: |
-| **Codebase Community Clustering & God Nodes** |  | ❌ | ❌ | ❌ |
-| **Downstream Blast Radius & Test Target Discovery**|  | ❌ | ❌ | ❌ |
-| **AST Interface Skeletons** |  |  |  | ❌ |
-| **Bidirectional Call Graphs (Callers/Callees)** |  | ❌ |  | ❌ |
-| **Runtime API Proxy & Prompt Cache Freezing** | ❌ |  | ❌ | ❌ |
-| **CCR (Compress-Cache-Retrieve)** | ⚡ (via MCP) |  | ❌ | ❌ |
-| **Terminal / Shell Output Filtering** | ❌ |  | ❌ |  |
-| **LSP Symbol-Level Atomic Refactoring** | ❌ | ❌ |  | ❌ |
-| **Zero-LLM / Local Determinism** |  (100%) |  |  (100%) |  (100%) |
+| **Codebase Community Clustering & God Nodes** | | ❌ | ❌ | ❌ |
+| **Downstream Blast Radius & Test Target Discovery** | | ❌ | ❌ | ❌ |
+| **AST Interface Skeletons** | | | | ❌ |
+| **Bidirectional Call Graphs (Callers/Callees)** | | ❌ | | ❌ |
+| **Runtime API Proxy & Prompt Cache Freezing** | ❌ | | ❌ | ❌ |
+| **CCR (Compress-Cache-Retrieve)** | ⚡ (via MCP) | | ❌ | ❌ |
+| **Terminal / Shell Output Filtering** | ❌ | | ❌ | |
+| **LSP Symbol-Level Atomic Refactoring** | ❌ | ❌ | | ❌ |
+| **Zero-LLM / Local Determinism** | (100%) | | (100%) | (100%) |
 
 ---
 
@@ -230,6 +257,7 @@ headroom wrap claude
 ---
 
 ## 8. Companion Guides & Deep Dives
+
 * [**Complete Skills & Tools Installation Guide**](file:///Users/raunak/Documents/projects/graphify/docs/SKILLS_INSTALLATION_GUIDE.md): Step-by-step setup for Matt Pocock skills, `graph_fy`, `headroom`, `serena`, and MCP configurations.
 * [**The $10 Spec-Driven Enterprise Setup**](file:///Users/raunak/Documents/projects/graphify/docs/SPEC_DRIVEN_ENTERPRISE_SETUP.md): Tool configs (`headroom`, `graph_fy`, `serena`), `mcp.json`, and agent rules.
 * [**From DDD to Spec to Code Blueprint**](file:///Users/raunak/Documents/projects/graphify/docs/DDD_TO_SPEC_TO_CODE_BLUEPRINT.md): Full lifecycle incorporating Domain-Driven Design, Matt Pocock's `/grill-me` pattern, Jira tickets, and TDD execution.

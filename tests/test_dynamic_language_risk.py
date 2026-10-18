@@ -150,3 +150,65 @@ def test_diff_context_confidence_and_disclaimer(tmp_path: Path):
     assert "| **Confidence** |" in ctx
     assert "Static Blast Radius Grounding" in ctx
     assert "Dynamic dispatch, runtime reflection (`getattr`), and framework DI" in ctx
+
+
+def test_ast_comment_and_string_immunity(tmp_path: Path):
+    """Ensure Tree-sitter AST queries ignore comments and string literals."""
+    py_code = '''
+# In comments: Depends(fake_comment_dep)
+fake_str = "Depends(fake_string_dep)"
+
+def get_real_db():
+    return None
+
+@app.get("/items")
+def list_items(db = Depends(get_real_db)):
+    return []
+'''
+    py_file = tmp_path / "routes.py"
+    py_file.write_text(py_code, encoding="utf-8")
+
+    result_py: dict = {
+        "nodes": [
+            {"id": "routes::list_items", "label": "list_items", "file_type": "function", "source_file": "routes.py", "source_location": "L8"},
+        ],
+        "edges": [],
+    }
+    extract_python_frameworks(py_file, py_code, result_py)
+
+    py_di_edges = [e for e in result_py["edges"] if e.get("context") == "fastapi_di"]
+    assert len(py_di_edges) == 1
+    assert py_di_edges[0]["target"] == "get_real_db"
+
+    js_code = '''
+// Comment: app.use(fakeMiddleware)
+// Comment: const user = useFakeHook();
+const stringLiteral = "useAnotherFakeHook()";
+
+app.use(realMiddleware);
+
+function Profile() {
+    const session = useRealSession();
+    return null;
+}
+'''
+    js_file = tmp_path / "app.js"
+    js_file.write_text(js_code, encoding="utf-8")
+
+    result_js: dict = {
+        "nodes": [
+            {"id": "app_js", "label": "app.js", "file_type": "file", "source_file": "app.js", "source_location": "L1"},
+            {"id": "app::Profile", "label": "Profile", "file_type": "function", "source_file": "app.js", "source_location": "L8"},
+        ],
+        "edges": [],
+    }
+    extract_js_frameworks(js_file, js_code, result_js)
+
+    mw_edges = [e for e in result_js["edges"] if e.get("context") == "express_middleware"]
+    assert len(mw_edges) == 1
+    assert mw_edges[0]["target"] == "realMiddleware"
+
+    hook_edges = [e for e in result_js["edges"] if e.get("context") == "react_hook"]
+    assert len(hook_edges) == 1
+    assert hook_edges[0]["target"] == "useRealSession"
+

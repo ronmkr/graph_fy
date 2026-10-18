@@ -401,6 +401,109 @@ def _normalize_route_path(path: str) -> str:
     return p.lower()
 
 
+def _discover_env_vars(candidate_dirs: list[Path]) -> dict[str, str]:
+    """Scan candidate directories for .env* and docker-compose*.yml files to extract API and base URL configurations."""
+    from urllib.parse import urlsplit
+    env_vars: dict[str, str] = {}
+    checked_dirs: set[Path] = set()
+
+    for d in candidate_dirs:
+        try:
+            curr: Path | None = d.resolve() if d.is_dir() else d.parent.resolve()
+        except Exception:
+            continue
+        depth = 0
+        while curr and depth < 3 and curr not in checked_dirs:
+            checked_dirs.add(curr)
+            # Scan .env, .env.example, .env.local, .env.development, .env.production, etc.
+            try:
+                for env_file in curr.glob(".env*"):
+                    if env_file.is_file():
+                        try:
+                            for line in env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                                line = line.strip()
+                                if not line or line.startswith("#") or "=" not in line:
+                                    continue
+                                k, v = line.split("=", 1)
+                                k = k.strip()
+                                v = v.strip().strip("'\"`")
+                                if any(t in k.upper() for t in ("API", "URL", "BASE", "PREFIX", "BACKEND", "GATEWAY")):
+                                    parsed = urlsplit(v)
+                                    path = parsed.path if parsed.netloc else v
+                                    if path:
+                                        env_vars[k] = "/" + path.strip("/")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # Scan docker-compose.yml / yaml
+            for compose_name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
+                compose_file = curr / compose_name
+                if compose_file.is_file():
+                    try:
+                        for line in compose_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                            line = line.strip().lstrip("- ")
+                            if "=" in line:
+                                k, v = line.split("=", 1)
+                            elif ":" in line and not line.startswith("http"):
+                                k, v = line.split(":", 1)
+                            else:
+                                continue
+                            k = k.strip()
+                            v = v.strip().strip("'\"`")
+                            if any(t in k.upper() for t in ("API", "URL", "BASE", "PREFIX", "BACKEND", "GATEWAY")):
+                                parsed = urlsplit(v)
+                                path = parsed.path if parsed.netloc else v
+                                if path:
+                                    env_vars[k] = "/" + path.strip("/")
+                    except Exception:
+                        pass
+
+            parent = curr.parent
+            if parent == curr:
+                break
+            curr = parent
+            depth += 1
+
+    return env_vars
+
+
+def _resolve_base_url_expr(expr: str, env_vars: dict[str, str]) -> str | None:
+    """Resolve string literal, process.env / import.meta.env, or fallback in baseURL expression."""
+    import re
+    from urllib.parse import urlsplit
+
+    if not expr:
+        return None
+    expr = expr.strip()
+
+    # 1. String literal: '/api/v1' or "http://localhost:8000/api"
+    m_lit = re.match(r"""^['"`]([^'"`]+)['"`]$""", expr)
+    if m_lit:
+        raw = m_lit.group(1).strip()
+        parsed = urlsplit(raw)
+        path = parsed.path if parsed.netloc else raw
+        return "/" + path.strip("/") if path else None
+
+    # 2. Dynamic env variable reference: process.env.VITE_API_URL or import.meta.env.NEXT_PUBLIC_API_URL
+    m_env = re.search(r"""(?:process\.env|import\.meta\.env)\.([A-Za-z0-9_]+)""", expr)
+    if m_env:
+        var_name = m_env.group(1)
+        if var_name in env_vars:
+            return env_vars[var_name]
+
+    # 3. Fallback expression: process.env.API || '/api/v1' or ?? '/api/v1'
+    m_fb = re.search(r"""(?:\|\||\?\?)\s*['"`]([^'"`]+)['"`]""", expr)
+    if m_fb:
+        raw = m_fb.group(1).strip()
+        parsed = urlsplit(raw)
+        path = parsed.path if parsed.netloc else raw
+        return "/" + path.strip("/") if path else None
+
+    return None
+
+
 def resolve_cross_boundary_api_routes(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
@@ -561,7 +664,22 @@ def resolve_cross_boundary_api_routes(
                 except Exception:
                     pass
 
-    # 2. Track Client BaseURL & Instance configurations
+    # 2. Track Client BaseURL & Instance configurations (with dynamic config and .env resolution)
+    candidate_dirs: list[Path] = [Path.cwd()]
+    if Path("graph_fy_out/.graphify_root").exists():
+        try:
+            groot = Path("graph_fy_out/.graphify_root").read_text(encoding="utf-8").strip()
+            if groot:
+                candidate_dirs.append(Path(groot))
+        except Exception:
+            pass
+    for n in nodes:
+        sf_cand = n.get("source_file", "")
+        if sf_cand:
+            candidate_dirs.append(Path(sf_cand))
+
+    env_vars = _discover_env_vars(candidate_dirs)
+
     client_base_urls: dict[str, str] = {}
     file_base_urls: dict[str, str] = {}
     global_base_url: str = ""
@@ -579,19 +697,23 @@ def resolve_cross_boundary_api_routes(
                 continue
             text = "\n".join(lines)
             for m_inst in re.finditer(
-                r"""(?:const|let|var|export\s+const)\s+([A-Za-z0-9_]+)\s*=\s*(?:axios\.create|createClient|new\s+\w*(?:Client|Api|Service))\s*\(\s*\{[^}]*base(?:URL|Path)\s*:\s*['"`]([^'"`]+)['"`]""",
+                r"""(?:const|let|var|export\s+const)\s+([A-Za-z0-9_]+)\s*=\s*(?:axios\.create|createClient|new\s+\w*(?:Client|Api|Service))\s*\(\s*\{[^}]*base(?:URL|Path)\s*:\s*([^,\n}]+)""",
                 text,
                 re.DOTALL,
             ):
                 var_name = m_inst.group(1)
-                b_url = m_inst.group(2).strip().strip("'\"`")
+                raw_expr = m_inst.group(2).strip()
+                b_url = _resolve_base_url_expr(raw_expr, env_vars)
                 if b_url:
                     client_base_urls[var_name] = b_url
                     file_base_urls[sf] = b_url
 
-            m_glob = re.search(r"""(?:axios\.defaults\.baseURL|OpenAPI\.BASE)\s*=\s*['"`]([^'"`]+)['"`]""", text)
+            m_glob = re.search(r"""(?:axios\.defaults\.baseURL|OpenAPI\.BASE)\s*=\s*([^;\n]+)""", text)
             if m_glob:
-                global_base_url = m_glob.group(1).strip().strip("'\"`")
+                raw_expr = m_glob.group(1).strip()
+                b_url = _resolve_base_url_expr(raw_expr, env_vars)
+                if b_url:
+                    global_base_url = b_url
 
     # 3. Discover client callers: (node, client_path, method, resolved_path)
     client_callers: list[tuple[dict[str, Any], str, str, str]] = []
@@ -613,7 +735,7 @@ def resolve_cross_boundary_api_routes(
         if not client_path:
             txt = str(n.get("text", "")) or str(n.get("label", ""))
             client_match = re.search(
-                r"""(?:fetch|([A-Za-z0-9_]+)\.(?:get|post|put|delete|patch|options|head)|axios(?:\.(?:get|post|put|delete|patch|options|head))?)\s*\(\s*["'`](\/[a-zA-Z0-9_\-\/{}:]+)["'`]""",
+                r"""(?:fetch|([A-Za-z0-9_]+)\.(?:get|post|put|delete|patch|options|head)|axios(?:\.(?:get|post|put|delete|patch|options|head))?)\s*\(\s*[`'"]((?:\$\{[^}]+\}|\/|[a-zA-Z0-9_\-\/{}:])+)[`'"]""",
                 txt,
             )
             if client_match:
@@ -623,6 +745,9 @@ def resolve_cross_boundary_api_routes(
                 method_match = re.search(r"\.(get|post|put|delete|patch|options|head)\b", txt, re.IGNORECASE)
                 if method_match and not method:
                     method = method_match.group(1).upper()
+                m_opt_meth = re.search(r"""method:\s*['"`](GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)['"`]""", txt, re.IGNORECASE)
+                if m_opt_meth and not method:
+                    method = m_opt_meth.group(1).upper()
 
         sf = n.get("source_file", "")
         lbl = n.get("label", "")
@@ -665,6 +790,14 @@ def resolve_cross_boundary_api_routes(
 
         if client_path:
             eff_method = method or "GET"
+            # Check for leading environment variable reference in client_path
+            m_lead = re.match(r"""^(?:\$\{)?(?:process\.env|import\.meta\.env)\.([A-Za-z0-9_]+)\}?(.*)""", client_path)
+            if m_lead:
+                vname = m_lead.group(1)
+                tail = m_lead.group(2).lstrip("/")
+                if vname in env_vars:
+                    base = env_vars[vname].rstrip("/")
+                    client_path = f"{base}/{tail}"
             # Resolve BaseURL if configured
             eff_base = client_base_urls.get(instance_var) or file_base_urls.get(sf) or global_base_url
             if eff_base and not client_path.startswith(eff_base):

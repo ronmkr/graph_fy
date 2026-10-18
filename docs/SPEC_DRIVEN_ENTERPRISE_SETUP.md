@@ -7,8 +7,9 @@
 ## 1. The Economics: Why $10 Is Plenty
 
 On Claude 3.7 / 3.5 Sonnet:
+
 * **Standard Turn (Unoptimized)**: 80k input + 2k output = **~$0.27 to $0.50 / turn**. Budget exhausted in **~20–30 turns** before core services are built.
-* **Optimized Turn (This Stack)**: 50k cached input ($0.015) + 200 surgical output tokens ($0.003) = **~$0.018 to $0.022 / turn**. 
+* **Optimized Turn (This Stack)**: 50k cached input ($0.015) + 200 surgical output tokens ($0.003) = **~$0.018 to $0.022 / turn**.
 * **Capacity**: **$10 yields ~450–500 productive turns**.
 
 ---
@@ -64,6 +65,7 @@ headroom wrap claude
 ```
 
 What Headroom does automatically:
+
 1. **Freezes prompt cache prefixes**: Ensures every turn hits the 90% Anthropic cache read discount ($0.30/M vs $3.00/M).
 2. **Compresses terminal/build noise**: Strips verbose build logs (Maven, Gradle, Cargo, npm) down to errors only.
 3. **Applies CCR (Compress-Cache-Retrieve)**: Automatically caches large tool results and injects compact handles.
@@ -109,7 +111,9 @@ Place this exact file in the root of your project:
 You never write code; you provide clean, unambiguous specifications.
 
 ### Step 1: Write the Spec
+
 Create `docs/specs/<feature>.md`:
+
 ```markdown
 # Spec: Order Fulfillment Service
 - Model: Order(id: UUID, customerId: UUID, items: List<Item>, status: Status)
@@ -122,11 +126,13 @@ Create `docs/specs/<feature>.md`:
 ```
 
 ### Step 2: Prompt Claude (1 Line)
-```
+
+```text
 Implement docs/specs/01-order-fulfillment.md. Follow AGENTS.md rules.
 ```
 
 ### Step 3: Claude Executes Autonomously
+
 1. Claude calls `graph_fy get_agent_context` (1,500 tokens).
 2. Claude creates domain models and interfaces.
 3. Claude writes a quiet unit test and runs it (fails).

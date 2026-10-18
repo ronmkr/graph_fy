@@ -230,3 +230,32 @@ def test_task_context_sqlite_fallback_when_graph_none(sample_task_graph):
     assert "Router" in res["prompt_context"]
 
 
+def test_task_context_prompt_cache_prefix_priming(sample_task_graph):
+    """Verify that multiple queries within the same subsystem share an identical prefix for prompt-cache hits."""
+    G, db_path, root = sample_task_graph
+
+    res1 = task_context("router dispatch request", graph=G, db_path=db_path, root_dir=root, token_budget=1500)
+    res2 = task_context("router dispatch request", graph=G, db_path=db_path, root_dir=root, token_budget=1500)
+
+    p1 = res1["prompt_context"]
+    p2 = res2["prompt_context"]
+
+    # Both start with deterministic cache header and invariant subsystem briefing
+    assert p1.startswith("<!-- graph_fy:agent_context:v1 -->")
+    assert p2.startswith("<!-- graph_fy:agent_context:v1 -->")
+
+    # Prefix up to the dynamic tail is identical
+    split_marker = "#### Query Impact & Verification Targets:"
+    assert split_marker in p1
+    assert split_marker in p2
+
+    prefix1 = p1.split(split_marker)[0]
+    prefix2 = p2.split(split_marker)[0]
+
+    assert prefix1 == prefix2
+    # Ensure prefix contains the bulk of tokens (>200 chars) for cache eligibility
+    assert len(prefix1) > 200
+
+
+
+

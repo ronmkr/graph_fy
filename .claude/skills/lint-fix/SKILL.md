@@ -4,13 +4,16 @@ description: Run deterministic ruff auto-fix and formatting (zero-LLM token fixe
 ---
 
 ## Objective
+
 Auto-correct code formatting and lint violations deterministically without consuming LLM reasoning tokens.
 
 ## Execution Command
+
 ```bash
-uv run ruff check --fix . && uv run ruff format .
+uv run ruff check --fix . && uv run ruff format . && npx --yes markdownlint-cli --fix "README.md" "UPSTREAM_SYNC.md" "SECURITY.md" "AGENTS.md" "CLAUDE.md" "GEMINI.md" "docs/**/*.md" "evals/**/*.md" ".claude/skills/**/*.md"
 ```
 
 ## Guardrails
+
 - Always run this command before proposing code diffs or reporting task completion.
 - Do not manually rewrite files for whitespace or simple import reordering; delegate to this skill.

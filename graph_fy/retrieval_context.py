@@ -784,35 +784,65 @@ def task_context(
         else "HIGH_CONFIDENCE (Static AST Verified)"
     )
 
-    # 5. Historical Co-Change Mining (Git)
+    # 5. Historical Co-Change Mining & Hotspot Tracking (Git)
     co_changed_files: list[tuple[str, float]] = []
-    if candidate_files and root_path.is_dir():
+    hotspot_files: list[dict[str, Any]] = []
+
+    target_set = {Path(f).as_posix() for f in candidate_files}
+
+    # First check graph nodes for precomputed co_changes_with edges & churn annotations
+    if graph is not None and target_set:
+        seen_co: set[str] = set()
+        for nid, data in graph.nodes(data=True):
+            sf = Path(str(data.get("source_file", ""))).as_posix()
+            if sf in target_set:
+                c_count = data.get("commit_count")
+                c_churn = data.get("churn_30d")
+                if c_count or c_churn:
+                    hotspot_files.append({
+                        "file": sf,
+                        "commit_count": c_count or 0,
+                        "churn_30d": c_churn or 0,
+                        "primary_authors": data.get("primary_authors", []),
+                    })
+                # Check neighbors for co_changes_with
+                for nbr in graph.neighbors(nid):
+                    edata = graph.get_edge_data(nid, nbr) or {}
+                    ed_list = edata.values() if isinstance(edata, dict) and any(isinstance(k, int) for k in edata) else [edata]
+                    for ed in ed_list:
+                        if ed.get("relation") == "co_changes_with":
+                            nbr_sf = Path(str(graph.nodes[nbr].get("source_file", ""))).as_posix()
+                            if nbr_sf and nbr_sf not in target_set and nbr_sf not in seen_co:
+                                seen_co.add(nbr_sf)
+                                weight = float(ed.get("weight") or 0.5)
+                                co_changed_files.append((nbr_sf, weight))
+
+    # Fallback to local git repository log mining if graph had no precomputed co-change edges
+    if not co_changed_files and target_set and root_path.is_dir():
         try:
-            log_proc = subprocess.run(
-                ["git", "log", "--pretty=format:---COMMIT---", "--name-only", "-n", "50"],
-                cwd=str(root_path),
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=5,
-            )
-            commits = log_proc.stdout.split("---COMMIT---")
-            target_set = {Path(f).as_posix() for f in candidate_files}
-            co_counts: Counter[str] = Counter()
-            target_commits = 0
-            for c in commits:
-                files = {Path(f.strip()).as_posix() for f in c.splitlines() if f.strip()}
-                if target_set.intersection(files):
-                    target_commits += 1
-                    for f in files:
-                        if f not in target_set:
-                            co_counts[f] += 1
-            if target_commits > 0:
-                for f, count in co_counts.most_common(4):
-                    freq = round(count / target_commits, 2)
-                    if freq >= 0.2:
-                        co_changed_files.append((f, freq))
+            from graph_fy.git_history import extract_git_history, compute_cochanges, compute_file_churn
+            git_commits = extract_git_history(root_path, max_commits=200)
+            if git_commits:
+                co_pairs = compute_cochanges(git_commits, min_co_commits=2, min_confidence=0.3)
+                seen_co = set()
+                for pair in co_pairs:
+                    if pair.file_a in target_set and pair.file_b not in target_set and pair.file_b not in seen_co:
+                        seen_co.add(pair.file_b)
+                        co_changed_files.append((pair.file_b, pair.jaccard))
+                    elif pair.file_b in target_set and pair.file_a not in target_set and pair.file_a not in seen_co:
+                        seen_co.add(pair.file_a)
+                        co_changed_files.append((pair.file_a, pair.jaccard))
+                if not hotspot_files:
+                    churns = compute_file_churn(git_commits)
+                    for tf in target_set:
+                        if tf in churns:
+                            ch = churns[tf]
+                            hotspot_files.append({
+                                "file": tf,
+                                "commit_count": ch.commit_count,
+                                "churn_30d": ch.churn_30d,
+                                "primary_authors": ch.primary_authors,
+                            })
         except Exception:
             pass
 
@@ -893,29 +923,15 @@ def task_context(
                 if graph is None or target not in graph:
                     missing_explicit_symbols.append(target)
 
-    # 8. Assemble Prompt Context
+    # 8. Assemble Prompt Context with Deterministic Prefix for Prompt-Cache Priming
     lines: list[str] = [
+        "<!-- graph_fy:agent_context:v1 -->",
         "### graph_fy Pre-Agent Architectural Briefing",
         "> [!IMPORTANT]",
         "> Grounded AST Invariant: All symbols, signatures, and dependencies below are extracted directly from the verified AST. Do NOT hallucinate non-existent methods, APIs, or imports. If a symbol or parameter is not present here, inspect the indicated source file before making assumptions.",
-    ]
-    if missing_explicit_symbols:
-        lines.extend([
-            "> [!WARNING]",
-            f"> Target Symbol Not Found: The following symbol(s) mentioned in the task do not exist in the verified AST: {', '.join(sorted(missing_explicit_symbols))}.",
-            "> Grounded AST Invariant: Do NOT hallucinate implementations or APIs for these non-existent symbols. Verify source code before proceeding.",
-        ])
-    lines.extend([
-        f"**Task**: {task}",
         f"**Target Subsystem**: {subsystem_str}",
-        f"**Blast Radius Risk**: {risk_tier} (Risk Score: {risk_score:.2f}, {downstream_impact_count} downstream dependents)",
         f"**AST Analysis Confidence**: {confidence_tier}",
-    ])
-    if affected_tests:
-        lines.append(f"**Verification Targets (Tests)**: {', '.join(sorted(affected_tests)[:6])}")
-    if co_changed_files:
-        co_str = ", ".join(f"`{f}` ({int(freq*100)}% co-change)" for f, freq in co_changed_files)
-        lines.append(f"**Historically Co-Changed Files**: {co_str}")
+    ]
 
     char_budget = token_budget * 4
     current_chars = sum(len(l) + 1 for l in lines)
@@ -969,6 +985,33 @@ def task_context(
             lines.append(block)
             current_chars += len(block)
 
+    # Query Impact & Verification Targets (Dynamic Tail)
+    lines.extend([
+        "\n#### Query Impact & Verification Targets:",
+        f"**Task**: {task}",
+        f"**Blast Radius Risk**: {risk_tier} (Risk Score: {risk_score:.2f}, {downstream_impact_count} downstream dependents)",
+    ])
+    if affected_tests:
+        lines.append(f"**Verification Targets (Tests)**: {', '.join(sorted(affected_tests)[:6])}")
+    if co_changed_files:
+        co_str = ", ".join(f"`{f}` ({int(freq*100)}% co-change)" for f, freq in co_changed_files)
+        lines.append(f"**Historically Co-Changed Files**: {co_str}")
+    if hotspot_files:
+        hot_str = ", ".join(
+            f"`{h['file']}` ({h['commit_count']} commits, {h['churn_30d']} lines churn/30d"
+            + (f", author: {h['primary_authors'][0]}" if h.get("primary_authors") else "")
+            + ")"
+            for h in hotspot_files[:3]
+        )
+        lines.append(f"**High-Churn Hotspots**: {hot_str}")
+
+    if missing_explicit_symbols:
+        lines.extend([
+            "> [!WARNING]",
+            f"> Target Symbol Not Found: The following symbol(s) mentioned in the task do not exist in the verified AST: {', '.join(sorted(missing_explicit_symbols))}.",
+            "> Grounded AST Invariant: Do NOT hallucinate implementations or APIs for these non-existent symbols. Verify source code before proceeding.",
+        ])
+
     prompt_context = "\n".join(lines)
     briefing_tokens = max(1, len(prompt_context) // 4)
     compression_ratio = round(raw_tokens / max(1, briefing_tokens), 1)
@@ -983,6 +1026,7 @@ def task_context(
         "downstream_impact_count": downstream_impact_count,
         "affected_tests": affected_tests,
         "historically_co_changed": co_changed_files,
+        "hotspots": hotspot_files,
         "architecture_diagram": mermaid_diagram,
         "raw_tokens": raw_tokens,
         "briefing_tokens": briefing_tokens,

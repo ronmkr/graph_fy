@@ -25,7 +25,7 @@ flowchart TD
 | **Constitution** | `AGENTS.md` / `CLAUDE.md` | *How do we build?* | High stability | System instructions (checked every turn) |
 | **ADR** | `docs/adr/ADR-XXX.md` | *Why did we choose this?* | Immutable (or superseded) | Architectural guardrail (prevents forbidden patterns) |
 | **Spec** | `docs/specs/SPEC-XXX.md` | *What must it do?* | Living (updated with feature) | Implementation blueprint |
-| **Task / Ticket** | Jira / GitHub Issue | *What is the next commit?* | Ephemeral (closed when done)| 1-turn execution target |
+| **Task / Ticket** | Jira / GitHub Issue | *What is the next commit?* | Ephemeral (closed when done) | 1-turn execution target |
 
 ---
 
@@ -33,13 +33,15 @@ flowchart TD
 
 An ADR captures an important architectural decision, along with its context, alternatives considered, and consequences.
 
-### When to Write an ADR:
+### When to Write an ADR
+
 * Introducing a new framework, library, or language version.
 * Choosing a persistent data store or communication protocol (REST vs. gRPC vs. Event-driven).
 * Enforcing architectural patterns (Hexagonal Architecture, CQRS, zero-ORM policy).
 * **Do NOT write an ADR for**: Trivial refactors, standard bug fixes, or day-to-day implementation details.
 
-### Repository ADR Index:
+### Repository ADR Index
+
 * [ADR-001: Project-Specific Unix Agent Skills Over Monolithic Generic Frameworks](adr/ADR-001-project-specific-unix-skills.md)
 
 ### The Canonical ADR Template (`docs/adr/ADR-001-template.md`)
@@ -94,7 +96,8 @@ How will we ensure this decision is never violated in code?
 
 Spec-Driven Development (SDD) treats specifications as the **single source of truth** driving AI agent generation. Instead of writing prompts that drift over time, you write structured specifications.
 
-### The 4-Phase SDD Lifecycle:
+### The 4-Phase SDD Lifecycle
+
 1. **Specify (`/speckit-specify`)**: Define requirements, business value, user personas, and strict non-goals.
 2. **Plan (`/speckit-plan`)**: Design domain models, port interfaces, data schemas, and link to existing ADRs.
 3. **Tasks (`/speckit-tasks`)**: Slice the plan into atomic, testable work items.
@@ -197,10 +200,11 @@ Feature: Payment Webhook Processing
 ---
 
 ## 6. Verification Command
+
 The agent must verify this spec using this exact quiet command:
+
 ```bash
 ./gradlew :packages:billing-core:test --tests "*PaymentWebhookTest" --quiet
-```
 ```
 
 ---
@@ -209,13 +213,14 @@ The agent must verify this spec using this exact quiet command:
 
 When an AI agent executes tasks, feed it both the ADR and the Spec:
 
-```
+```text
 [Developer Prompt]
 "Implement task 1 of SPEC-042 (docs/specs/SPEC-042-payment-webhook.md).
 Adhere strictly to architectural constraints in docs/adr/ADR-003.md and AGENTS.md rules."
 ```
 
-### The Agent's Execution Path:
+### The Agent Execution Path
+
 1. **Reads ADR-003**: Learns that all webhook signatures must use constant-time comparisons (`MessageDigest.isEqual`) and no foreign ORM dependencies are allowed in domain logic.
 2. **Reads SPEC-042**: Learns the exact invariants (`INV-PAY-01`, `INV-PAY-02`) and Gherkin scenarios.
 3. **Calls `graph_fy get_agent_context`**: Retrieves the `BillingEngine` subsystem AST skeleton and callers.

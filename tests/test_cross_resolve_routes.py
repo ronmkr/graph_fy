@@ -261,3 +261,166 @@ def test_openapi_contract_integration_implements_and_routes_to():
     # 3. Direct fetch routes to backend handler and OpenAPI operation
     assert ("frontend_direct_fetch", "backend_list_users", "routes_to") in route_edges
     assert ("frontend_direct_fetch", "openapi_get_users_op", "routes_to") in route_edges
+
+
+def test_env_variable_base_url_resolution(tmp_path: Path):
+    """Verify that baseURL with import.meta.env.VITE_API_URL resolves via .env file."""
+    # Write .env file
+    env_content = """\
+# Environment settings
+VITE_API_URL=http://localhost:5173/api/v2
+PORT=3000
+"""
+    _write(tmp_path, ".env", env_content)
+
+    # Write frontend client with dynamic baseURL
+    fe_code = """\
+import axios from 'axios';
+
+export const apiClient = axios.create({
+  baseURL: import.meta.env.VITE_API_URL,
+});
+
+export function listItems() {
+  return apiClient.get('/items');
+}
+"""
+    fe_file = _write(tmp_path, "src/api/items.ts", fe_code)
+
+    # Write backend FastAPI router
+    be_code = """\
+from fastapi import APIRouter
+
+router = APIRouter(prefix="/api/v2")
+
+@router.get("/items")
+def get_items():
+    return []
+"""
+    be_file = _write(tmp_path, "backend/routes/items.py", be_code)
+
+    nodes = [
+        {
+            "id": "backend_get_items",
+            "label": "get_items()",
+            "_callable": True,
+            "source_file": str(be_file),
+            "source_location": "L6",
+        },
+        {
+            "id": "frontend_list_items",
+            "label": "listItems()",
+            "_callable": True,
+            "source_file": str(fe_file),
+            "source_location": "L8",
+        },
+    ]
+    edges: list[dict[str, Any]] = []
+
+    resolve_cross_boundary_api_routes(nodes, edges)
+    route_edges = [(e["source"], e["target"], e["relation"]) for e in edges if e.get("relation") == "routes_to"]
+
+    assert ("frontend_list_items", "backend_get_items", "routes_to") in route_edges
+
+
+def test_docker_compose_and_fallback_base_url_resolution(tmp_path: Path):
+    """Verify that baseURL with fallback or docker-compose environment resolves correctly."""
+    # Write docker-compose.yml
+    compose_content = """\
+version: '3.8'
+services:
+  web:
+    image: node:20
+    environment:
+      - BACKEND_API_URL=http://api-service:8080/api/v3
+"""
+    _write(tmp_path, "docker-compose.yml", compose_content)
+
+    # Write frontend client with process.env and fallback
+    fe_code = """\
+import axios from 'axios';
+
+const client = axios.create({
+  baseURL: process.env.BACKEND_API_URL || '/api/fallback',
+});
+
+export function getOrders() {
+  return client.get('/orders');
+}
+"""
+    fe_file = _write(tmp_path, "frontend/client.js", fe_code)
+
+    # Write backend router
+    be_code = """\
+from fastapi import APIRouter
+
+router = APIRouter(prefix="/api/v3")
+
+@router.get("/orders")
+def fetch_orders():
+    return []
+"""
+    be_file = _write(tmp_path, "server/orders.py", be_code)
+
+    nodes = [
+        {
+            "id": "backend_fetch_orders",
+            "label": "fetch_orders()",
+            "_callable": True,
+            "source_file": str(be_file),
+            "source_location": "L6",
+        },
+        {
+            "id": "frontend_get_orders",
+            "label": "getOrders()",
+            "_callable": True,
+            "source_file": str(fe_file),
+            "source_location": "L8",
+        },
+    ]
+    edges: list[dict[str, Any]] = []
+
+    resolve_cross_boundary_api_routes(nodes, edges)
+    route_edges = [(e["source"], e["target"], e["relation"]) for e in edges if e.get("relation") == "routes_to"]
+
+    assert ("frontend_get_orders", "backend_fetch_orders", "routes_to") in route_edges
+
+
+def test_client_path_leading_env_variable(tmp_path: Path):
+    """Verify that direct fetch calls with leading env variable resolve against backend."""
+    _write(tmp_path, ".env", "REACT_APP_API_BASE=/api/v1\n")
+
+    be_code = """\
+from fastapi import APIRouter
+
+router = APIRouter(prefix="/api/v1")
+
+@router.post("/checkout")
+def process_checkout():
+    return {"status": "ok"}
+"""
+    be_file = _write(tmp_path, "backend/checkout.py", be_code)
+
+    nodes = [
+        {
+            "id": "backend_process_checkout",
+            "label": "process_checkout()",
+            "_callable": True,
+            "source_file": str(be_file),
+            "source_location": "L6",
+        },
+        {
+            "id": "frontend_submit_checkout",
+            "label": "submitCheckout()",
+            "type": "function",
+            "text": "fetch(`${process.env.REACT_APP_API_BASE}/checkout`, { method: 'POST' });",
+            "source_file": str(tmp_path / "frontend/Checkout.tsx"),
+        },
+    ]
+    edges: list[dict[str, Any]] = []
+
+    resolve_cross_boundary_api_routes(nodes, edges)
+    route_edges = [(e["source"], e["target"], e["relation"]) for e in edges if e.get("relation") == "routes_to"]
+
+    assert ("frontend_submit_checkout", "backend_process_checkout", "routes_to") in route_edges
+

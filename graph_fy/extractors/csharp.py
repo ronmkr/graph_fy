@@ -10,10 +10,421 @@ the core migration happens.
 """
 from __future__ import annotations
 
+import hashlib
 import html
 from pathlib import Path
 
-from graph_fy.extractors.base import _make_id
+from graph_fy.extractors.base import (
+    _LANGUAGE_BUILTIN_GLOBALS,
+    _file_stem,
+    _make_id,
+    _read_text,
+    _semantic_reference_edge,
+    _source_location,
+    REFERENCE_CONTEXTS,
+)
+from graph_fy.extractors.models import LanguageConfig
+from graph_fy.security import sanitize_metadata
+
+
+def _csharp_namespace_id(dotted_name: str) -> str:
+    digest = hashlib.sha1(dotted_name.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
+    return f"csharp_namespace:{digest}"
+
+
+def _csharp_pre_scan_interfaces(root_node, source: bytes) -> set[str]:
+    """Return names declared as `interface` in this C# compilation unit."""
+    out: set[str] = set()
+    stack = [root_node]
+    while stack:
+        n = stack.pop()
+        if n.type == "interface_declaration":
+            name_node = n.child_by_field_name("name")
+            if name_node is not None:
+                text = _read_text(name_node, source)
+                if text:
+                    out.add(text)
+        stack.extend(n.children)
+    return out
+
+
+def _csharp_classify_base(name: str, interface_names: set[str]) -> str:
+    """`implements` if the base name is an interface (declared or by I-prefix convention), else `inherits`."""
+    if name in interface_names:
+        return "implements"
+    if len(name) >= 2 and name[0] == "I" and name[1].isupper():
+        return "implements"
+    return "inherits"
+
+
+_CSHARP_TYPE_PARAMETER_SCOPE_DECLARATIONS = frozenset({
+    "class_declaration",
+    "interface_declaration",
+    "record_declaration",
+    "struct_declaration",
+    "method_declaration",
+})
+
+
+def _csharp_type_parameters_in_scope(node, source: bytes) -> frozenset[str]:
+    """Return C# type-parameter names visible from ``node``."""
+    names: set[str] = set()
+    scope = node
+    while scope is not None:
+        if scope.type in _CSHARP_TYPE_PARAMETER_SCOPE_DECLARATIONS:
+            for child in scope.children:
+                if child.type != "type_parameter_list":
+                    continue
+                for param in child.children:
+                    if param.type == "type_parameter":
+                        name_node = next(
+                            (sub for sub in param.children if sub.type == "identifier"),
+                            None,
+                        )
+                        if name_node is not None:
+                            name = _read_text(name_node, source)
+                            if name:
+                                names.add(name)
+                    elif param.type == "identifier":
+                        name = _read_text(param, source)
+                        if name:
+                            names.add(name)
+        scope = scope.parent
+    return frozenset(names)
+
+
+def _csharp_collect_type_refs(
+    node,
+    source: bytes,
+    generic: bool,
+    out: list[tuple[str, str, bool, str]],
+    skip: frozenset[str] | None = None,
+) -> None:
+    """Walk a C# type expression; append (name, role, qualified, qualifier) tuples."""
+    if node is None:
+        return
+    if skip is None:
+        skip = _csharp_type_parameters_in_scope(node, source)
+    t = node.type
+    if t == "predefined_type":
+        return
+    if t == "identifier":
+        name = _read_text(node, source)
+        if name and name not in skip:
+            out.append((name, "generic_arg" if generic else "type", False, ""))
+        return
+    if t == "qualified_name":
+        prefix, _, text = _read_text(node, source).rpartition(".")
+        text = text.split("<", 1)[0]
+        if text and text not in skip:
+            out.append((text, "generic_arg" if generic else "type", True, prefix))
+        return
+    if t == "generic_name":
+        name_child = node.child_by_field_name("name")
+        if name_child is None:
+            for sub in node.children:
+                if sub.type == "identifier":
+                    name_child = sub
+                    break
+        if name_child is not None:
+            qualified = name_child.type == "qualified_name"
+            prefix, _, name = _read_text(name_child, source).rpartition(".")
+            if name and name not in skip:
+                out.append((name, "generic_arg" if generic else "type", qualified, prefix if qualified else ""))
+        for sub in node.children:
+            if sub.type == "type_argument_list":
+                for arg in sub.children:
+                    if arg.is_named:
+                        _csharp_collect_type_refs(arg, source, True, out, skip)
+        return
+    if t in ("nullable_type", "array_type", "pointer_type", "ref_type"):
+        for c in node.children:
+            if c.is_named:
+                _csharp_collect_type_refs(c, source, generic, out, skip)
+        return
+    if node.is_named:
+        for c in node.children:
+            if c.is_named:
+                _csharp_collect_type_refs(c, source, generic, out, skip)
+
+
+def _csharp_attribute_names(method_node, source: bytes) -> list[tuple[str, bool, str]]:
+    """Collect attribute names from a C# method/declaration's attribute_list children."""
+    names: list[tuple[str, bool, str]] = []
+    skip = _csharp_type_parameters_in_scope(method_node, source)
+    for child in method_node.children:
+        if child.type != "attribute_list":
+            continue
+        for attr in child.children:
+            if attr.type != "attribute":
+                continue
+            name_node = attr.child_by_field_name("name")
+            if name_node is None:
+                for sub in attr.children:
+                    if sub.type in ("identifier", "qualified_name"):
+                        name_node = sub
+                        break
+            if name_node is not None:
+                qualified = name_node.type == "qualified_name"
+                prefix, _, text = _read_text(name_node, source).rpartition(".")
+                if text and text not in skip:
+                    names.append((text, qualified, prefix if qualified else ""))
+    return names
+
+
+def _read_csharp_type_name(node, source: bytes) -> tuple[str, bool, str] | None:
+    """Resolve a C# type name, whether it was qualified, and its qualifier prefix."""
+    if node is None:
+        return None
+    if node.type in ("identifier", "predefined_type"):
+        return (_read_text(node, source), False, "")
+    if node.type == "qualified_name":
+        prefix, _, tail = _read_text(node, source).rpartition(".")
+        tail = tail.split("<", 1)[0]
+        return (tail, True, prefix)
+    if node.type == "generic_name":
+        name_node = node.child_by_field_name("name")
+        if name_node is not None:
+            qualified = name_node.type == "qualified_name"
+            prefix, _, tail = _read_text(name_node, source).rpartition(".")
+            return (tail, qualified, prefix if qualified else "")
+    for child in node.children:
+        if not child.is_named:
+            continue
+        result = _read_csharp_type_name(child, source)
+        if result:
+            return result
+    return None
+
+
+def _csharp_bare_call_name(name_node, source: bytes) -> str:
+    """The callee identifier of a C# call-site name node."""
+    if name_node.type == "generic_name":
+        for child in name_node.children:
+            if child.type == "identifier":
+                return _read_text(child, source)
+    return _read_text(name_node, source)
+
+
+def _csharp_receiver_type_name(type_node, source: bytes) -> str | None:
+    info = _read_csharp_type_name(type_node, source)
+    if not info:
+        return None
+    name = info[0]
+    return name if name and name[:1].isupper() else None
+
+
+def _csharp_method_receiver_types(
+    method_node,
+    source: bytes,
+    field_types: dict[str, str],
+) -> tuple[dict[str, list[tuple[int, int, str | None]]], dict[str, str]]:
+    bindings: dict[str, list[tuple[int, int, str | None]]] = {}
+    field_poisoned: set[str] = set()
+
+    def bind(name: str | None, type_name: str | None, scope_node) -> None:
+        if not name or scope_node is None:
+            return
+        if field_types.get(name) not in (None, type_name):
+            field_poisoned.add(name)
+        bindings.setdefault(name, []).append(
+            (scope_node.start_byte, scope_node.end_byte, type_name)
+        )
+
+    def bind_parameter(param, scope_node) -> None:
+        name_node = param.child_by_field_name("name")
+        if name_node is not None:
+            bind(
+                _read_text(name_node, source),
+                _csharp_receiver_type_name(param.child_by_field_name("type"), source),
+                scope_node,
+            )
+
+    body = method_node.child_by_field_name("body")
+    param_scope = body if body is not None else method_node
+    params = method_node.child_by_field_name("parameters")
+    if params is not None:
+        for param in params.children:
+            if param.type == "parameter":
+                bind_parameter(param, param_scope)
+
+    stack = (
+        [(child, param_scope) for child in body.children]
+        if body is not None
+        else []
+    )
+    while stack:
+        node, scope = stack.pop()
+        if node.type in (
+            "class_declaration",
+            "struct_declaration",
+            "interface_declaration",
+            "record_declaration",
+            "enum_declaration",
+        ):
+            continue
+        if node.type == "lambda_expression":
+            lam_params = node.child_by_field_name("parameters")
+            if lam_params is not None:
+                if lam_params.type == "implicit_parameter":
+                    bind(_read_text(lam_params, source), None, node)
+                else:
+                    for param in lam_params.children:
+                        if param.type == "parameter":
+                            bind_parameter(param, node)
+                        elif param.type == "implicit_parameter":
+                            bind(_read_text(param, source), None, node)
+        elif node.type == "local_function_statement":
+            lf_params = node.child_by_field_name("parameters")
+            if lf_params is not None:
+                for param in lf_params.children:
+                    if param.type == "parameter":
+                        bind_parameter(param, node)
+        elif node.type == "local_declaration_statement":
+            vd = next(
+                (c for c in node.children if c.type == "variable_declaration"), None
+            )
+            if vd is not None:
+                declared = _csharp_receiver_type_name(
+                    vd.child_by_field_name("type"), source
+                )
+                for declarator in vd.children:
+                    if declarator.type != "variable_declarator":
+                        continue
+                    name_node = declarator.child_by_field_name("name") or next(
+                        (g for g in declarator.children if g.type == "identifier"),
+                        None,
+                    )
+                    if name_node is None:
+                        continue
+                    type_name = declared
+                    if type_name is None:
+                        for g in declarator.children:
+                            if g.type == "object_creation_expression":
+                                type_name = _csharp_receiver_type_name(
+                                    g.child_by_field_name("type"), source
+                                )
+                                break
+                    bind(_read_text(name_node, source), type_name, scope)
+        elif node.type in ("declaration_expression", "declaration_pattern"):
+            name_node = node.child_by_field_name("name")
+            if name_node is not None and name_node.type == "identifier":
+                bind(
+                    _read_text(name_node, source),
+                    _csharp_receiver_type_name(
+                        node.child_by_field_name("type"), source
+                    ),
+                    scope,
+                )
+        child_scope = (
+            node
+            if node.type in (
+                "block", "lambda_expression", "local_function_statement"
+            )
+            else scope
+        )
+        stack.extend((child, child_scope) for child in node.children)
+
+    base = {
+        name: type_name
+        for name, type_name in field_types.items()
+        if name not in field_poisoned
+    }
+    for name in field_poisoned:
+        bindings.pop(name, None)
+    return bindings, base
+
+
+def _csharp_scoped_receiver_type(
+    table: tuple[dict[str, list[tuple[int, int, str | None]]], dict[str, str]] | None,
+    name: str | None,
+    call_byte: int,
+) -> str | None:
+    if not table or not name:
+        return None
+    bindings, base = table
+    candidates = [
+        b for b in bindings.get(name, ())
+        if b[0] <= call_byte < b[1]
+    ]
+    if not candidates:
+        return base.get(name)
+    innermost = min(end - start for start, end, _ in candidates)
+    inner = [b for b in candidates if b[1] - b[0] == innermost]
+    if len(inner) == 1:
+        return inner[0][2]
+    return None
+
+
+def _csharp_namespace_name(node, source: bytes) -> str:
+    name_node = node.child_by_field_name("name")
+    if name_node is not None:
+        return _read_text(name_node, source).strip()
+    for child in node.children:
+        if child.type in ("identifier", "qualified_name"):
+            return _read_text(child, source).strip()
+    return ""
+
+
+def _csharp_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
+                       nodes: list, edges: list, seen_ids: set, function_bodies: list,
+                       parent_class_nid: str | None, add_node_fn, add_edge_fn,
+                       walk_fn, namespace_stack: list[str], scope_stack: list[str]) -> bool:
+    if node.type == "enum_member_declaration" and parent_class_nid:
+        name_node = node.child_by_field_name("name")
+        if name_node is None:
+            return True
+        member_name = _read_text(name_node, source)
+        if not member_name:
+            return True
+        line = node.start_point[0] + 1
+        member_nid = _make_id(parent_class_nid, member_name)
+        if member_nid not in seen_ids:
+            add_node_fn(member_nid, member_name, line)
+            add_edge_fn(parent_class_nid, member_nid, "case_of", line)
+        return True
+    if node.type == "namespace_declaration":
+        ns_name = _csharp_namespace_name(node, source)
+        pushed = False
+        if ns_name:
+            namespace_stack.append(ns_name)
+            scope_stack.append(f"s{node.start_byte}")
+            pushed = True
+            ns_label = ".".join(namespace_stack)
+            ns_nid = _csharp_namespace_id(ns_label)
+            line = node.start_point[0] + 1
+            add_node_fn(ns_nid, ns_label, line, node_type="namespace", metadata={"kind": "csharp_namespace"})
+            add_edge_fn(file_nid, ns_nid, "contains", line)
+        body = node.child_by_field_name("body")
+        if body:
+            try:
+                for child in body.children:
+                    walk_fn(child, parent_class_nid)
+            finally:
+                if pushed:
+                    namespace_stack.pop()
+                    scope_stack.pop()
+        elif pushed:
+            namespace_stack.pop()
+            scope_stack.pop()
+        return True
+    if node.type == "file_scoped_namespace_declaration":
+        ns_name = _csharp_namespace_name(node, source)
+        if ns_name:
+            namespace_stack.append(ns_name)
+            scope_stack.append(f"s{node.start_byte}")
+            ns_label = ".".join(namespace_stack)
+            ns_nid = _csharp_namespace_id(ns_label)
+            line = node.start_point[0] + 1
+            add_node_fn(ns_nid, ns_label, line, node_type="namespace", metadata={"kind": "csharp_namespace"})
+            add_edge_fn(file_nid, ns_nid, "contains", line)
+        return True
+    if parent_class_nid and node.type.startswith("preproc_"):
+        for child in node.children:
+            walk_fn(child, parent_class_nid)
+        return True
+    return False
+
 
 
 def _build_csharp_type_def_index(all_nodes: list[dict]) -> dict[tuple[str, str], str]:
@@ -446,3 +857,63 @@ def _resolve_csharp_type_references(
         node for node in all_nodes
         if node.get("id") not in repointed_from or node.get("id") in still_referenced
     ]
+
+
+def _import_csharp(node, source: bytes, file_nid: str, stem: str, edges: list, str_path: str, scope_stack: list[str] | None = None) -> None:
+    text = _read_text(node, source).strip().rstrip(";")
+    if text.startswith("global "):
+        text = text[len("global "):].strip()
+    if not text.startswith("using"):
+        return
+    body = text[len("using"):].strip()
+    using_kind, alias, target_fqn = "namespace", None, body
+    if body.startswith("static "):
+        using_kind, target_fqn = "static", body[len("static "):].strip()
+    elif "=" in body:
+        lhs, rhs = body.split("=", 1)
+        using_kind, alias, target_fqn = "alias", lhs.strip(), rhs.strip()
+    if not target_fqn:
+        return
+    edges.append({
+        "source": file_nid,
+        "target": _make_id(target_fqn),
+        "relation": "imports",
+        "context": "import",
+        "confidence": "EXTRACTED",
+        "source_file": str_path,
+        "source_location": f"L{node.start_point[0] + 1}",
+        "weight": 1.0,
+        "metadata": sanitize_metadata({k: v for k, v in
+            {"using_kind": using_kind, "alias": alias, "target_fqn": target_fqn,
+             "scope_kind": "namespace" if scope_stack else "file",
+             "scope_id": scope_stack[-1] if scope_stack else None}.items() if v is not None}),
+    })
+
+
+_CSHARP_CONFIG = LanguageConfig(
+    ts_module="tree_sitter_c_sharp",
+    class_types=frozenset({
+        "class_declaration",
+        "interface_declaration",
+        "enum_declaration",
+        "struct_declaration",
+        "record_declaration",
+    }),
+    function_types=frozenset({"method_declaration"}),
+    import_types=frozenset({"using_directive"}),
+    call_types=frozenset({"invocation_expression", "object_creation_expression"}),
+    call_function_field="function",
+    call_accessor_node_types=frozenset({"member_access_expression"}),
+    call_accessor_field="name",
+    body_fallback_child_types=("declaration_list",),
+    function_boundary_types=frozenset({"method_declaration"}),
+    import_handler=_import_csharp,
+)
+
+
+def extract_csharp(path: Path) -> dict:
+    """Extract C# type declarations, methods, namespaces, and usings from a .cs file."""
+    from graph_fy.extractors.engine import _extract_generic
+    return _extract_generic(path, _CSHARP_CONFIG)
+
+

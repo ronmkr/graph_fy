@@ -4,7 +4,7 @@ graph_fy is a fully local knowledge graph builder and statistical retrieval engi
 
 ## Pipeline
 
-```
+```text
 detect()  →  extract()  →  cross_resolve()  →  build()  →  labeling()  →  cluster()  →  analyze helpers  →  report.generate()  →  retrieval.build_index()
 ```
 
@@ -14,7 +14,7 @@ Each stage lives in its own module and they communicate through plain Python dic
 
 Frontier models (Claude 3.7 Sonnet, Gemini 2.0 Pro/Flash, GPT-4o) suffer from context bloat, expensive token consumption, and exploratory hallucinations when reading raw repository files blind. `graph_fy` solves this by executing 100% deterministic local graph analysis **before** querying any frontier model:
 
-```
+```text
 Developer Task
       │
       ▼
@@ -52,7 +52,7 @@ To prevent blowing up the LLM agent's context window and driving up token costs,
 Signatures below are the real ones - `tests/test_architecture_doc.py` imports every symbol named here, so this table cannot drift from the code.
 
 | Module | Entry point(s) | Input → Output |
-|--------|----------------|----------------|
+| -------- | ---------------- | ---------------- |
 | `detect.py` | `detect(root)` | directory → scan summary dict: `files` grouped by category, plus `total_files`, `total_words`, `warning`, `scan_root`, … |
 | `extract.py` | `extract(paths, *, root=None, ...)`, `collect_files(target)` | **list** of file paths → `{nodes, edges}` dict. `collect_files` expands a directory into that list, and lives here, not in `detect.py` |
 | `cross_resolve.py` | `resolve_cross_format_dependencies(nodes, edges)` | nodes + edges → cross-format linked dependency chains (Terraform, Helm, K8s, Docker, CloudFormation, Argo CD) |
@@ -113,7 +113,7 @@ Every extractor returns:
 ## Confidence labels
 
 | Label | Meaning |
-|-------|---------|
+| ------- | --------- |
 | `EXTRACTED` | Relationship is explicitly stated in the source (e.g., an import statement, a direct call) |
 | `INFERRED` | Relationship is a reasonable deduction (e.g., call-graph second pass, co-occurrence in context) |
 | `AMBIGUOUS` | Relationship is uncertain; flagged for human review in GRAPH_REPORT.md |
@@ -152,4 +152,3 @@ All tests are pure unit tests - no network calls, no file system side effects ou
 ## Lineage & Credits
 
 `graph_fy` is an independent, offline-first knowledge-graph engine derived from the architectural lineage of the original [Graphify](https://github.com/safishamsi/graphify) project authored by **Safi Shamsi** and its community contributors. We credit and acknowledge their pioneering multi-language AST extraction and graph foundation.
-

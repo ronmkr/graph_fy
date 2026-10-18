@@ -8,7 +8,7 @@
 
 In standard single-repository projects, an agent can often recover from blind searches. In a massive monorepo, unoptimized agents fail immediately:
 
-```
+```text
 ❌ Monorepo Anti-Patterns:
 • Running `grep -r` or `find .`            ➔ Dumps 50,000 lines of filepaths (Context blowup)
 • Running root test (`bazel test //...`)     ➔ 45-minute execution + 30,000 tokens of noisy logs
@@ -16,8 +16,9 @@ In standard single-repository projects, an agent can often recover from blind se
 • Incomplete mental model                     ➔ Agent breaks 4 downstream consumer packages unknowingly
 ```
 
-### The $0.15 Monorepo Formula:
-```
+### The $0.15 Monorepo Formula
+
+```text
 1 Subsystem Briefing (graph_fy)    ➔ 1,500 tokens ($0.015)
 1 Isolated Package TDD Turn (Serena) ➔   800 tokens ($0.008)
 1 Surgical Implementation Diff     ➔   400 tokens ($0.006)
@@ -44,13 +45,16 @@ flowchart TD
 ## 3. Step-by-Step Monorepo Execution
 
 ### Step 1: Subsystem Pinpoint & Boundary Pruning (`graph_fy`)
+
 Before letting Claude touch code, isolate the specific Leiden community in the monorepo:
 
 ```bash
 # Pinpoints the exact subsystem, God nodes, and existing contracts in 1 second
 graph_fy context "add Stripe refund webhook listener"
 ```
+
 Or via Claude's MCP:
+
 ```json
 get_agent_context(task="add Stripe refund webhook listener")
 ```
@@ -61,12 +65,14 @@ get_agent_context(task="add Stripe refund webhook listener")
 ---
 
 ### Step 2: Anchor Claude to the Sub-Package
+
 In massive monorepos, running commands from the root directory kills performance and floods context.
 
 **Force Claude to anchor to the sub-package in your prompt**:
 > *"Work strictly within `packages/billing-core`. Implement `docs/specs/refund-webhook.md`. Do not execute root-level builds."*
 
 Configure package-scoped commands:
+
 * **Gradle Monorepo**: `./gradlew :packages:billing-core:test --quiet`
 * **Turborepo / pnpm**: `pnpm --filter billing-core test`
 * **Bazel**: `bazel test //packages/billing-core:...`
@@ -75,37 +81,45 @@ Configure package-scoped commands:
 ---
 
 ### Step 3: Interface-First Expansion (Native CCR)
+
 If Claude needs to inspect an existing interface in another monorepo package (e.g. `packages/common-events`), **never let it read the full file**:
 
 Use the on-demand handle embedded by `graph_fy`:
+
 ```json
 get_symbol_implementation(node_id_or_symbol="common_events_PaymentEvent")
 ```
+
 * **Result**: Claude retrieves only the 10-line interface signature. The 500 lines of implementation logic in `common-events` remain unread.
 
 ---
 
 ### Step 4: Atomic Refactoring via Serena (LSP)
+
 When adding code that touches existing monorepo symbols, use Serena's LSP engine rather than full file rewrites:
 
 ```json
 serena.find_referencing_symbols(name_path_pattern="PaymentProcessor/processRefund")
 ```
+
 * Uses compiler-level Language Server Protocol (JDTLS, Pyright, rust-analyzer, tsserver) to identify exact references across the monorepo.
 * Executes surgical replacement via `serena.replace_symbol_body`.
 
 ---
 
 ### Step 5: Downstream Blast Radius Check (The Regression Shield)
+
 This is where 90% of monorepo breakages happen: an engineer changes a method in `packages/billing-core` and accidentally breaks `apps/mobile-api` or `services/subscription-worker`.
 
 Before opening a PR, Claude runs:
+
 ```json
 get_impact_analysis(target_symbol="RefundService_execute")
 ```
 
 `graph_fy` calculates the BFS downstream dependency graph across the entire monorepo:
-```
+
+```text
 Blast Radius Risk: MEDIUM (Downstream Dependents: 3)
 Affected Consumer Packages:
   - apps/mobile-api
@@ -116,10 +130,12 @@ Affected Verification Targets (Tests):
 ```
 
 **Claude runs ONLY those 2 affected downstream tests**:
+
 ```bash
 ./gradlew :apps:mobile-api:test --tests "RefundControllerTest" --quiet
 ./gradlew :services:subscription-worker:test --tests "RefundWorkerTest" --quiet
 ```
+
 * **Time taken**: 15 seconds.
 * **Tokens spent**: 400 tokens.
 * **Guarantee**: Full monorepo compatibility verified without running a 45-minute full build!
@@ -127,10 +143,13 @@ Affected Verification Targets (Tests):
 ---
 
 ### Step 6: Fast Local Knowledge Graph Sync
+
 After changes are verified:
+
 ```bash
 graph_fy update packages/billing-core
 ```
+
 Updates the monorepo AST graph locally in ~1.5 seconds with zero external calls and zero API cost.
 
 ---

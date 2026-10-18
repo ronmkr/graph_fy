@@ -8,7 +8,7 @@ This document outlines the hexagonal boundary architecture, automated drift trac
 
 To minimize merge conflicts and prevent fork rot as upstream evolves Tree-sitter parsers and AST extractors, `graph_fy` enforces strict hexagonal architectural boundaries:
 
-```
+```text
 +--------------------------------------------------------------------------+
 | Outer Agent & Tooling Layer (Fork-Specific, Zero Upstream Conflict)      |
 |                                                                          |
@@ -32,6 +32,7 @@ To minimize merge conflicts and prevent fork rot as upstream evolves Tree-sitter
 ```
 
 ### Invariant Rules
+
 1. **Zero Core Pollution**: Outer agent tools (`graph_fy/commands/`, `graph_fy/context/`, `graph_fy/templates/`) MUST NEVER modify internal AST parser hooks or inject agent-specific schemas into core extractor outputs.
 2. **Schema Invariant**: Edge confidence levels emitted in core extraction MUST strictly adhere to standard schemas: `EXTRACTED`, `INFERRED`, or `AMBIGUOUS`.
 
@@ -40,11 +41,13 @@ To minimize merge conflicts and prevent fork rot as upstream evolves Tree-sitter
 ## 2. Automated Upstream Drift Tracking
 
 An automated GitHub Action runs daily at `02:00 UTC` (`.github/workflows/upstream_sync.yml`):
+
 - Fetches `upstream/main` (`https://github.com/safouanechergui/graphify.git`).
 - Calculates commit distance between `HEAD` and `upstream/main`.
 - If new upstream commits or releases are detected, it compiles a diff summary and opens/updates an automated tracking issue with tag `upstream-sync`.
 
 ### Manual Sync Command
+
 ```bash
 # Add upstream remote if not already present
 git remote add upstream https://github.com/safouanechergui/graphify.git

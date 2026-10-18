@@ -22,7 +22,8 @@ flowchart TD
 
 Before writing a single Jira ticket or prompt, define the domain mechanics.
 
-### Core DDD Building Blocks:
+### Core DDD Building Blocks
+
 1. **Ubiquitous Language**: A single, unambiguous glossary shared by business stakeholders and code (e.g. `Order`, `Fulfill`, `Cancel`, `LineItem` — never interchangeably call it `Purchase` or `Transaction`).
 2. **Bounded Contexts**: Clear boundaries isolating domains (e.g. `BillingContext` vs. `InventoryContext` vs. `FulfillmentContext`). In `graph_fy`, each bounded context maps directly to a **Leiden community**.
 3. **Aggregates & Aggregate Roots**: Clusters of domain objects treated as a single unit for data changes (e.g. `Order` is the root; `OrderItem` cannot exist or be modified outside `Order`).
@@ -37,11 +38,13 @@ Before writing a single Jira ticket or prompt, define the domain mechanics.
 
 Never let an AI agent jump straight from a vague prompt into code. Use the **Matt Pocock `/grill-me`** skill pattern to challenge requirements.
 
-### How to Grill the Plan:
+### How to Grill the Plan
+
 Before writing the spec, prompt Claude or your agent:
 > *"Grill me on this domain plan. Ask me 4 tough questions about edge cases, race conditions, invariant violations, and failure modes. Do not write code."*
 
-### Key Areas to Interrogate:
+### Key Areas to Interrogate
+
 * **State Transitions**: What happens if a duplicate payment webhook arrives after an order is fulfilled?
 * **Invariant Boundaries**: Where is the validation enforced? (Inside the Aggregate, never scattered in controllers).
 * **Failure Semantics**: If the downstream inventory reservation fails, does the order roll back or transition to `PAYMENT_PENDING_INVENTORY_FAILED`?
@@ -52,7 +55,8 @@ Before writing the spec, prompt Claude or your agent:
 
 Convert the grilled domain model into an unambiguous, formal specification (`docs/specs/<feature>.md`).
 
-### Enterprise Spec Template:
+### Enterprise Spec Template
+
 ```markdown
 # Spec: Order Fulfillment Lifecycle
 **Bounded Context**: Fulfillment
@@ -97,7 +101,7 @@ Scenario: Attempting to Fulfill Unpaid Order
 
 Break the spec into vertical, atomic tickets. **Rule**: A single ticket must touch at most **one layer or aggregate** and fit in **one agent turn (under 1,000 tokens)**.
 
-```
+```text
 Epic: Order Fulfillment
 ├── TICKET-1: Domain Model & Invariants (Order.java, OrderStatus.java, Money.java)
 ├── TICKET-2: Domain Ports (OrderRepository.java, InventoryPort.java)
@@ -105,7 +109,8 @@ Epic: Order Fulfillment
 └── TICKET-4: Infrastructure Adapters (JpaOrderRepositoryAdapter.java)
 ```
 
-### Jira Ticket Format:
+### Jira Ticket Format
+
 * **Title**: `[Fulfillment] Implement FulfillOrderUseCase with TDD`
 * **Context**: Link to `docs/specs/order-fulfillment.md`
 * **Acceptance Criteria**: Copy the exact Gherkin scenario.
@@ -121,7 +126,8 @@ Claude executes the ticket using our **3-tool optimization stack**:
 headroom wrap claude
 ```
 
-### The 5-Step Agent Loop:
+### The 5-Step Agent Loop
+
 1. **Pre-Agent Context (`graph_fy`)**:
    Agent calls `graph_fy get_agent_context(task="FulfillOrderUseCase")`.
    * Gets existing port interfaces and AST skeletons.
@@ -140,6 +146,7 @@ headroom wrap claude
 ## 7. Phase 6: Dual-Axis Review & Blast Radius
 
 Before submitting a Pull Request:
+
 1. **Spec Alignment**: Did the implementation satisfy all domain invariants (`INV-01`, `INV-02`) and Gherkin scenarios?
 2. **Blast Radius Analysis**:
    Run `graph_fy get_diff_context` (or `graph_fy diff HEAD~1`).
