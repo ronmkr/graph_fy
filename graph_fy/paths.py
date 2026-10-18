@@ -32,6 +32,26 @@ COMMUNITY_COLORS = [
 ]
 
 
+def os_path(path: "str | Path") -> str:
+    r"""Return an OS path string safe for open()/stat() on Windows long paths."""
+    import sys
+    if sys.platform != "win32":
+        return str(path)
+    s = str(path)
+    if s.startswith("\\\\?\\"):
+        return s
+    try:
+        s = os.path.abspath(s)
+    except Exception:
+        return str(path)
+    if s.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + s[2:]
+    return "\\\\?\\" + s
+
+
+_os_path = os_path
+
+
 def os_replace_with_fallback(src: "str | Path", dst: "str | Path") -> None:
     """``os.replace(src, dst)``, falling back to a copy for a known set of
     Windows quirks (#3508) that raise even when ``src``/``dst`` are the same

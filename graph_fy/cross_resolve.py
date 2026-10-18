@@ -368,13 +368,31 @@ def resolve_cross_format_dependencies(
     return nodes, edges
 
 
-def _normalize_route_path(path: str) -> str:
-    """Normalize route path: strip protocol, host, query params, trailing slash, and unify :id / {id} param syntax."""
+_HTTP_METHODS: frozenset[str] = frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"})
+
+
+def _split_method_and_path(raw: str) -> tuple[str | None, str]:
+    """Extract leading HTTP method (if present) and clean path."""
     import re
+    cleaned = raw.strip().strip("'\"`")
+    m = re.match(r"^(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\s+(.*)$", cleaned, re.IGNORECASE)
+    if m:
+        return m.group(1).upper(), m.group(2).strip()
+    return None, cleaned
+
+
+def _normalize_route_path(path: str) -> str:
+    """Normalize route path: strip method, protocol, host, query params, trailing slash, and unify :id / {id} / ${id} param syntax."""
+    import re
+    if not path:
+        return ""
+    _, path = _split_method_and_path(path)
     p = path.strip().strip("'\"`")
     p = p.split("?")[0]
     if "://" in p:
-        p = "/" + p.split("://", 1)[1].split("/", 1)[-1] if "/" in p.split("://", 1)[1] else "/"
+        after_scheme = p.split("://", 1)[1]
+        p = "/" + after_scheme.split("/", 1)[-1] if "/" in after_scheme else "/"
+    p = re.sub(r"\$\{[a-zA-Z0-9_.]+\}", "{}", p)
     p = re.sub(r"[:<][a-zA-Z0-9_]+>?", "{}", p)
     p = re.sub(r"\{[a-zA-Z0-9_]+\}", "{}", p)
     p = re.sub(r"/[0-9]+(?=/|$)", "/{}", p)
@@ -387,12 +405,13 @@ def resolve_cross_boundary_api_routes(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Connect frontend HTTP client calls (fetch, axios, sdk) to backend route endpoints.
+    """Connect frontend HTTP client calls (fetch, axios, sdk) to backend route endpoints and OpenAPI operations.
 
     Discovers:
     1. Backend routes: OpenAPI operations, FastAPI/Flask/Express/NestJS decorated endpoints.
     2. Frontend client calls: fetch('/api/...'), axios.get('/api/...'), apiClient.post(...)
-    When normalized paths match, adds `routes_to` edges with confidence `INFERRED`.
+    When normalized paths and HTTP methods match, adds `routes_to` edges with confidence `INFERRED`
+    (or `EXTRACTED` for direct OpenAPI matches) and annotates `http_method` and `context`.
     """
     import re
     from pathlib import Path
@@ -427,6 +446,8 @@ def resolve_cross_boundary_api_routes(
 
     # 1. Collect backend route providers: (node, norm_path, method, file_stem)
     backend_routes: list[tuple[dict[str, Any], str, str, str]] = []
+    openapi_ops: list[tuple[dict[str, Any], str, str, str]] = []  # (node, method, path, op_id)
+
     for n in nodes:
         if n.get("file_type") == "rationale":
             continue
@@ -447,17 +468,38 @@ def resolve_cross_boundary_api_routes(
         sf = n.get("source_file", "")
         stem = Path(sf).stem if sf else ""
 
-        if ntype in ("openapi_operation", "openapi_path") or lbl.startswith("OpenAPI:"):
+        if not method and route_path:
+            m_meth, r_clean = _split_method_and_path(route_path)
+            if m_meth:
+                method = m_meth
+                route_path = r_clean
+
+        if not method and any(lbl.startswith(p) for p in ("Route:", "Endpoint:", "API:", "OpenAPI:")):
+            rest = lbl.split(":", 1)[-1].strip()
+            m_meth, rest_clean = _split_method_and_path(rest)
+            if m_meth:
+                method = m_meth
+                if not route_path:
+                    route_path = rest_clean
+
+        # OpenAPI / API spec operations
+        if ntype in ("openapi_operation", "openapi_path", "api_operation", "api_path") or lbl.startswith(("OpenAPI:", "API:")):
             if not route_path and ":" in lbl:
-                route_path = lbl.split(":")[-1]
+                rest = lbl.split(":", 1)[-1].strip()
+                _, route_path = _split_method_and_path(rest)
             if route_path:
-                backend_routes.append((n, _normalize_route_path(route_path), method or "GET", stem))
+                norm_p = _normalize_route_path(route_path)
+                m_eff = method or "GET"
+                op_id = str(n.get("operation_id") or n.get("operationId") or "").lower()
+                backend_routes.append((n, norm_p, m_eff, stem))
+                openapi_ops.append((n, m_eff, norm_p, op_id))
         elif any(k in ntype for k in ("route", "endpoint", "api_handler", "rpc")):
             if route_path:
                 backend_routes.append((n, _normalize_route_path(route_path), method or "GET", stem))
-        elif any(lbl.startswith(prefix) for prefix in ("Route:", "Endpoint:", "API:")):
+        elif any(lbl.startswith(prefix) for prefix in ("Route:", "Endpoint:")):
             if not route_path:
-                route_path = lbl.split(":", 1)[-1]
+                rest = lbl.split(":", 1)[-1].strip()
+                _, route_path = _split_method_and_path(rest)
             backend_routes.append((n, _normalize_route_path(route_path), method or "GET", stem))
         elif sf and (lbl.endswith("()") or n.get("_callable")):
             # Inspect definition line for route decorator (FastAPI, Flask, NestJS, Express, etc.)
@@ -467,8 +509,9 @@ def resolve_cross_boundary_api_routes(
                     lineno = int(sloc[1:]) - 1
                     lines = _get_file_lines(sf)
                     if lines and 0 <= lineno < len(lines):
-                        start = max(0, lineno - 6)
+                        start = max(0, lineno - 8)
                         snippet = "\n".join(lines[start:lineno + 1])
+                        # Check FastAPI / Flask decorators
                         m = re.search(
                             r"""@(?:router|api_router|app|blueprint|bp)\.(get|post|put|delete|patch|options|head|route|api_route)\s*\(\s*["']([^"']+)["']""",
                             snippet,
@@ -479,15 +522,79 @@ def resolve_cross_boundary_api_routes(
                             if deco_meth in ("ROUTE", "API_ROUTE"):
                                 m_meth = re.search(r"""methods\s*=\s*\[\s*["'](GET|POST|PUT|DELETE|PATCH)["']""", snippet, re.IGNORECASE)
                                 deco_meth = m_meth.group(1).upper() if m_meth else "GET"
-                            backend_routes.append((n, _normalize_route_path(m.group(2)), method or deco_meth, stem))
+                            deco_path = m.group(2)
+                            # Check for router prefix in file: APIRouter(prefix="/...")
+                            full_file = "\n".join(lines[:lineno])
+                            m_pref = re.search(r"""(?:APIRouter|Blueprint)\s*\([^)]*prefix\s*=\s*["']([^"']+)["']""", full_file)
+                            if m_pref:
+                                pref = m_pref.group(1).strip("/")
+                                if not deco_path.strip("/").startswith(pref):
+                                    deco_path = f"/{pref}/{deco_path.lstrip('/')}"
+                            backend_routes.append((n, _normalize_route_path(deco_path), method or deco_meth, stem))
+                        else:
+                            # Check NestJS decorators: @Get('/path'), @Post('/path'), etc.
+                            m_nest = re.search(
+                                r"""@(Get|Post|Put|Delete|Patch|Options|Head)\s*\(\s*["']?([^"']*)["']?\s*\)""",
+                                snippet,
+                                re.IGNORECASE,
+                            )
+                            if m_nest:
+                                deco_meth = m_nest.group(1).upper()
+                                deco_path = m_nest.group(2) or "/"
+                                full_file = "\n".join(lines[:lineno])
+                                m_ctrl = re.search(r"""@Controller\s*\(\s*["']([^"']+)["']\s*\)""", full_file)
+                                if m_ctrl:
+                                    ctrl_prefix = m_ctrl.group(1).strip("/")
+                                    deco_path = f"/{ctrl_prefix}/{deco_path.lstrip('/')}"
+                                backend_routes.append((n, _normalize_route_path(deco_path), method or deco_meth, stem))
+                            else:
+                                # Check Express: (app|router).(get|post|put|delete)('/path', ...)
+                                m_exp = re.search(
+                                    r"""(?:app|router)\.(get|post|put|delete|patch|options|head)\s*\(\s*["']([^"']+)["']""",
+                                    snippet,
+                                    re.IGNORECASE,
+                                )
+                                if m_exp:
+                                    deco_meth = m_exp.group(1).upper()
+                                    deco_path = m_exp.group(2)
+                                    backend_routes.append((n, _normalize_route_path(deco_path), method or deco_meth, stem))
                 except Exception:
                     pass
 
-    if not backend_routes:
-        return new_edges
+    # 2. Track Client BaseURL & Instance configurations
+    client_base_urls: dict[str, str] = {}
+    file_base_urls: dict[str, str] = {}
+    global_base_url: str = ""
 
-    # 2. Discover client callers with route paths: (node, client_path, method)
-    client_callers: list[tuple[dict[str, Any], str, str]] = []
+    scanned_files: set[str] = set()
+    for n in nodes:
+        sf = n.get("source_file", "")
+        if not sf or sf in scanned_files:
+            continue
+        scanned_files.add(sf)
+        ext = Path(sf).suffix.lower()
+        if ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py"):
+            lines = _get_file_lines(sf)
+            if not lines:
+                continue
+            text = "\n".join(lines)
+            for m_inst in re.finditer(
+                r"""(?:const|let|var|export\s+const)\s+([A-Za-z0-9_]+)\s*=\s*(?:axios\.create|createClient|new\s+\w*(?:Client|Api|Service))\s*\(\s*\{[^}]*base(?:URL|Path)\s*:\s*['"`]([^'"`]+)['"`]""",
+                text,
+                re.DOTALL,
+            ):
+                var_name = m_inst.group(1)
+                b_url = m_inst.group(2).strip().strip("'\"`")
+                if b_url:
+                    client_base_urls[var_name] = b_url
+                    file_base_urls[sf] = b_url
+
+            m_glob = re.search(r"""(?:axios\.defaults\.baseURL|OpenAPI\.BASE)\s*=\s*['"`]([^'"`]+)['"`]""", text)
+            if m_glob:
+                global_base_url = m_glob.group(1).strip().strip("'\"`")
+
+    # 3. Discover client callers: (node, client_path, method, resolved_path)
+    client_callers: list[tuple[dict[str, Any], str, str, str]] = []
     for n in nodes:
         if n.get("file_type") == "rationale":
             continue
@@ -500,19 +607,22 @@ def resolve_cross_boundary_api_routes(
             or meta.get("api_path")
             or ""
         )
-        method = str(n.get("http_method") or n.get("method") or meta.get("http_method") or "GET").upper()
+        method = str(n.get("http_method") or n.get("method") or meta.get("http_method") or "").upper()
+        instance_var = ""
+
         if not client_path:
             txt = str(n.get("text", "")) or str(n.get("label", ""))
-            fetch_match = re.search(
-                r"""(?:fetch|axios(?:\.(?:get|post|put|delete|patch))?)\s*\(\s*["'`](\/[a-zA-Z0-9_\-\/{}:]+)["'`]""",
+            client_match = re.search(
+                r"""(?:fetch|([A-Za-z0-9_]+)\.(?:get|post|put|delete|patch|options|head)|axios(?:\.(?:get|post|put|delete|patch|options|head))?)\s*\(\s*["'`](\/[a-zA-Z0-9_\-\/{}:]+)["'`]""",
                 txt,
             )
-            if fetch_match:
-                client_path = fetch_match.group(1)
-                if "axios." in txt:
-                    method_match = re.search(r"axios\.(get|post|put|delete|patch)", txt)
-                    if method_match:
-                        method = method_match.group(1).upper()
+            if client_match:
+                if client_match.group(1):
+                    instance_var = client_match.group(1)
+                client_path = client_match.group(2)
+                method_match = re.search(r"\.(get|post|put|delete|patch|options|head)\b", txt, re.IGNORECASE)
+                if method_match and not method:
+                    method = method_match.group(1).upper()
 
         sf = n.get("source_file", "")
         lbl = n.get("label", "")
@@ -528,26 +638,42 @@ def resolve_cross_boundary_api_routes(
                         m_url = re.search(r"""url:\s*['"`](\/[a-zA-Z0-9_\-\/{}:]+)['"`]""", body)
                         if m_url:
                             client_path = m_url.group(1)
-                            m_meth = re.search(r"""\.(get|post|put|delete|patch)\b""", body, re.IGNORECASE)
-                            if m_meth:
+                            m_meth = re.search(r"""\.(get|post|put|delete|patch|options|head)\b""", body, re.IGNORECASE)
+                            if m_meth and not method:
                                 method = m_meth.group(1).upper()
-                        elif "fetch" in body:
-                            m_fetch = re.search(r"""fetch\s*\(\s*['"`](\/[a-zA-Z0-9_\-\/{}:]+)['"`]""", body)
+                            m_opt_meth = re.search(r"""method:\s*['"`](GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)['"`]""", body, re.IGNORECASE)
+                            if m_opt_meth:
+                                method = m_opt_meth.group(1).upper()
+                        else:
+                            m_fetch = re.search(r"""\bfetch\s*\(\s*['"`](\/[a-zA-Z0-9_\-\/{}:]+)['"`]""", body)
                             if m_fetch:
                                 client_path = m_fetch.group(1)
-                                m_meth = re.search(r"""method:\s*['"`](GET|POST|PUT|DELETE|PATCH)['"`]""", body, re.IGNORECASE)
-                                method = m_meth.group(1).upper() if m_meth else "GET"
-                        elif "axios" in body:
-                            m_axios = re.search(r"""axios\.(get|post|put|delete|patch)\s*\(\s*['"`](\/[a-zA-Z0-9_\-\/{}:]+)['"`]""", body)
-                            if m_axios:
-                                method = m_axios.group(1).upper()
-                                client_path = m_axios.group(2)
+                                m_meth = re.search(r"""method:\s*['"`](GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)['"`]""", body, re.IGNORECASE)
+                                method = m_meth.group(1).upper() if m_meth else (method or "GET")
+                            else:
+                                m_call = re.search(
+                                    r"""([A-Za-z0-9_]+)\.(get|post|put|delete|patch|options|head)\s*\(\s*['"`](\/[a-zA-Z0-9_\-\/{}:]+)['"`]""",
+                                    body,
+                                    re.IGNORECASE,
+                                )
+                                if m_call:
+                                    instance_var = m_call.group(1)
+                                    method = m_call.group(2).upper()
+                                    client_path = m_call.group(3)
                 except Exception:
                     pass
 
         if client_path:
-            client_callers.append((n, client_path, method))
+            eff_method = method or "GET"
+            # Resolve BaseURL if configured
+            eff_base = client_base_urls.get(instance_var) or file_base_urls.get(sf) or global_base_url
+            if eff_base and not client_path.startswith(eff_base):
+                resolved_path = f"{eff_base.rstrip('/')}/{client_path.lstrip('/')}"
+            else:
+                resolved_path = client_path
+            client_callers.append((n, client_path, eff_method, resolved_path))
 
+    # Helper: Route matching
     def _routes_match(c_path: str, b_path: str, b_stem: str) -> bool:
         norm_c = _normalize_route_path(c_path)
         norm_b = _normalize_route_path(b_path)
@@ -564,18 +690,104 @@ def resolve_cross_boundary_api_routes(
                 return True
         return False
 
-    for n, client_path, method in client_callers:
+    # 4. Step 5.3: Link Backend Handlers to OpenAPI Operations via 'implements' edges
+    if openapi_ops:
         for b_node, norm_b, b_method, b_stem in backend_routes:
-            if _routes_match(client_path, norm_b, b_stem):
-                if not method or not b_method or method == b_method or method == "ALL" or b_method == "ALL":
-                    key = (n["id"], b_node["id"], "routes_to")
-                    if key not in seen_edges and n["id"] != b_node["id"]:
+            if b_node.get("type") in ("api_operation", "openapi_operation") or b_node.get("label", "").startswith(("API:", "OpenAPI:")):
+                continue  # Skip OpenAPI spec nodes themselves
+            b_lbl = b_node.get("label", "").lower().rstrip("()")
+            for op_node, op_method, op_norm_path, op_id in openapi_ops:
+                matched = False
+                conf = "INFERRED"
+                if (norm_b == op_norm_path or norm_b.endswith(op_norm_path) or op_norm_path.endswith(norm_b)):
+                    if b_method in (op_method, "ALL") or op_method == "ALL":
+                        matched = True
+                if not matched and op_id and len(op_id) > 2:
+                    op_clean = op_id.replace("_", "")
+                    b_clean = b_lbl.replace("_", "")
+                    if op_clean in b_clean or b_clean in op_clean:
+                        matched = True
+                        conf = "EXTRACTED"
+                if matched:
+                    key = (b_node["id"], op_node["id"], "implements")
+                    if key not in seen_edges and b_node["id"] != op_node["id"]:
                         seen_edges.add(key)
+                        edge = {
+                            "source": b_node["id"],
+                            "target": op_node["id"],
+                            "relation": "implements",
+                            "http_method": op_method,
+                            "context": f"implements:{op_method}",
+                            "confidence": conf,
+                            "weight": 1.0,
+                            "source_file": b_node.get("source_file", ""),
+                            "source_location": b_node.get("source_location", "L1"),
+                        }
+                        edges.append(edge)
+                        new_edges.append(edge)
+
+    # 5. Connect Client Callers to Backend Routes & OpenAPI Operations
+    for n, client_path, method, resolved_path in client_callers:
+        for b_node, norm_b, b_method, b_stem in backend_routes:
+            if n["id"] == b_node["id"]:
+                continue
+            matches_route = _routes_match(client_path, norm_b, b_stem) or _routes_match(resolved_path, norm_b, b_stem)
+            if matches_route:
+                # Step 5.1: Strict HTTP method compatibility
+                method_compat = (
+                    not method
+                    or not b_method
+                    or method == "ALL"
+                    or b_method == "ALL"
+                    or method == b_method
+                )
+                if method_compat:
+                    key = (n["id"], b_node["id"], "routes_to")
+                    if key not in seen_edges:
+                        seen_edges.add(key)
+                        eff_verb = method if method and method != "ALL" else (b_method if b_method and b_method != "ALL" else "GET")
                         edge = {
                             "source": n["id"],
                             "target": b_node["id"],
                             "relation": "routes_to",
+                            "http_method": eff_verb,
+                            "context": f"routes_to:{eff_verb}",
                             "confidence": "INFERRED",
+                            "weight": 1.0,
+                            "source_file": n.get("source_file", ""),
+                            "source_location": n.get("source_location", "L1"),
+                        }
+                        edges.append(edge)
+                        new_edges.append(edge)
+
+    # 6. Step 5.3: Connect Client SDK Functions to OpenAPI operations by operationId
+    if openapi_ops:
+        for n in nodes:
+            if n.get("file_type") == "rationale":
+                continue
+            lbl = n.get("label", "").rstrip("()").lstrip(".")
+            if not lbl or len(lbl) < 3:
+                continue
+            clean_lbl = lbl.lower().replace("_", "")
+            sf = n.get("source_file", "").lower()
+            # Only client/frontend/sdk files
+            if not any(k in sf for k in ("client", "sdk", "frontend", "src", "api", "service")):
+                continue
+            for op_node, op_method, op_norm_path, op_id in openapi_ops:
+                if not op_id or len(op_id) < 3:
+                    continue
+                clean_op_id = op_id.lower().replace("_", "")
+                if clean_lbl == clean_op_id or clean_lbl.endswith(clean_op_id):
+                    key = (n["id"], op_node["id"], "routes_to")
+                    if key not in seen_edges and n["id"] != op_node["id"]:
+                        seen_edges.add(key)
+                        edge = {
+                            "source": n["id"],
+                            "target": op_node["id"],
+                            "relation": "routes_to",
+                            "http_method": op_method,
+                            "context": f"routes_to:{op_method}",
+                            "confidence": "EXTRACTED",
                             "weight": 1.0,
                             "source_file": n.get("source_file", ""),
                             "source_location": n.get("source_location", "L1"),

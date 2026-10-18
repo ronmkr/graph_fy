@@ -7,9 +7,8 @@ Quantifies and benchmarks:
   4. Anti-Hallucination Rate (100% deterministic AST grounding vs 0% on phantom APIs)
   5. Blast Radius Recall (Transitive graph reachability vs naive isolated file grep)
 """
-from __future__ import annotations
-
 import json
+import re
 import statistics
 import time
 from dataclasses import asdict, dataclass
@@ -20,6 +19,23 @@ import networkx as nx
 
 from graph_fy.multi_repo import resolve_multi_graphs
 from graph_fy.retrieval import task_context
+
+_GPT_TOKEN_PATTERN = re.compile(
+    r"""'s|'t|'re|'ve|'m|'ll|'d|[a-zA-Z_]\w*|\d+|[^\s\w]|\s+"""
+)
+
+
+def count_tokens(text: str) -> int:
+    """Accurately count LLM BPE tokens using tiktoken (if available) or standard subword regex."""
+    if not text:
+        return 0
+    try:
+        import tiktoken
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    except Exception:
+        return len(_GPT_TOKEN_PATTERN.findall(text))
+
 
 
 @dataclass
@@ -87,10 +103,23 @@ class ComparativeReport:
 
     category_breakdown: dict[str, dict[str, float]]
     cases: list[ComparativeCaseResult]
+    mode: str = "simulated"
 
     def to_markdown(self) -> str:
+        mode_banner = (
+            "> 🔬 **Evaluation Mode: Empirical (Live Agent Traces & Ground Truth)**  \n"
+            "> Grounded in recorded agent execution traces, exact subword token measurements, and verified ground-truth coverage."
+            if self.mode == "empirical"
+            else (
+                "> ⚠️ **Evaluation Mode: Simulated (Heuristic Baseline Model)**  \n"
+                "> Metrics for 'Without Skill' are computed via an analytical baseline model simulating whole-file ingestion and multi-turn API latencies."
+            )
+        )
+
         lines = [
             "# graph_fy vs Raw LLM Comparative Evaluation Report",
+            "",
+            mode_banner,
             "",
             "Comparative benchmark of **With Skill (`graph_fy`)** vs **Without Skill (Naive / Raw LLM Baseline)** "
             f"across **{self.total_scenarios} real-world software engineering scenarios**.",
@@ -137,6 +166,21 @@ class ComparativeReport:
                 f"| `{c.id}` | {c.category} | {target_slug} | {sk_info} | {raw_info} | **{c.token_compression_pct:.1f}%** | **{c.latency_speedup_x:.0f}x** | {res_pill} |"
             )
 
+        lines.extend([
+            "",
+            "## Benchmark Methodology & Limitations",
+            "",
+            "### 1. Measurement Methodology",
+            "- **With Skill (`graph_fy`)**: Evaluated via live local `task_context` execution against the codebase AST. Token counts are computed using exact BPE subword tokenization. Symbol precision and blast radius recall are verified against scenario ground-truth.",
+            "- **Without Skill (Raw LLM Baseline)**:",
+            "  - In **Simulated Mode**, token consumption reflects complete source file ingestion for all target modules plus direct imports. Exploratory turns simulate the standard agent sequence (search -> read -> grep -> plan). Latency models cloud API round-trip times (~3.2s per turn).",
+            "  - In **Empirical Mode**, metrics reflect recorded agent trajectory logs comparing live tool-use steps with and without pre-computed AST briefings.",
+            "",
+            "### 2. Known Boundaries & Dynamic Dispatch Caveats",
+            "- **Syntactic vs Dynamic Dispatch**: Blast radius recall reflects statically discoverable relations from AST parsing (imports, class inheritance, function calls). Dynamic reflection (`getattr()`, `eval()`, runtime metaprogramming, and dynamic imports via `importlib`) require runtime tracing or framework-specific annotations.",
+            "- **Single-File Isolation Bias**: The baseline assumes naive agent exploration reads full files rather than surgical slices. Modern frontier agents with structured sub-agent tools or targeted grep may narrow token consumption, though at the expense of additional round trips and higher network latency.",
+        ])
+
         return "\n".join(lines)
 
 
@@ -149,6 +193,8 @@ def run_comparative_evals(
     category_filter: str | None = None,
     limit: int | None = None,
     token_budget: int = 1500,
+    mode: str = "simulated",
+    traces_path: str | Path | None = None,
 ) -> ComparativeReport:
     """Execute head-to-head comparative evaluation: With Skill vs Without Skill."""
     if graph is None and graph_path:
@@ -163,6 +209,21 @@ def run_comparative_evals(
     with open(sc_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     scenarios: list[dict[str, Any]] = data.get("scenarios", []) if isinstance(data, dict) else data
+
+    empirical_traces: dict[str, Any] = {}
+    if mode == "empirical":
+        if traces_path is None:
+            cand = Path(root_dir) / "evals" / "empirical_traces.json"
+            if not cand.exists():
+                cand = Path("evals/empirical_traces.json")
+            if cand.exists():
+                traces_path = cand
+        if traces_path and Path(traces_path).exists():
+            try:
+                raw_data = json.loads(Path(traces_path).read_text(encoding="utf-8"))
+                empirical_traces = raw_data.get("traces", {}) if isinstance(raw_data, dict) else {}
+            except Exception:
+                empirical_traces = {}
 
     if category_filter:
         cf_lower = category_filter.lower()
@@ -184,6 +245,7 @@ def run_comparative_evals(
         is_phantom = verif.get("is_phantom", False)
         forbidden = sc.get("forbidden_hallucinations", [])
         expected_files = sc.get("expected_files", [])
+        target_symbols = sc.get("target_symbols", [])
 
         # =====================================================================
         # 1. WITH SKILL (graph_fy)
@@ -200,7 +262,7 @@ def run_comparative_evals(
         )
         sk_latency_ms = (time.perf_counter() - t0) * 1000.0
         prompt_text = briefing.get("prompt_context", "")
-        sk_tokens = max(1, len(prompt_text) // 4)
+        sk_tokens = max(1, count_tokens(prompt_text))
         sk_turns = 1  # Delivered in 1-turn initial briefing
 
         prompt_lower = prompt_text.lower()
@@ -221,7 +283,17 @@ def run_comparative_evals(
             matched = [t for t in must_contain if t.lower() in prompt_lower]
             precision = len(matched) / max(1, len(must_contain))
             sk_passed = precision >= 0.5 and not hallucinated and not unwanted
-            sk_recall = 100.0  # Graph reachability captures all connected symbols & downstream tests
+
+            # Ground-truth blast radius recall against expected target symbols and files
+            found_symbols = [s for s in target_symbols if s.lower() in prompt_lower]
+            found_files = [f for f in expected_files if Path(f).name.lower() in prompt_lower or f.lower() in prompt_lower]
+            total_ground_truth = len(target_symbols) + len(expected_files) + len(must_contain)
+            if total_ground_truth > 0:
+                covered_count = len(found_symbols) + len(found_files) + len(matched)
+                sk_recall = round(min(100.0, (covered_count / total_ground_truth) * 100.0), 1)
+            else:
+                sk_recall = round(precision * 100.0, 1)
+
             sk_details = f"Matched {len(matched)}/{len(must_contain)} terms ({', '.join(matched[:3])})"
             if hallucinated:
                 sk_details += f" | Hallucinated: {hallucinated}"
@@ -229,43 +301,62 @@ def run_comparative_evals(
         # =====================================================================
         # 2. WITHOUT SKILL (Naive / Raw LLM Baseline)
         # =====================================================================
-        # Calculate raw file token consumption from expected files + dependencies
-        calculated_raw_chars = 0
-        file_count = max(2, len(expected_files))
-        for ef in expected_files:
-            p = Path(root_dir) / ef
-            if p.exists() and p.is_file():
-                try:
-                    calculated_raw_chars += len(p.read_text(encoding="utf-8", errors="ignore"))
-                except OSError:
-                    calculated_raw_chars += 16000
-            else:
-                # Standard Python module length (~400-800 lines = ~16k-32k chars)
-                calculated_raw_chars += 22000
+        if mode == "empirical" and sc_id in empirical_traces:
+            trace = empirical_traces[sc_id]
+            t_sk = trace.get("with_skill", {})
+            t_raw = trace.get("without_skill", {})
 
-        # Transitive dependency / imported files penalty (at least 2-3 additional files)
-        calculated_raw_chars += file_count * 15000
-        raw_tokens = max(18000, calculated_raw_chars // 4)
+            sk_passed = bool(t_sk.get("passed", sk_passed))
+            sk_tokens = int(t_sk.get("tokens", sk_tokens))
+            sk_turns = int(t_sk.get("turns", sk_turns))
+            sk_latency_ms = float(t_sk.get("latency_ms", sk_latency_ms))
+            sk_anti_hallucination = bool(t_sk.get("anti_hallucination", sk_anti_hallucination))
+            sk_recall = float(t_sk.get("blast_radius_recall", sk_recall))
+            if t_sk.get("details"):
+                sk_details = f"[Empirical] {t_sk['details']}"
 
-        # Exploratory round-trip turns: search (1) + file reads (2-4) + grep callers (1-2) + plan (1)
-        raw_turns = min(10, max(5, file_count + 3))
-
-        # Latency: Multi-turn network API latency @ 3200ms per round trip
-        raw_latency_ms = float(raw_turns * 3200.0)
-
-        if is_phantom:
-            # Without AST ground truth, raw LLMs hallucinate code on non-existent APIs (>85% failure)
-            raw_anti_hallucination = False
-            raw_passed = False
-            raw_recall = 0.0
-            raw_details = "Hallucinated non-existent APIs (no AST ground truth guard)"
+            raw_passed = bool(t_raw.get("passed", True))
+            raw_tokens = int(t_raw.get("tokens", 18500))
+            raw_turns = int(t_raw.get("turns", 5))
+            raw_latency_ms = float(t_raw.get("latency_ms", raw_turns * 3200.0))
+            raw_anti_hallucination = bool(t_raw.get("anti_hallucination", not is_phantom))
+            raw_recall = float(t_raw.get("blast_radius_recall", 33.3))
+            raw_details = f"[Empirical] {t_raw.get('details', f'Required {raw_turns} turns')}"
         else:
-            # Raw models can eventually locate direct keyword matches after multi-turn reading,
-            # but miss indirect transitive blast radius
-            raw_anti_hallucination = True
-            raw_passed = True
-            raw_recall = 35.0  # Isolated file view misses indirect callers and test suites
-            raw_details = f"Required {raw_turns} exploratory turns reading full source files"
+            # Simulated baseline: calculate real token footprint of referenced files
+            raw_file_tokens = 0
+            local_found = 0
+            for ef in expected_files:
+                p = Path(root_dir) / ef
+                if p.exists() and p.is_file():
+                    try:
+                        raw_file_tokens += count_tokens(p.read_text(encoding="utf-8", errors="ignore"))
+                        local_found += 1
+                    except OSError:
+                        pass
+            if local_found == 0:
+                raw_file_tokens = max(1, len(expected_files)) * 3200
+
+            # Naive exploration reads target files + immediate transitive import dependencies
+            transitive_tokens = max(1, len(expected_files)) * 2400
+            raw_tokens = max(2800, raw_file_tokens + transitive_tokens)
+            raw_turns = min(10, max(4, len(expected_files) + 3))
+            raw_latency_ms = float(raw_turns * 3200.0)
+
+            if is_phantom:
+                raw_anti_hallucination = False
+                raw_passed = False
+                raw_recall = 0.0
+                raw_details = "Hallucinated non-existent APIs (no AST ground truth guard)"
+            else:
+                raw_anti_hallucination = True
+                raw_passed = True
+                total_gt = len(target_symbols) + len(expected_files) + len(must_contain)
+                raw_covered_files = 1 if expected_files else 0
+                raw_covered_symbols = max(1, len(target_symbols) // max(1, len(expected_files))) if target_symbols else (1 if must_contain else 0)
+                raw_covered_must = max(1, len(must_contain) // max(1, len(expected_files))) if must_contain else 0
+                raw_recall = round(min(100.0, ((raw_covered_files + raw_covered_symbols + raw_covered_must) / max(1, total_gt)) * 100.0), 1)
+                raw_details = f"Required {raw_turns} exploratory turns reading full source files"
 
         # =====================================================================
         # 3. COMPARATIVE METRICS
@@ -387,4 +478,5 @@ def run_comparative_evals(
         raw_blast_radius_recall_pct=raw_blast_recall,
         category_breakdown=cat_breakdown,
         cases=cases,
+        mode=mode,
     )

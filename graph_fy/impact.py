@@ -352,15 +352,65 @@ def compute_impact(
         explanations.append(f"{len(affected_apis)} external API endpoint(s) potentially affected.")
     if affected_iac:
         explanations.append(f"{len(affected_iac)} IaC/cloud config resource(s) impacted.")
-    if affected_tests:
-        explanations.append(f"{len(affected_tests)} test suite(s) cover this dependency path.")
+    # Dynamic Language Risk & Confidence Rating
+    dynamic_risks: set[str] = set()
+    root_path = root if root is not None else Path(".")
+
+    all_evaluated = list(targets) + [d["id"] for d in downstream_entries[:30]]
+    for nid in all_evaluated:
+        ndata = graph.nodes.get(nid, {})
+        lbl = str(ndata.get("label", ""))
+        ctx = str(ndata.get("context", ""))
+        if any(p in lbl.lower() for p in ("getattr", "setattr", "hasattr", "importlib", "eval", "exec", "**kwargs")):
+            dynamic_risks.add(f"dynamic-symbol:{lbl}")
+        if ndata.get("has_dependency_injection") or ctx == "fastapi_di":
+            dynamic_risks.add("fastapi-di")
+        if ctx == "pytest_fixture":
+            dynamic_risks.add("pytest-fixture")
+        if ctx == "express_middleware":
+            dynamic_risks.add("express-middleware")
+        if ctx == "react_hook":
+            dynamic_risks.add("react-hook")
+
+    seen_files: set[str] = set()
+    for nid in all_evaluated[:15]:
+        sf = str(graph.nodes.get(nid, {}).get("source_file", ""))
+        if sf and sf not in seen_files:
+            seen_files.add(sf)
+            fp = Path(sf) if Path(sf).is_absolute() else (root_path / sf)
+            if fp.is_file():
+                try:
+                    ftext = fp.read_text(encoding="utf-8", errors="ignore")
+                    if "getattr(" in ftext or "setattr(" in ftext or "hasattr(" in ftext:
+                        dynamic_risks.add("reflection/getattr")
+                    if "importlib" in ftext or "__import__" in ftext:
+                        dynamic_risks.add("dynamic-import")
+                    if "Depends(" in ftext:
+                        dynamic_risks.add("fastapi-di")
+                    if "@pytest.fixture" in ftext:
+                        dynamic_risks.add("pytest-fixture")
+                    if "**kwargs" in ftext:
+                        dynamic_risks.add("kwargs-forwarding")
+                except OSError:
+                    pass
+
+    if dynamic_risks:
+        confidence_rating = "DYNAMIC_RISK_DETECTED"
+        confidence_score = 0.65
+        explanations.append(
+            f"Dynamic language risk detected ({', '.join(sorted(dynamic_risks)[:4])}); static blast radius may not capture runtime reflection or dynamic dispatch."
+        )
     else:
-        explanations.append("Warning: No affected unit/integration tests detected for this dependency path.")
+        confidence_rating = "HIGH_CONFIDENCE"
+        confidence_score = 1.0
 
     return {
         "target": target,
         "target_nodes": targets,
         "target_labels": [str(graph.nodes[t].get("label") or t) for t in targets],
+        "confidence_rating": confidence_rating,
+        "confidence_score": confidence_score,
+        "dynamic_risks": sorted(dynamic_risks),
         "downstream_count": downstream_count,
         "downstream_nodes": downstream_entries,
         "affected_tests": affected_tests,
@@ -390,6 +440,13 @@ def format_impact_report(impact_data: dict[str, Any], terse: bool = False) -> st
     target_name = ", ".join(impact_data.get("target_labels", [])) or impact_data.get("target", "unknown")
     tier = impact_data.get("risk_tier", "LOW")
     score = impact_data.get("risk_score", 0.0)
+    conf_rating = impact_data.get("confidence_rating", "HIGH_CONFIDENCE")
+    conf_risks = impact_data.get("dynamic_risks", [])
+    conf_display = (
+        f"[DYNAMIC RISK DETECTED] ({', '.join(conf_risks[:3]) if conf_risks else 'Dynamic reflection/dispatch'})"
+        if conf_rating == "DYNAMIC_RISK_DETECTED"
+        else "[HIGH CONFIDENCE] (Static AST Verified)"
+    )
     count = impact_data.get("downstream_count", 0)
     tests = impact_data.get("affected_tests", [])
     apis = impact_data.get("affected_apis", [])
@@ -399,7 +456,7 @@ def format_impact_report(impact_data: dict[str, Any], terse: bool = False) -> st
 
     if terse:
         return (
-            f"Impact for {target_name}: [{tier} | {score:.2f}] "
+            f"Impact for {target_name}: [{tier} | {score:.2f} | {conf_rating}] "
             f"{count} dependents, {len(tests)} tests, {len(apis)} APIs, "
             f"{len(iac)} IaC, {len(comms)} communities"
         )
@@ -410,6 +467,7 @@ def format_impact_report(impact_data: dict[str, Any], terse: bool = False) -> st
         f" PREDICTIVE IMPACT ANALYSIS & BLAST RADIUS: {target_name}",
         "================================================================================",
         f"Risk Tier:         {tier} (Score: {score:.3f} / 1.000)",
+        f"Confidence:        {conf_display}",
         f"Downstream Nodes:  {count}",
         f"Communities:       {len(comms)} crossed ({comms if comms else 'none'})",
         f"God Nodes Touched: {len(gods)}",

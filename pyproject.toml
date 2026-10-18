@@ -134,7 +134,7 @@ dev = [
 package = true
 
 [tool.setuptools]
-packages = ["graph_fy", "graph_fy.extractors", "graph_fy.exporters"]
+packages = ["graph_fy", "graph_fy.extractors", "graph_fy.exporters", "graph_fy.commands", "graph_fy.templates"]
 include-package-data = false
 
 [tool.setuptools.package-data]
@@ -143,7 +143,7 @@ include-package-data = false
 # under graph_fy/skills/<host>/references/, and the always-on injection blocks
 # under graph_fy/always_on/. There is no graph_fy/skills/<host>/SKILL.md in the
 # repo, so no SKILL.md glob is needed here.
-graph_fy = ["skill.md", "skill-copilot.md", "skill-vscode.md", "skills/*/references/*.md", "always_on/*.md"]
+graph_fy = ["skill.md", "skill-copilot.md", "skill-vscode.md", "skills/*/references/*.md", "always_on/*.md", "templates/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
