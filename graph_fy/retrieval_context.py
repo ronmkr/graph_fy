@@ -583,6 +583,7 @@ def task_context(
     graph_path: Path | str | None = None,
     include_diagram: bool = True,
     include_bodies: bool | str = "auto",
+    hotpatch: bool = True,
     limit: int = 6,
 ) -> dict[str, Any]:
     """Generate a holistic, deterministic pre-agent architectural briefing.
@@ -599,24 +600,25 @@ def task_context(
     from graph_fy.retrieval import query
 
     root_path = Path(root_dir)
-    if graph_path is None:
-        if (root_path / "graph_fy_out" / "graph.json").exists():
-            graph_path = root_path / "graph_fy_out" / "graph.json"
-        elif (root_path / "graph.json").exists():
-            graph_path = root_path / "graph.json"
-    if db_path is None:
-        if graph_path is not None and (Path(graph_path).parent / "graph.db").exists():
-            db_path = Path(graph_path).parent / "graph.db"
-        elif graph_path is not None and (Path(graph_path).parent / "index.db").exists():
-            db_path = Path(graph_path).parent / "index.db"
-        elif (root_path / "graph_fy_out" / "graph.db").exists():
-            db_path = root_path / "graph_fy_out" / "graph.db"
-        elif (root_path / "graph_fy_out" / "index.db").exists():
-            db_path = root_path / "graph_fy_out" / "index.db"
-        elif (root_path / "graph.db").exists():
-            db_path = root_path / "graph.db"
-        elif (root_path / "index.db").exists():
-            db_path = root_path / "index.db"
+    if graph is None:
+        if graph_path is None:
+            if (root_path / "graph_fy_out" / "graph.json").exists():
+                graph_path = root_path / "graph_fy_out" / "graph.json"
+            elif (root_path / "graph.json").exists():
+                graph_path = root_path / "graph.json"
+        if db_path is None:
+            if graph_path is not None and (Path(graph_path).parent / "graph.db").exists():
+                db_path = Path(graph_path).parent / "graph.db"
+            elif graph_path is not None and (Path(graph_path).parent / "index.db").exists():
+                db_path = Path(graph_path).parent / "index.db"
+            elif (root_path / "graph_fy_out" / "graph.db").exists():
+                db_path = root_path / "graph_fy_out" / "graph.db"
+            elif (root_path / "graph_fy_out" / "index.db").exists():
+                db_path = root_path / "graph_fy_out" / "index.db"
+            elif (root_path / "graph.db").exists():
+                db_path = root_path / "graph.db"
+            elif (root_path / "index.db").exists():
+                db_path = root_path / "index.db"
 
     if graph is None and graph_path is not None and Path(graph_path).exists():
         try:
@@ -630,6 +632,41 @@ def task_context(
                 graph = store.to_networkx()
         except Exception:
             graph = None
+
+    # Pre-Flight Staleness Check & Query-Time Hot-Patching (Issue #51)
+    staleness_info: dict[str, Any] = {
+        "is_stale": False,
+        "action": "clean",
+        "staleness_count": 0,
+        "modified_files": [],
+        "deleted_files": [],
+    }
+    has_disk_artifacts = (
+        graph_path is not None
+        or db_path is not None
+        or (graph is None and ((root_path / "graph_fy_out" / "graph.json").exists() or (root_path / "graph_fy_out" / "graph.db").exists()))
+    )
+    if hotpatch and has_disk_artifacts:
+        try:
+            from graph_fy.staleness import check_graph_staleness, hot_patch_graph
+            staleness_info = check_graph_staleness(
+                graph_path=graph_path,
+                db_path=db_path,
+                project_root=root_path,
+            )
+            if staleness_info.get("action") == "hotpatch" and (
+                staleness_info.get("modified_files") or staleness_info.get("deleted_files")
+            ):
+                hp_res = hot_patch_graph(
+                    graph=graph,
+                    db_path=db_path,
+                    modified_files=staleness_info.get("modified_files"),
+                    deleted_files=staleness_info.get("deleted_files"),
+                    project_root=root_path,
+                )
+                staleness_info["hotpatch_applied"] = hp_res
+        except Exception:
+            pass
 
     if not task or not task.strip():
         return {
@@ -704,6 +741,23 @@ def task_context(
         if did_you_mean:
             did_you_mean_msg = f"\n> Did you mean: {', '.join(f'`{s}`' for s in did_you_mean)}?"
 
+        prompt_parts = [
+            "### graph_fy Pre-Agent Architectural Briefing\n",
+            f"**Task**: {task}\n",
+        ]
+        if staleness_info.get("action") == "warn" and staleness_info.get("warning_banner"):
+            prompt_parts.insert(0, f"> [!WARNING]\n> {staleness_info['warning_banner']}\n")
+        elif staleness_info.get("hotpatch_applied"):
+            hp = staleness_info["hotpatch_applied"]
+            if hp.get("patched_files"):
+                prompt_parts.append(f"<!-- Note: Graph hot-patched for {hp['patched_files']} modified file(s) in {hp.get('duration_ms', 0)}ms -->\n")
+
+        prompt_parts.extend([
+            "> [!WARNING]\n",
+            f"> Target Symbol Not Found: No symbols matching '{task}' exist in the knowledge graph.{did_you_mean_msg}\n",
+            "> Grounded AST Invariant: Do NOT hallucinate non-existent APIs, classes, methods, or imports. Verify the exact identifier.",
+        ])
+
         return {
             "task": task,
             "subsystems": [],
@@ -718,13 +772,8 @@ def task_context(
             "raw_tokens": 0,
             "briefing_tokens": 0,
             "compression_ratio": 1.0,
-            "prompt_context": (
-                f"### graph_fy Pre-Agent Architectural Briefing\n"
-                f"**Task**: {task}\n\n"
-                f"> [!WARNING]\n"
-                f"> Target Symbol Not Found: No symbols matching '{task}' exist in the knowledge graph.{did_you_mean_msg}\n"
-                f"> Grounded AST Invariant: Do NOT hallucinate non-existent APIs, classes, methods, or imports. Verify the exact identifier."
-            ),
+            "staleness": staleness_info,
+            "prompt_context": "\n".join(prompt_parts),
         }
 
     # 3. Subsystem / Community Detection
@@ -954,6 +1003,13 @@ def task_context(
         f"**AST Analysis Confidence**: {confidence_tier}",
     ]
 
+    if staleness_info.get("action") == "warn" and staleness_info.get("warning_banner"):
+        lines.append(f"> [!WARNING]\n> {staleness_info['warning_banner']}")
+    elif staleness_info.get("hotpatch_applied"):
+        hp = staleness_info["hotpatch_applied"]
+        if hp.get("patched_files"):
+            lines.append(f"<!-- Note: Graph hot-patched for {hp['patched_files']} modified file(s) in {hp.get('duration_ms', 0)}ms -->")
+
     char_budget = token_budget * 4
     current_chars = sum(len(l) + 1 for l in lines)
 
@@ -1103,5 +1159,6 @@ def task_context(
         "raw_tokens": raw_tokens,
         "briefing_tokens": briefing_tokens,
         "compression_ratio": compression_ratio,
+        "staleness": staleness_info,
         "prompt_context": prompt_context,
     }

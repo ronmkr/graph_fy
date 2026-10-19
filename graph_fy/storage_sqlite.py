@@ -269,6 +269,29 @@ class SqliteGraphStore:
             if build_fts:
                 self.populate_fts(G, cur=cur)
 
+            # Record file_stats from distinct source_file attributes in G
+            file_paths = {data.get("source_file") for _, data in G.nodes(data=True) if data.get("source_file")}
+            stats_rows = []
+            for fp in file_paths:
+                if not fp:
+                    continue
+                p = Path(fp)
+                if not p.is_absolute():
+                    cand = self.db_path.parent.parent / p
+                    if cand.exists():
+                        p = cand
+                if p.exists() and p.is_file():
+                    try:
+                        st = p.stat()
+                        stats_rows.append((str(fp), st.st_size, st.st_mtime_ns, None))
+                    except OSError:
+                        pass
+            if stats_rows:
+                cur.executemany(
+                    "INSERT OR REPLACE INTO file_stats (path, size, mtime_ns, content_hash) VALUES (?, ?, ?, ?);",
+                    stats_rows,
+                )
+
             self.conn.commit()
 
             # Ensure backward compatibility symlink: index.db -> graph.db
@@ -361,6 +384,157 @@ class SqliteGraphStore:
             c.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('optimize');")
         except sqlite3.Error:
             pass
+
+    def record_file_stats(self, stats: dict[str, tuple[int, int, str | None]]) -> None:
+        """Record file size, mtime_ns, and content hash in file_stats table."""
+        rows = [(path, sz, mtime_ns, h) for path, (sz, mtime_ns, h) in stats.items()]
+        with self.conn:
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO file_stats (path, size, mtime_ns, content_hash) VALUES (?, ?, ?, ?);",
+                rows,
+            )
+
+    def get_file_stats(self) -> dict[str, dict[str, Any]]:
+        """Return dict of path -> {size, mtime_ns, content_hash}."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT path, size, mtime_ns, content_hash FROM file_stats;")
+        res: dict[str, dict[str, Any]] = {}
+        for row in cur.fetchall():
+            res[row["path"]] = {
+                "size": row["size"],
+                "mtime_ns": row["mtime_ns"],
+                "content_hash": row["content_hash"],
+            }
+        return res
+
+    def remove_file(self, file_path: str) -> None:
+        """Remove all nodes and incident edges associated with a source file."""
+        fp_str = str(file_path)
+        fp_name = Path(file_path).name
+        cur = self.conn.cursor()
+        with self.conn:
+            cur.execute(
+                """
+                DELETE FROM edges
+                WHERE source_id IN (SELECT id FROM nodes WHERE source_file = ? OR source_file = ?)
+                   OR target_id IN (SELECT id FROM nodes WHERE source_file = ? OR source_file = ?);
+                """,
+                (fp_str, fp_name, fp_str, fp_name),
+            )
+            cur.execute(
+                "DELETE FROM nodes_fts WHERE source_path = ? OR source_path = ?;",
+                (fp_str, fp_name),
+            )
+            cur.execute(
+                "DELETE FROM node_metadata WHERE source_path = ? OR source_path = ?;",
+                (fp_str, fp_name),
+            )
+            cur.execute(
+                "DELETE FROM nodes WHERE source_file = ? OR source_file = ?;",
+                (fp_str, fp_name),
+            )
+            cur.execute("DELETE FROM file_stats WHERE path = ? OR path = ?;", (fp_str, fp_name))
+
+    def hot_patch_file(
+        self,
+        file_path: str,
+        new_nodes: list[dict],
+        new_edges: list[dict],
+        stat: tuple[int, int, str | None] | None = None,
+    ) -> None:
+        """Atomically hot-patch nodes, edges, FTS, and file stats for a modified file."""
+        fp_str = str(file_path)
+        cur = self.conn.cursor()
+        with self.conn:
+            self.remove_file(fp_str)
+
+            node_rows = []
+            fts_rows = []
+            meta_rows = []
+            reserved = {"label", "file_type", "node_kind", "source_file", "source_location", "community_id", "pagerank"}
+            for n in new_nodes:
+                nid = str(n.get("id") or "")
+                if not nid:
+                    continue
+                lbl = str(n.get("label") or nid)
+                kind = str(n.get("file_type") or n.get("node_kind") or "concept")
+                sf = n.get("source_file") or fp_str
+                s_line, e_line = _parse_source_location(n.get("source_location"))
+                cid = n.get("community_id")
+                comm_id = int(cid) if cid is not None else None
+                pr = float(n.get("pagerank") or 0.0)
+                extra = {k: v for k, v in n.items() if k not in reserved}
+                meta_json = json.dumps(extra) if extra else None
+                node_rows.append((nid, lbl, kind, str(sf), s_line, e_line, comm_id, pr, meta_json))
+
+                doc = n.get("docstring") or ""
+                body = n.get("body") or ""
+                content = f"{lbl}\n{doc}\n{body}".strip()
+                fts_rows.append((nid, lbl, "", "", content, str(sf)))
+                meta_rows.append((nid, lbl, str(sf), str(n.get("source_location") or ""), kind, kind, pr, 0, content))
+
+            if node_rows:
+                cur.executemany(
+                    """
+                    INSERT OR REPLACE INTO nodes
+                    (id, label, kind, source_file, start_line, end_line, community_id, pagerank, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    node_rows,
+                )
+                cur.executemany(
+                    "INSERT INTO nodes_fts (node_id, title, headings, tags, body, source_path) VALUES (?, ?, ?, ?, ?, ?);",
+                    fts_rows,
+                )
+                cur.executemany(
+                    """
+                    INSERT INTO node_metadata
+                    (node_id, label, source_path, source_location, file_type, node_kind, pagerank, degree, content)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    meta_rows,
+                )
+
+            edge_rows = []
+            seen_edges = set()
+            reserved_e = {"relation", "confidence", "weight", "confidence_score", "call_site_line", "source_location"}
+            for e in new_edges:
+                s = str(e.get("source") or "")
+                t = str(e.get("target") or "")
+                if not s or not t:
+                    continue
+                rel = str(e.get("relation") or "references")
+                conf = str(e.get("confidence") or "EXTRACTED")
+                wt = float(e.get("weight") or e.get("confidence_score") or 1.0)
+                cs_line, _ = _parse_source_location(e.get("call_site_line") or e.get("source_location"))
+                cs_key = cs_line if cs_line is not None else -1
+
+                edge_key = (s, t, rel, cs_key)
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+
+                extra_e = {k: v for k, v in e.items() if k not in reserved_e}
+                e_meta = json.dumps(extra_e) if extra_e else None
+                edge_rows.append((s, t, rel, conf, wt, cs_key, e_meta))
+
+            if edge_rows:
+                cur.executemany(
+                    """
+                    INSERT OR REPLACE INTO edges
+                    (source_id, target_id, relation, confidence, weight, call_site_line, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    edge_rows,
+                )
+
+            if stat:
+                sz, mtime_ns, h = stat
+                cur.execute(
+                    "INSERT OR REPLACE INTO file_stats (path, size, mtime_ns, content_hash) VALUES (?, ?, ?, ?);",
+                    (fp_str, sz, mtime_ns, h),
+                )
+
 
     def fts_search(
         self,

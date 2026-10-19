@@ -184,6 +184,7 @@ class GraphQueryEngine:
         graph_path: str | None = None,
         include_diagram: bool = True,
         include_bodies: bool | str = "auto",
+        hotpatch: bool = True,
     ) -> dict[str, Any]:
         """Generate deterministic pre-agent architectural briefing before LLM calls."""
         return _task_context(
@@ -194,6 +195,7 @@ class GraphQueryEngine:
             graph_path=graph_path,
             include_diagram=include_diagram,
             include_bodies=include_bodies,
+            hotpatch=hotpatch,
         )
 
     @staticmethod

@@ -135,6 +135,11 @@ graph_fy lint --layers                        # enforce clean decoupled layer hi
 graph_fy lint --drift --base ../main_branch/  # detect breaking API removals & signature drift
 graph_fy lint --context-managers              # detect unclosed DB/lock leaks (missing __exit__/__aexit__)
 
+# Sub-Second AST & Fast-Path Slicing (Unindexed)
+graph_fy skeleton path/to/file.py             # instant file AST skeleton in <10ms
+graph_fy skeleton path/to/file.py --symbol fn # instant single-symbol skeleton
+graph_fy query "symbol_name" --fast-grep      # sub-second unindexed lexical + Tree-sitter AST search
+
 # Graph Generation & Incremental Updates
 graph_fy .                                    # build graph and search index in graph_fy_out/
 graph_fy update .                             # fast incremental AST update (post-edit, no LLM)
