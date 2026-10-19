@@ -1055,6 +1055,7 @@ def get_agent_context(
     graph_path: str | None = None,
     include_diagram: bool = True,
     include_bodies: bool | str = "auto",
+    hotpatch: bool = True,
 ) -> dict:
     """Generate a holistic, deterministic pre-agent architectural briefing before LLM calls."""
     from graph_fy.query_engine import GraphQueryEngine
@@ -1066,6 +1067,7 @@ def get_agent_context(
         graph_path=graph_path,
         include_diagram=include_diagram,
         include_bodies=include_bodies,
+        hotpatch=hotpatch,
     )
 
 

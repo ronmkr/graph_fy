@@ -903,12 +903,28 @@ def _build_server(graph_path: str):
         depth = int(arguments.get("max_depth", 15))
         return str(get_execution_flow(entry_point=entry, sink=sink, max_depth=depth, graph=G))
 
+    def _maybe_hotpatch_graph(root_dir: str) -> None:
+        nonlocal G
+        try:
+            from graph_fy.staleness import check_graph_staleness, hot_patch_graph
+            st = check_graph_staleness(graph_path=active_graph_path, project_root=root_dir)
+            if st.get("action") == "hotpatch" and (st.get("modified_files") or st.get("deleted_files")):
+                hot_patch_graph(
+                    graph=G,
+                    modified_files=st.get("modified_files"),
+                    deleted_files=st.get("deleted_files"),
+                    project_root=root_dir,
+                )
+        except Exception:
+            pass
+
     def _tool_find_definitions(arguments: dict) -> str:
         from graph_fy.mcp import find_definitions
         query = arguments.get("query", "")
         if not query:
             raise ToolError("Missing required argument: 'query'")
         root = str(Path(active_graph_path).parent.parent) if Path(active_graph_path).parent.name == "graph_fy_out" else str(Path(active_graph_path).parent)
+        _maybe_hotpatch_graph(root)
         res = find_definitions(query, graph=G, root_dir=root)
         return json.dumps(res, indent=2)
 
@@ -918,6 +934,7 @@ def _build_server(graph_path: str):
         if not symbol:
             raise ToolError("Missing required argument: 'symbol'")
         root = str(Path(active_graph_path).parent.parent) if Path(active_graph_path).parent.name == "graph_fy_out" else str(Path(active_graph_path).parent)
+        _maybe_hotpatch_graph(root)
         res = get_callers(symbol, graph=G, root_dir=root)
         return json.dumps(res, indent=2)
 
@@ -927,6 +944,7 @@ def _build_server(graph_path: str):
         if not symbol:
             raise ToolError("Missing required argument: 'symbol'")
         root = str(Path(active_graph_path).parent.parent) if Path(active_graph_path).parent.name == "graph_fy_out" else str(Path(active_graph_path).parent)
+        _maybe_hotpatch_graph(root)
         res = get_callees(symbol, graph=G, root_dir=root)
         return json.dumps(res, indent=2)
 
@@ -936,6 +954,7 @@ def _build_server(graph_path: str):
         if not symbol:
             raise ToolError("Missing required argument: 'symbol'")
         root = str(Path(active_graph_path).parent.parent) if Path(active_graph_path).parent.name == "graph_fy_out" else str(Path(active_graph_path).parent)
+        _maybe_hotpatch_graph(root)
         res = find_references(symbol, graph=G, root_dir=root)
         return json.dumps(res, indent=2)
 

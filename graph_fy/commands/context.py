@@ -15,6 +15,7 @@ def cmd_context(argv: list[str]) -> int:
     graph_paths: list[str] = []
     db_path = None
     include_diagram = "--no-diagram" not in argv
+    hotpatch = "--no-hotpatch" not in argv
     if any(arg in argv for arg in ("--include-bodies", "--hydrate-bodies", "--full-bodies")):
         include_bodies: bool | str = True
     elif "--no-bodies" in argv or "--no-hydrate" in argv:
@@ -100,6 +101,7 @@ def cmd_context(argv: list[str]) -> int:
             token_budget=budget,
             include_diagram=include_diagram,
             include_bodies=include_bodies,
+            hotpatch=hotpatch,
         )
     else:
         res = task_context(
@@ -110,6 +112,7 @@ def cmd_context(argv: list[str]) -> int:
             token_budget=budget,
             include_diagram=include_diagram,
             include_bodies=include_bodies,
+            hotpatch=hotpatch,
         )
 
     if "--json" in argv:
