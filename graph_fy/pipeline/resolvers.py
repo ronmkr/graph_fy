@@ -1,4 +1,4 @@
-"""Phase 3: Two-pass cross-language and framework symbol resolution."""
+"""Cross-language and framework symbol resolution."""
 from __future__ import annotations
 
 import os

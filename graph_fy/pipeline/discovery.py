@@ -1,4 +1,4 @@
-"""Phase 1: File discovery, path anchoring, and cache initialization."""
+"""File discovery, path anchoring, and cache initialization."""
 from __future__ import annotations
 
 import os
