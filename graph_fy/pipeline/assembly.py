@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path, PurePath
 
-from graph_fy.extractors.base import _file_stem, _make_id
+from graph_fy.extractors.base import _file_node_id, _file_stem, _make_id
 
 
 def _default_portable_out_of_root_sf(p: Path, root: Path) -> str:
@@ -33,7 +33,6 @@ def assemble_graph(
 ) -> dict:
     """Execute phase 4: relativize, remap IDs, tag provenance, and assemble final dictionary."""
     if file_node_id_fn is None:
-        from graph_fy.extract import _file_node_id
         file_node_id_fn = _file_node_id
 
     if portable_sf_fn is None:

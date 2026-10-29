@@ -318,6 +318,11 @@ def resolve_cross_file_raw_calls(
 
     label_index = build_label_index(all_nodes)
     known_pairs = existing_edge_pairs(all_edges)
+    nid_to_node = {
+        str(n.get("id")): n
+        for n in all_nodes
+        if n.get("id")
+    }
     # nid -> source_file, for the shared god-node tie-breakers (#1553) so a
     # same-named test mock no longer erases a real cross-file call.
     nid_to_source_file = {
@@ -341,14 +346,25 @@ def resolve_cross_file_raw_calls(
         if len(candidates) == 1:
             target: str | None = candidates[0]
         else:
-            # Ambiguous bare name. Apply the shared tie-breakers (non-test
-            # preference, then path proximity); resolve only if exactly one
-            # candidate survives, else preserve the god-node guard and skip.
-            target = disambiguate_ambiguous_candidates(
-                candidates,
-                {c: nid_to_source_file.get(c, "") for c in candidates},
-                str(raw_call.get("source_file", "")),
-            )
+            target = None
+            arg_count = raw_call.get("arg_count")
+            if arg_count is not None:
+                matched = [
+                    c for c in candidates
+                    if nid_to_node.get(c, {}).get("metadata", {}).get("arity") == arg_count
+                    or f"_a{arg_count}" in c
+                ]
+                if len(matched) == 1:
+                    target = matched[0]
+            if target is None:
+                # Ambiguous bare name. Apply the shared tie-breakers (non-test
+                # preference, then path proximity); resolve only if exactly one
+                # candidate survives, else preserve the god-node guard and skip.
+                target = disambiguate_ambiguous_candidates(
+                    candidates,
+                    {c: nid_to_source_file.get(c, "") for c in candidates},
+                    str(raw_call.get("source_file", "")),
+                )
             if target is None:
                 continue
         caller = str(raw_call.get("caller_nid", ""))

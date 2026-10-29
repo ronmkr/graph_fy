@@ -541,3 +541,32 @@ def load_node_link_graph(path_or_data):
         return json_graph.node_link_graph(data, edges="links")
     except TypeError:  # networkx too old for the edges kwarg; default is "links"
         return json_graph.node_link_graph(data)
+
+
+class _StageTimer:
+    """Print per-stage wall-clock timings to stderr when --timing is set (#1490).
+
+    Monotonic (perf_counter), diagnostic-only: emits ``[graph_fy timing] <stage>:
+    N.Ns`` after each stage and a final total. Off by default, so normal output is
+    byte-identical and machine-read stdout is untouched.
+    """
+
+    def __init__(self, enabled: bool) -> None:
+        import time as _time
+        self._now = _time.perf_counter
+        self.enabled = enabled
+        self.start = self._now()
+        self._last = self.start
+
+    def mark(self, stage: str) -> None:
+        now = self._now()
+        if self.enabled:
+            import sys as _sys
+            print(f"[graph_fy timing] {stage}: {now - self._last:.1f}s", file=_sys.stderr)
+        self._last = now
+
+    def total(self) -> None:
+        if self.enabled:
+            import sys as _sys
+            print(f"[graph_fy timing] total: {self._now() - self.start:.1f}s", file=_sys.stderr)
+

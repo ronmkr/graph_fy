@@ -571,6 +571,41 @@ def _resolves_under_root(path: Path, root: Path) -> bool:
     return True
 
 
+def _is_redundant_git_worktree(dir_path: Path, root: Path) -> bool:
+    """Return True if dir_path is a linked git worktree whose main checkout is under root."""
+    try:
+        git_file = dir_path / ".git"
+        if not git_file.is_file():
+            return False
+        content = git_file.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return False
+    if not content.startswith("gitdir:"):
+        return False
+    gitdir_str = content[7:].strip()
+    gitdir_path = (dir_path / gitdir_str).resolve()
+    # Check commondir pointer inside worktree gitdir
+    common_dir_file = gitdir_path / "commondir"
+    if common_dir_file.is_file():
+        try:
+            commondir_str = common_dir_file.read_text(encoding="utf-8", errors="replace").strip()
+            main_dot_git = (gitdir_path / commondir_str).resolve()
+            main_checkout = main_dot_git.parent
+            if _resolves_under_root(main_checkout, root):
+                return True
+        except OSError:
+            pass
+    parts = gitdir_path.parts
+    if "worktrees" in parts:
+        wt_idx = parts.index("worktrees")
+        if wt_idx >= 1:
+            main_dot_git = Path(*parts[:wt_idx])
+            main_checkout = main_dot_git.parent if main_dot_git.name == ".git" else main_dot_git
+            if _resolves_under_root(main_checkout, root):
+                return True
+    return False
+
+
 def detect(root: Path, *, follow_symlinks: bool | None = None, google_workspace: bool | None = None, extra_excludes: list[str] | None = None, cache_root: Path | None = None, gitignore: bool = True) -> dict:
     root = root.resolve()
     configured_out_dir = root / graph_fy_OUT
@@ -726,6 +761,9 @@ def detect(root: Path, *, follow_symlinks: bool | None = None, google_workspace:
                         except (OSError, RuntimeError):
                             pass
                     if is_configured_out:
+                        pruned_noise.append(str(child) + os.sep)
+                        continue
+                    if _is_redundant_git_worktree(child, root):
                         pruned_noise.append(str(child) + os.sep)
                         continue
                     if _is_noise_dir(d, dp):
@@ -886,14 +924,22 @@ def detect(root: Path, *, follow_symlinks: bool | None = None, google_workspace:
 
 
 from graph_fy.paths import os_path as _os_path
-from graph_fy.manifest import (
-    _md5_file,
-    _stat_and_hash,
-    _to_relative_for_storage,
-    _to_absolute_from_storage,
-    load_manifest,
-    save_manifest,
-    _mtime_may_hide_a_rewrite,
-    detect_incremental,
-)
+
+
+def __getattr__(name: str):
+    """Lazily re-export manifest symbols to avoid cyclic import with manifest.py."""
+    if name in {
+        "_md5_file",
+        "_stat_and_hash",
+        "_to_relative_for_storage",
+        "_to_absolute_from_storage",
+        "load_manifest",
+        "save_manifest",
+        "_mtime_may_hide_a_rewrite",
+        "detect_incremental",
+    }:
+        import graph_fy.manifest as _manifest
+        return getattr(_manifest, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 

@@ -54,6 +54,7 @@ _LANGUAGE_BUILTIN_GLOBALS: frozenset[str] = frozenset({
 _make_id = make_id
 
 
+
 def _file_stem(path: Path) -> str:
     """Stem used as the node-ID prefix for a file and its symbols.
 
@@ -78,6 +79,16 @@ def _file_stem(path: Path) -> str:
     if not path.name:
         return ""
     return path.with_suffix("").as_posix()
+
+
+def _file_node_id(rel_path: Path) -> str:
+    """File-level node ID matching the skill.md spec: ``{parent_dir}_{stem}`` —
+    one parent directory level, no extension. ``rel_path`` MUST be relative to
+    the project root so top-level files collapse to a bare stem (``setup.py`` ->
+    ``setup``) instead of picking up the root directory name. This must equal the
+    ID semantic subagents generate, or AST and semantic extraction split a file
+    into two disconnected ghost nodes (#1033)."""
+    return _make_id(_file_stem(rel_path))
 
 
 def _read_text(node, source: bytes) -> str:

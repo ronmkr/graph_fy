@@ -679,11 +679,13 @@ def _scan_js_nested_function_declarations(
     container_node, parent_nid: str, *, source: bytes, config,
     add_node, add_edge, callable_def_nids: set | None,
     local_bound_names: dict | None, function_bodies: list,
+    scope_parents: dict[str, str] | None = None,
+    lexical_nids_by_scope: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Emit a node + `contains` edge for every named `function`/generator
     declaration lexically nested inside *container_node*, scoped under
-    *parent_nid*, and track its body so calls made from inside it resolve
-    instead of dangling (#2653).
+    *parent_nid*, track its body, and record lexical scope hierarchy so calls
+    resolve to local definitions instead of falling through or leaking (#2653, #4767).
 
     Recurses through non-function children AND through the bodies of nested
     arrow / function expressions, so a `function` declared inside an arrow
@@ -715,6 +717,11 @@ def _scan_js_nested_function_declarations(
                     callable_def_nids.add(nested_nid)
                 if local_bound_names is not None:
                     local_bound_names[nested_nid] = _js_local_bound_names(child, source)
+                if scope_parents is not None:
+                    scope_parents[nested_nid] = parent_nid
+                if lexical_nids_by_scope is not None:
+                    lexical_nids_by_scope.setdefault(parent_nid, {})[func_name] = nested_nid
+                    lexical_nids_by_scope.setdefault(nested_nid, {})[func_name] = nested_nid
                 nested_body = _find_body(child, config)
                 if nested_body:
                     function_bodies.append((nested_nid, nested_body))
@@ -724,6 +731,8 @@ def _scan_js_nested_function_declarations(
                         callable_def_nids=callable_def_nids,
                         local_bound_names=local_bound_names,
                         function_bodies=function_bodies,
+                        scope_parents=scope_parents,
+                        lexical_nids_by_scope=lexical_nids_by_scope,
                     )
         elif child.type in _JS_FUNCTION_VALUE_TYPES:
             # An anonymous arrow/function expression is not itself a node, but a
@@ -735,6 +744,8 @@ def _scan_js_nested_function_declarations(
                 callable_def_nids=callable_def_nids,
                 local_bound_names=local_bound_names,
                 function_bodies=function_bodies,
+                scope_parents=scope_parents,
+                lexical_nids_by_scope=lexical_nids_by_scope,
             )
         else:
             _scan_js_nested_function_declarations(
@@ -743,6 +754,8 @@ def _scan_js_nested_function_declarations(
                 callable_def_nids=callable_def_nids,
                 local_bound_names=local_bound_names,
                 function_bodies=function_bodies,
+                scope_parents=scope_parents,
+                lexical_nids_by_scope=lexical_nids_by_scope,
             )
 
 
@@ -883,7 +896,9 @@ def _js_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
                    callable_def_nids: set | None = None,
                    local_bound_names: dict | None = None,
                    closure_locals_by_body: dict | None = None,
-                   config=None) -> bool:
+                   config=None,
+                   scope_parents: dict[str, str] | None = None,
+                   lexical_nids_by_scope: dict[str, dict[str, str]] | None = None) -> bool:
     """Handle lexical_declaration (arrow functions, CJS requires, module-level const literals) for JS/TS. Returns True if handled."""
     # CommonJS / prototype member assignments whose value is a function:
     #   exports.X = () => {}     → file-contained function  X()
@@ -1075,6 +1090,8 @@ def _js_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
                                     callable_def_nids=callable_def_nids,
                                     local_bound_names=local_bound_names,
                                     function_bodies=function_bodies,
+                                    scope_parents=scope_parents,
+                                    lexical_nids_by_scope=lexical_nids_by_scope,
                                 )
                                 # #3408: `this.X = fn` members were captured only
                                 # when the enclosing function was a DECLARATION;

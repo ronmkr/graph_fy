@@ -493,26 +493,31 @@ def extract_markdown(path: Path, source_text: str | None = None) -> dict:
         line_num = line_num_0 + 1
 
         # Skip over fenced code blocks (``` or ~~~) so their contents are not parsed as
-        # headings, but do not emit nodes/edges for them (#1077).
-        stripped = line_text.strip()
+        # headings, but do not emit nodes/edges for them (#1077). Track fence character
+        # and length per CommonMark rules (#4787).
+        m_fence_open = re.match(r"^[ ]{0,3}(`{3,}|~{3,})(.*)$", line_text)
         if not in_code_block:
-            fence_match = re.match(r"^(`{3,}|~{3,})", stripped)
-            if fence_match:
-                fc = fence_match.group(1)[0]
-                fl = len(fence_match.group(1))
-                rest = stripped[fl:]
-                if rest.rstrip().endswith(fc * fl):
-                    # Single-line closed fence: e.g. ```python foo() ```
+            if m_fence_open:
+                fence_str = m_fence_open.group(1)
+                fc = fence_str[0]
+                fl = len(fence_str)
+                info = m_fence_open.group(2).strip()
+                if fc == "`" and "`" in info:
+                    pass
+                else:
+                    if info.endswith(fc * fl) and len(info) >= fl:
+                        # Single-line closed fence: e.g. ```python foo() ```
+                        section_lines.setdefault(current_nid, []).append(line_text)
+                        continue
+                    current_fence = (fc, fl)
+                    in_code_block = True
                     section_lines.setdefault(current_nid, []).append(line_text)
                     continue
-                current_fence = (fc, fl)
-                in_code_block = True
-                section_lines.setdefault(current_nid, []).append(line_text)
-                continue
         else:
             if current_fence is not None:
                 fc, fl = current_fence
-                if stripped.startswith(fc * fl) and not stripped.strip(fc):
+                m_close = re.match(r"^[ ]{0,3}" + re.escape(fc) + r"{" + str(fl) + r",}[ \t]*$", line_text)
+                if m_close:
                     in_code_block = False
                     current_fence = None
                     section_lines.setdefault(current_nid, []).append(line_text)
@@ -545,11 +550,20 @@ def extract_markdown(path: Path, source_text: str | None = None) -> dict:
         for m in _MD_TAG_RE.finditer(scan_text):
             add_tag(m.group(1), line_num)
 
-        # Detect headings: # Heading, ## Heading, etc.
-        heading_match = re.match(r'^(#{1,6})\s+(.+)', line_text)
+        # Detect headings per CommonMark ATX specification (#4790, #4791):
+        # 0-3 spaces of indentation, 1-6 hashes, trailing hash sequence stripped.
+        heading_match = re.match(r"^[ ]{0,3}(#{1,6})(?:[ \t]+(.*))?$", line_text)
         if heading_match:
             level = len(heading_match.group(1))
-            title = heading_match.group(2).strip()
+            raw_title = heading_match.group(2) or ""
+            content = raw_title.rstrip()
+            m_trail = re.search(r"[ \t]+#+[ \t]*$", content)
+            if m_trail:
+                content = content[:m_trail.start()].rstrip()
+            elif re.match(r"^#+[ \t]*$", content):
+                content = ""
+
+            title = content.strip()
             if not title or not any(c.isalnum() for c in title):
                 continue
             h_nid = _make_id(stem, title)

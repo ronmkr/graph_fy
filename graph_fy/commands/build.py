@@ -567,7 +567,7 @@ def cmd_build(
     if stage_timer_cls is not None:
         _StageTimer = stage_timer_cls
     else:
-        from graph_fy.cli import _StageTimer
+        from graph_fy.paths import _StageTimer
 
     sys_argv_backup = sys.argv
     sys.argv = list(argv)

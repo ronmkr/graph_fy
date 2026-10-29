@@ -160,6 +160,7 @@ filterwarnings = [
     "ignore:semantic cache skipped out-of-scope source_file.*:RuntimeWarning",
     "ignore:Please import `random` from the `scipy.sparse` namespace.*:DeprecationWarning",
     "ignore:The keyword argument 'nopython=False' was supplied.*:Warning",
+    "ignore:invalid escape sequence.*:SyntaxWarning",
 ]
 
 [tool.bandit]

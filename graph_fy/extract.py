@@ -30,6 +30,7 @@ from .markdown_resolution import MARKDOWN_MENTION_SUFFIXES, resolve_markdown_men
 # --- migrated to graph_fy/extractors/ (see graph_fy/extractors/MIGRATION.md) ---
 from graph_fy.extractors.base import (  # noqa: F401
     _LANGUAGE_BUILTIN_GLOBALS,
+    _file_node_id,
     _file_stem,
     _make_id,
     _read_text,
@@ -88,7 +89,7 @@ from graph_fy.extractors.rtk import extract_rtk, is_rtk_file  # noqa: F401
 from graph_fy.extractors.cmake import extract_cmake, is_cmake_file  # noqa: F401
 from graph_fy.extractors.qt_ui import extract_qt_ui, is_qt_ui_file  # noqa: F401
 from graph_fy.extractors.gradle import extract_gradle, is_gradle_file  # noqa: F401
-from graph_fy.security import sanitize_metadata
+from graph_fy.security import sanitize_metadata, _redact_rationale_labels
 from graph_fy.paths import disambiguate_ambiguous_candidates
 
 from graph_fy.extractors.models import LanguageConfig, _JS_CACHE_BYPASS_SUFFIXES, _NamespaceExportFact, _StarExportFact, _SymbolAliasFact, _SymbolDeclarationFact, _SymbolExportFact, _SymbolImportFact, _SymbolResolutionFacts, _SymbolUseFact, _WORKSPACE_PACKAGE_CACHE  # noqa: E402,F401
@@ -202,7 +203,9 @@ def _raise_recursion_limit() -> None:
 
 def _safe_extract(extractor: Callable, path: Path) -> dict:
     try:
-        return extractor(path)
+        result = extractor(path)
+        _redact_rationale_labels(result)
+        return result
     except RecursionError:
         print(f"  warning: skipped {path} (recursion limit exceeded)", file=sys.stderr, flush=True)
         return {"nodes": [], "edges": [], "error": "recursion_limit_exceeded"}
@@ -212,16 +215,6 @@ def _safe_extract(extractor: Callable, path: Path) -> dict:
             traceback.print_exc(file=sys.stderr)
         print(f"  warning: skipped {path} ({type(e).__name__}: {e})", file=sys.stderr, flush=True)
         return {"nodes": [], "edges": [], "error": f"{type(e).__name__}: {e}"}
-
-
-def _file_node_id(rel_path: Path) -> str:
-    """File-level node ID matching the skill.md spec: ``{parent_dir}_{stem}`` —
-    one parent directory level, no extension. ``rel_path`` MUST be relative to
-    the project root so top-level files collapse to a bare stem (``setup.py`` ->
-    ``setup``) instead of picking up the root directory name. This must equal the
-    ID semantic subagents generate, or AST and semantic extraction split a file
-    into two disconnected ghost nodes (#1033)."""
-    return _make_id(_file_stem(rel_path))
 
 
 from graph_fy.extractors.python_imports import (  # noqa: F401

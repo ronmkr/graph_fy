@@ -88,7 +88,11 @@ def get_parser_for_path(path: Path | str) -> tuple[Parser, str] | tuple[None, No
     try:
         mod = importlib.import_module(mod_name)
         lang_fn = getattr(mod, fn_name) if fn_name else getattr(mod, "language")
-        ts_lang = Language(lang_fn())
+        raw_lang = lang_fn()
+        import warnings as _warnings
+        with _warnings.catch_warnings():
+            _warnings.filterwarnings("ignore", category=DeprecationWarning, message="int argument support is deprecated")
+            ts_lang = Language(raw_lang)
         parser = Parser(ts_lang)
         _PARSER_CACHE[suffix] = (parser, lang_name)
         return parser, lang_name

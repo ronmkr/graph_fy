@@ -459,3 +459,86 @@ def sanitize_metadata(metadata: Mapping[str, Any] | None) -> dict[str, object]:
             continue
         result[clean_key] = _sanitize_metadata_value(value)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Credential & Secret Redaction (Pre-Cache Choke Point #4647)
+# ---------------------------------------------------------------------------
+
+_PEM_KEY_RE = re.compile(
+    r"-----BEGIN (?:[A-Z0-9_-]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9_-]+ )?PRIVATE KEY-----"
+    r"|-----BEGIN (?:[A-Z0-9_-]+ )?PRIVATE KEY-----[^\n]*"
+)
+
+_URL_USERINFO_RE = re.compile(
+    r"(?i)\b([a-z][a-z0-9+.-]*://)(?:[^/\s@:]*):(.+?)@([a-zA-Z0-9_.-]+(?::\d+)?)(?=[/?#\s]|$)"
+)
+
+_GITHUB_TOKEN_RE = re.compile(
+    r"(?:(?<=[^\w])|^|(?<=_))(?:gh[pours]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})"
+)
+
+_SLACK_TOKEN_RE = re.compile(
+    r"\bxox[baprs]-[0-9]{9,13}-[0-9]{9,13}(?:-[0-9a-zA-Z]+)?\b|\bxoxe(?:\.[0-9a-zA-Z-]+|-[0-9a-zA-Z-]+)\b"
+)
+
+_JWT_RE = re.compile(
+    r"\beyJ[A-Za-z0-9_-]{3,}\.eyJ[A-Za-z0-9_-]{3,}\.[A-Za-z0-9_-]{5,}\b"
+)
+
+_OPENAI_KEY_RE = re.compile(
+    r"\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}\b"
+)
+
+_AWS_KEY_RE = re.compile(
+    r"\b(AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\b"
+)
+
+_SECRET_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (_PEM_KEY_RE, "[redacted]"),
+    (_URL_USERINFO_RE, r"\1[redacted]@\3"),
+    (_GITHUB_TOKEN_RE, "[redacted]"),
+    (_SLACK_TOKEN_RE, "[redacted]"),
+    (_JWT_RE, "[redacted]"),
+    (_OPENAI_KEY_RE, "[redacted]"),
+    (_AWS_KEY_RE, "[redacted]"),
+]
+
+
+def redact_credentials(text: str) -> str:
+    """Redact API keys, tokens, passwords, and private keys from *text*."""
+    if not text:
+        return text
+    for pat, repl in _SECRET_PATTERNS:
+        text = pat.sub(repl, text)
+    return text
+
+
+def _redact_rationale_labels(result: dict) -> None:
+    """Centralized pre-cache choke point for rationale label & text redaction.
+
+    Ensures docstrings and comments containing secrets, private keys, or URL
+    credentials cannot slip into graph.json or downstream exports (#4647).
+    """
+    if not isinstance(result, dict):
+        return
+    nodes = result.get("nodes")
+    if not isinstance(nodes, list):
+        return
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        is_rationale = (
+            n.get("file_type") == "rationale"
+            or "rationale" in n
+            or str(n.get("id", "")).endswith("_rationale")
+            or "_rationale_" in str(n.get("id", ""))
+        )
+        if is_rationale:
+            lbl = n.get("label")
+            if isinstance(lbl, str):
+                n["label"] = redact_credentials(lbl)
+            rat = n.get("rationale")
+            if isinstance(rat, str):
+                n["rationale"] = redact_credentials(rat)
+

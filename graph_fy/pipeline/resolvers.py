@@ -56,7 +56,7 @@ def run_resolution_phase(
 ) -> tuple[list[dict], list[dict]]:
     """Execute Phase 3: cross-file symbol, call, and framework route resolution."""
     if file_node_id_fn is None:
-        from graph_fy.extract import _file_node_id
+        from graph_fy.extractors.base import _file_node_id
         file_node_id_fn = _file_node_id
 
     _file_node_id = file_node_id_fn
