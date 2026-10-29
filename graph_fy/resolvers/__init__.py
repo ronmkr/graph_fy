@@ -114,3 +114,4 @@ from graph_fy.resolvers.python import (
     _resolve_python_namespace_dir,
     _walk_python_tree,
 )
+from graph_fy.resolvers.config_lineage import resolve_config_lineage

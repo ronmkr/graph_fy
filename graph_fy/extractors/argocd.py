@@ -185,6 +185,36 @@ def _extract_application(
             "source_location": "L1",
         })
 
+    # Helm parameters / config values
+    helm = source.get("helm") or {}
+    if isinstance(helm, dict):
+        params = helm.get("parameters") or []
+        if isinstance(params, list):
+            for p in params:
+                if isinstance(p, dict) and p.get("name"):
+                    pname = str(p["name"])
+                    p_nid = _make_id("argocd_param", str_path, app_name, pname)
+                    nodes.append({
+                        "id": p_nid,
+                        "label": f"Argo:Param:{pname}",
+                        "type": "config_decl",
+                        "file_type": "code",
+                        "config_type": "env",
+                        "config_name": pname,
+                        "source_file": str_path,
+                        "source_location": "L1",
+                        "text": f"Argo CD Application {app_name} parameter {pname}",
+                    })
+                    edges.append({
+                        "source": app_nid,
+                        "target": p_nid,
+                        "relation": "declares_config",
+                        "confidence": "EXTRACTED",
+                        "weight": 1.0,
+                        "source_file": str_path,
+                        "source_location": "L1",
+                    })
+
 
 def _extract_applicationset(
     str_path: str,

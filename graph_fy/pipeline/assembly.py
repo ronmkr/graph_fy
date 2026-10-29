@@ -1,4 +1,4 @@
-"""Phase 4: ID remapping, provenance tagging, POSIX normalization, and graph assembly."""
+"""ID remapping, provenance tagging, POSIX normalization, and graph assembly."""
 from __future__ import annotations
 
 import os

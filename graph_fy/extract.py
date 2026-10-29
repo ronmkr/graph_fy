@@ -1126,10 +1126,10 @@ _PARALLEL_THRESHOLD = 20
 
 
 
-from graph_fy.pipeline.phase1_discovery import collect_files, infer_root_and_cache
-from graph_fy.pipeline.phase2_workers import run_worker_phase
-from graph_fy.pipeline.phase3_resolvers import run_resolution_phase
-from graph_fy.pipeline.phase4_assembly import assemble_graph
+from graph_fy.pipeline.discovery import collect_files, infer_root_and_cache
+from graph_fy.pipeline.workers import run_worker_phase
+from graph_fy.pipeline.resolvers import run_resolution_phase
+from graph_fy.pipeline.assembly import assemble_graph
 
 
 def extract(

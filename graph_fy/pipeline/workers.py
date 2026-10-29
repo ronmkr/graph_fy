@@ -1,4 +1,4 @@
-"""Phase 2: Worker dispatch, caching, and per-file AST extraction."""
+"""Worker dispatch, caching, and per-file AST extraction."""
 from __future__ import annotations
 
 import os

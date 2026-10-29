@@ -5,7 +5,7 @@ import math
 import re
 import warnings
 from array import array
-from typing import NamedTuple
+from typing import NamedTuple, Any
 
 import networkx as nx
 from graph_fy.export import _strip_diacritics

@@ -102,6 +102,29 @@ def extract_github_workflow(path: Path) -> dict[str, Any]:
     workflow_env_vars: list[str] = []
     if isinstance(global_env, dict):
         workflow_env_vars.extend(str(k) for k in global_env.keys())
+        for k in global_env.keys():
+            k_str = str(k)
+            env_nid = _make_id("gha_env", str_path, k_str)
+            nodes.append({
+                "id": env_nid,
+                "label": f"GHA:Env:{k_str}",
+                "type": "config_decl",
+                "file_type": "code",
+                "config_type": "env",
+                "config_name": k_str,
+                "source_file": str_path,
+                "source_location": "L1",
+                "text": f"GitHub Actions workflow environment variable {k_str}",
+            })
+            edges.append({
+                "source": file_nid,
+                "target": env_nid,
+                "relation": "declares_env",
+                "confidence": "EXTRACTED",
+                "weight": 1.0,
+                "source_file": str_path,
+                "source_location": "L1",
+            })
     wf_node["env_vars"] = workflow_env_vars
 
     # 3. Jobs
@@ -112,6 +135,32 @@ def extract_github_workflow(path: Path) -> dict[str, Any]:
                 continue
             job_nid = _make_id("job", str_path, str(job_id))
             job_name = job_data.get("name") or str(job_id)
+
+            job_env = job_data.get("env") or {}
+            if isinstance(job_env, dict):
+                for k in job_env.keys():
+                    k_str = str(k)
+                    env_nid = _make_id("gha_env", str_path, str(job_id), k_str)
+                    nodes.append({
+                        "id": env_nid,
+                        "label": f"GHA:Env:{k_str}",
+                        "type": "config_decl",
+                        "file_type": "code",
+                        "config_type": "env",
+                        "config_name": k_str,
+                        "source_file": str_path,
+                        "source_location": "L1",
+                        "text": f"GitHub Actions job {job_id} environment variable {k_str}",
+                    })
+                    edges.append({
+                        "source": job_nid,
+                        "target": env_nid,
+                        "relation": "declares_env",
+                        "confidence": "EXTRACTED",
+                        "weight": 1.0,
+                        "source_file": str_path,
+                        "source_location": "L1",
+                    })
 
             # Reusable workflow call job
             uses_call = job_data.get("uses")

@@ -1,4 +1,4 @@
-"""Phase 3: Two-pass cross-language and framework symbol resolution."""
+"""Cross-language and framework symbol resolution."""
 from __future__ import annotations
 
 import os
@@ -1018,6 +1018,13 @@ def run_resolution_phase(
     try:
         from graph_fy.ffi_resolve import resolve_ffi_boundaries
         resolve_ffi_boundaries(all_nodes, all_edges, root=root)
+    except Exception:
+        pass
+
+    # Cross-layer configuration & environment variable lineage resolution (#28)
+    try:
+        from graph_fy.resolvers.config_lineage import resolve_config_lineage
+        resolve_config_lineage(all_nodes, all_edges, root=root)
     except Exception:
         pass
 

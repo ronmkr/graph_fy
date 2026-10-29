@@ -194,6 +194,38 @@ def extract_kubernetes(path: Path) -> dict[str, Any]:
                 "source_location": f"doc-{doc_idx + 1}",
             })
 
+            # Ingest ConfigMap / Secret keys as config_decl nodes
+            if kind in ("ConfigMap", "Secret"):
+                data_dict = doc.get("data") if isinstance(doc.get("data"), dict) else {}
+                sdata_dict = doc.get("stringData") if isinstance(doc.get("stringData"), dict) else {}
+                all_cfg_keys = list(data_dict.keys()) + list(sdata_dict.keys())
+                cfg_type = "configmap_key" if kind == "ConfigMap" else "secret_key"
+                for k in all_cfg_keys:
+                    k_str = str(k)
+                    cfg_nid = _make_id("k8s_cfg", str_path, namespace, str(name), k_str)
+                    if cfg_nid not in seen_ids:
+                        seen_ids.add(cfg_nid)
+                        nodes.append({
+                            "id": cfg_nid,
+                            "label": f"K8s:{kind}Key:{k_str}",
+                            "type": "config_decl",
+                            "file_type": "code",
+                            "config_type": cfg_type,
+                            "config_name": k_str,
+                            "source_file": str_path,
+                            "source_location": f"doc-{doc_idx + 1}",
+                            "text": f"Kubernetes {kind} {name} key {k_str}",
+                        })
+                        edges.append({
+                            "source": res_id,
+                            "target": cfg_nid,
+                            "relation": "declares_config",
+                            "confidence": "EXTRACTED",
+                            "weight": 1.0,
+                            "source_file": str_path,
+                            "source_location": f"doc-{doc_idx + 1}",
+                        })
+
         parsed_resources.append({
             "id": res_id,
             "kind": kind,
@@ -376,6 +408,39 @@ def extract_kubernetes(path: Path) -> dict[str, Any]:
                                             "source_file": str_path,
                                             "source_location": loc,
                                         })
+
+                        # Container env declarations (config_decl)
+                        env_items = c.get("env") or []
+                        if isinstance(env_items, list):
+                            for env_item in env_items:
+                                if not isinstance(env_item, dict):
+                                    continue
+                                env_k = env_item.get("name")
+                                if env_k:
+                                    env_k_str = str(env_k)
+                                    env_nid = _make_id("k8s_env", str_path, res["namespace"], res["name"], env_k_str)
+                                    if env_nid not in seen_ids:
+                                        seen_ids.add(env_nid)
+                                        nodes.append({
+                                            "id": env_nid,
+                                            "label": f"K8s:Env:{env_k_str}",
+                                            "type": "config_decl",
+                                            "file_type": "code",
+                                            "config_type": "env",
+                                            "config_name": env_k_str,
+                                            "source_file": str_path,
+                                            "source_location": loc,
+                                            "text": f"Kubernetes container env {env_k_str} in {res['name']}",
+                                        })
+                                    edges.append({
+                                        "source": src_id,
+                                        "target": env_nid,
+                                        "relation": "declares_env",
+                                        "confidence": "EXTRACTED",
+                                        "weight": 1.0,
+                                        "source_file": str_path,
+                                        "source_location": loc,
+                                    })
 
         # 4. ownerReferences
         meta = doc.get("metadata") or {}
