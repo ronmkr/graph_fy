@@ -59,30 +59,7 @@ def _find_graph_path_for_target(target: str | Path | None = None) -> Path:
     return Path(_default_graph_path())
 
 
-class _StageTimer:
-    """Print per-stage wall-clock timings to stderr when --timing is set (#1490).
-
-    Monotonic (perf_counter), diagnostic-only: emits ``[graph_fy timing] <stage>:
-    N.Ns`` after each stage and a final total. Off by default, so normal output is
-    byte-identical and machine-read stdout is untouched.
-    """
-
-    def __init__(self, enabled: bool) -> None:
-        import time as _time
-        self._now = _time.perf_counter
-        self.enabled = enabled
-        self.start = self._now()
-        self._last = self.start
-
-    def mark(self, stage: str) -> None:
-        now = self._now()
-        if self.enabled:
-            print(f"[graph_fy timing] {stage}: {now - self._last:.1f}s", file=sys.stderr)
-        self._last = now
-
-    def total(self) -> None:
-        if self.enabled:
-            print(f"[graph_fy timing] total: {self._now() - self.start:.1f}s", file=sys.stderr)
+from graph_fy.paths import _StageTimer
 
 
 def _enforce_graph_size_cap_or_exit(gp: Path) -> None:
@@ -96,8 +73,10 @@ def _enforce_graph_size_cap_or_exit(gp: Path) -> None:
 
 
 def _reenter_main() -> None:
-    from graph_fy.__main__ import main
-    main()
+    from graph_fy.commands.build import cmd_build
+    rc = cmd_build(sys.argv, "extract", _graph_fy_OUT, _StageTimer)
+    if rc != 0:
+        sys.exit(rc)
 
 
 def dispatch_command(cmd: str) -> None:
@@ -339,4 +318,5 @@ def dispatch_command(cmd: str) -> None:
 
 
 if __name__ == "__main__":
-    _reenter_main()
+    import runpy
+    runpy.run_module("graph_fy", run_name="__main__")

@@ -449,3 +449,30 @@ output "bucket_name" {
     dumped = _json.dumps(r["nodes"])
     for secret in ("hunter2-default", "tok-in-output", "marked-sensitive"):
         assert secret not in dumped
+
+
+def test_terraform_aliased_providers_and_references(tmp_path: Path):
+    body = """\
+provider "aws" {
+  region = "us-east-1"
+}
+
+provider "aws" {
+  alias  = "west"
+  region = "us-west-2"
+}
+
+resource "aws_instance" "web" {
+  provider      = aws.west
+  instance_type = "t3.micro"
+}
+"""
+    r = extract_terraform(_write(tmp_path, "providers.tf", body))
+    labels = {n["label"] for n in r["nodes"]}
+    assert "provider.aws" in labels
+    assert "provider.aws.west" in labels
+
+    by_id = {n["id"]: n["label"] for n in r["nodes"]}
+    refs = {(by_id.get(e["source"]), by_id.get(e["target"])) for e in r["edges"] if e["relation"] == "references"}
+    assert ("AWS:aws_instance.web", "provider.aws.west") in refs
+

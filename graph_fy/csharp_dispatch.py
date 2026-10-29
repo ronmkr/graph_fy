@@ -26,6 +26,8 @@ forced once there is a single implementer, but the source text never names it.
 """
 from __future__ import annotations
 
+import re
+
 _CSHARP_SUFFIXES = (".cs",)
 
 DISPATCH_RELATION = "dispatches_to"
@@ -85,7 +87,7 @@ def resolve_csharp_interface_dispatch(
     node_by_id = {n.get("id"): n for n in all_nodes}
 
     implementers: dict[str, set[str]] = {}
-    methods_of: dict[str, dict[str, set[str]]] = {}
+    methods_of: dict[str, dict[str, list[tuple[str, int | None]]]] = {}
     for e in all_edges:
         rel = e.get("relation")
         if rel == "implements":
@@ -97,9 +99,14 @@ def resolve_csharp_interface_dispatch(
                 continue
             name = _method_label(mnode)
             if name:
-                # A set, so the same method arriving on two `method` edges cannot
-                # look like two same-named methods and trip the guard below.
-                methods_of.setdefault(owner, {}).setdefault(name, set()).add(method_nid)
+                arity = mnode.get("metadata", {}).get("arity")
+                if arity is None and "_a" in method_nid:
+                    m = re.search(r"_a(\d+)", method_nid)
+                    if m:
+                        arity = int(m.group(1))
+                existing_entries = methods_of.setdefault(owner, {}).setdefault(name, [])
+                if not any(entry[0] == method_nid for entry in existing_entries):
+                    existing_entries.append((method_nid, arity))
 
     if not implementers or not methods_of:
         return
@@ -129,26 +136,42 @@ def resolve_csharp_interface_dispatch(
 
         impl_methods = methods_of.get(impl_nid, {})
         for name, declared in methods_of.get(interface_nid, {}).items():
-            if len(declared) != 1:
+            candidates = impl_methods.get(name, [])
+            if not candidates:
                 continue
-            candidates = impl_methods.get(name, set())
-            if len(candidates) != 1:
-                continue
-            source = next(iter(declared))
-            target = next(iter(candidates))
-            if source == target or (source, target) in existing_pairs:
-                continue
-            existing_pairs.add((source, target))
-            new_edges.append({
-                "source": source,
-                "target": target,
-                "relation": DISPATCH_RELATION,
-                "context": "call",
-                "confidence": "INFERRED",
-                "confidence_score": 0.9,
-                "source_file": str(impl_node.get("source_file", "")),
-                "source_location": impl_node.get("source_location"),
-                "weight": 1.0,
-            })
+            if len(declared) == 1 and len(candidates) == 1:
+                source = declared[0][0]
+                target = candidates[0][0]
+                if source != target and (source, target) not in existing_pairs:
+                    existing_pairs.add((source, target))
+                    new_edges.append({
+                        "source": source,
+                        "target": target,
+                        "relation": DISPATCH_RELATION,
+                        "context": "call",
+                        "confidence": "INFERRED",
+                        "confidence_score": 0.9,
+                        "source_file": str(impl_node.get("source_file", "")),
+                        "source_location": impl_node.get("source_location"),
+                        "weight": 1.0,
+                    })
+            else:
+                for iface_method_nid, iface_arity in declared:
+                    matching = [c[0] for c in candidates if c[1] == iface_arity]
+                    if len(matching) == 1:
+                        target = matching[0]
+                        if iface_method_nid != target and (iface_method_nid, target) not in existing_pairs:
+                            existing_pairs.add((iface_method_nid, target))
+                            new_edges.append({
+                                "source": iface_method_nid,
+                                "target": target,
+                                "relation": DISPATCH_RELATION,
+                                "context": "call",
+                                "confidence": "INFERRED",
+                                "confidence_score": 0.9,
+                                "source_file": str(impl_node.get("source_file", "")),
+                                "source_location": impl_node.get("source_location"),
+                                "weight": 1.0,
+                            })
 
     all_edges.extend(new_edges)

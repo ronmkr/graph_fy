@@ -21,129 +21,139 @@ from graph_fy.extractors.models import LanguageConfig
 from graph_fy.extractors.resolution import _resolve_js_import_target
 from graph_fy.security import sanitize_metadata
 
-from graph_fy.extractors.csharp import (
-    _csharp_namespace_id,
-    _csharp_pre_scan_interfaces,
-    _csharp_classify_base,
-    _CSHARP_TYPE_PARAMETER_SCOPE_DECLARATIONS,
-    _csharp_type_parameters_in_scope,
-    _csharp_collect_type_refs,
-    _csharp_attribute_names,
-    _read_csharp_type_name,
-    _csharp_bare_call_name,
-    _csharp_receiver_type_name,
-    _csharp_method_receiver_types,
-    _csharp_scoped_receiver_type,
-    _csharp_namespace_name,
-    _csharp_extra_walk,
-)
-from graph_fy.extractors.java import (
-    _JAVA_TYPE_PARAMETER_SCOPE_DECLARATIONS,
-    _java_type_parameters_in_scope,
-    _JAVA_BUILTIN_TYPES,
-    _java_collect_type_refs,
-    _java_receiver_type_name,
-    _java_declarator_names,
-    _java_lambda_parameters,
-    _java_method_receiver_types,
-    _java_annotation_nodes,
-    _java_annotation_names,
-    _java_annotation_class_literal_refs,
-    _java_extra_walk,
-)
-from graph_fy.extractors.swift import (
-    _swift_declaration_keyword,
-    _swift_pre_scan,
-    _swift_classify_base,
-    _swift_user_type_name,
-    _swift_collect_type_refs,
-    _swift_property_type_node,
-    _swift_attribute_type_name,
-    _swift_factory_call,
-    _swift_property_name,
-    _swift_constructor_type,
-    _swift_receiver_name,
-    _swift_local_var_types,
-    _swift_extra_walk,
-)
-from graph_fy.extractors.kotlin import (
-    _kotlin_user_type_name,
-    _kotlin_collect_type_refs,
-    _kotlin_property_type_node,
-    _kotlin_function_return_type_node,
-    _scala_collect_type_refs,
-    _kotlin_extra_walk,
-    _kotlin_package_name,
-    _kotlin_nav_identifier_segments,
-)
-from graph_fy.extractors.ruby import (
-    _ruby_new_class_name,
-    _ruby_local_class_bindings,
-    _ruby_const_last_name,
-    _ruby_const_full_name,
-    _ruby_body_has_lookup_barrier,
-    _ruby_file_has_refinement_barrier,
-    _ruby_external_method_owners,
-    _ruby_extra_walk,
-    _RUBY_CLASS_FACTORIES,
-)
-from graph_fy.extractors.php import (
-    _php_name_text,
-    _php_collect_type_refs,
-    _php_method_return_type_node,
-)
-from graph_fy.extractors.c_cpp import (
-    _C_PRIMITIVE_TYPE_NODES,
-    _c_collect_type_refs,
-    _cpp_collect_type_refs,
-    _get_cpp_func_name,
-    _cpp_declarator_name,
-    _cpp_local_var_types,
-)
-from graph_fy.extractors.python import (
-    _PYTHON_TYPE_CONTAINERS,
-    _PYTHON_ANNOTATION_NOISE,
-    _PYTHON_DECORATOR_NOISE,
-    _python_collect_type_refs,
-    _python_collect_param_refs,
-    _python_param_names,
-    _python_collect_assignment_targets,
-    _python_local_bound_names,
-    _python_module_bound_names,
-    _scan_python_nested_function_declarations,
-    _python_decorator_name,
-    _python_pre_scan_underscore_collisions,
-    _python_underscore_salted_nid,
-)
-from graph_fy.extractors.javascript import (
-    _js_pre_scan_member_collisions,
-    _js_member_salted_nid,
-    _js_collect_pattern_idents,
-    _js_local_bound_names,
-    _js_module_bound_names,
-    _js_import_binds_external,
-    _js_external_import_names,
-    _js_dispatch_value_idents,
-    _dynamic_import_js,
-    _ts_receiver_type_table,
-    _find_require_call,
-    _require_imports_js,
-    _scan_js_nested_function_declarations,
-    _js_topmost_closures,
-    _js_member_assignment_target,
-    _js_scan_member_assignments,
-    _js_extra_walk,
-    _ts_extra_walk,
-    _ts_decorator_name,
-    _ts_method_name,
-    _ts_descendant_decorators,
-    _ts_emit_decorator_edges,
-    _JS_SCOPE_BOUNDARY,
-    _JS_FUNCTION_VALUE_TYPES,
-)
-from graph_fy.extractors.lua import (
-    _lua_is_require_call,
-)
+import graph_fy.extractors.csharp as _cs
+import graph_fy.extractors.java as _jv
+import graph_fy.extractors.swift as _sw
+import graph_fy.extractors.kotlin as _kt
+import graph_fy.extractors.ruby as _rb
+import graph_fy.extractors.php as _ph
+import graph_fy.extractors.c_cpp as _cc
+import graph_fy.extractors.python as _py
+import graph_fy.extractors.javascript as _js
+import graph_fy.extractors.lua as _lu
+
+# C# helpers
+_csharp_namespace_id = _cs._csharp_namespace_id
+_csharp_pre_scan_interfaces = _cs._csharp_pre_scan_interfaces
+_csharp_classify_base = _cs._csharp_classify_base
+_CSHARP_TYPE_PARAMETER_SCOPE_DECLARATIONS = _cs._CSHARP_TYPE_PARAMETER_SCOPE_DECLARATIONS
+_csharp_type_parameters_in_scope = _cs._csharp_type_parameters_in_scope
+_csharp_collect_type_refs = _cs._csharp_collect_type_refs
+_csharp_attribute_names = _cs._csharp_attribute_names
+_read_csharp_type_name = _cs._read_csharp_type_name
+_csharp_bare_call_name = _cs._csharp_bare_call_name
+_csharp_receiver_type_name = _cs._csharp_receiver_type_name
+_csharp_method_receiver_types = _cs._csharp_method_receiver_types
+_csharp_scoped_receiver_type = _cs._csharp_scoped_receiver_type
+_csharp_namespace_name = _cs._csharp_namespace_name
+_csharp_extra_walk = _cs._csharp_extra_walk
+
+# Java helpers
+_JAVA_TYPE_PARAMETER_SCOPE_DECLARATIONS = _jv._JAVA_TYPE_PARAMETER_SCOPE_DECLARATIONS
+_java_type_parameters_in_scope = _jv._java_type_parameters_in_scope
+_JAVA_BUILTIN_TYPES = _jv._JAVA_BUILTIN_TYPES
+_java_collect_type_refs = _jv._java_collect_type_refs
+_java_receiver_type_name = _jv._java_receiver_type_name
+_java_declarator_names = _jv._java_declarator_names
+_java_lambda_parameters = _jv._java_lambda_parameters
+_java_method_receiver_types = _jv._java_method_receiver_types
+_java_annotation_nodes = _jv._java_annotation_nodes
+_java_annotation_names = _jv._java_annotation_names
+_java_annotation_class_literal_refs = _jv._java_annotation_class_literal_refs
+_java_extra_walk = _jv._java_extra_walk
+
+# Swift helpers
+_swift_declaration_keyword = _sw._swift_declaration_keyword
+_swift_pre_scan = _sw._swift_pre_scan
+_swift_classify_base = _sw._swift_classify_base
+_swift_user_type_name = _sw._swift_user_type_name
+_swift_collect_type_refs = _sw._swift_collect_type_refs
+_swift_property_type_node = _sw._swift_property_type_node
+_swift_attribute_type_name = _sw._swift_attribute_type_name
+_swift_factory_call = _sw._swift_factory_call
+_swift_property_name = _sw._swift_property_name
+_swift_constructor_type = _sw._swift_constructor_type
+_swift_receiver_name = _sw._swift_receiver_name
+_swift_local_var_types = _sw._swift_local_var_types
+_swift_extra_walk = _sw._swift_extra_walk
+
+# Kotlin helpers
+_kotlin_user_type_name = _kt._kotlin_user_type_name
+_kotlin_collect_type_refs = _kt._kotlin_collect_type_refs
+_kotlin_property_type_node = _kt._kotlin_property_type_node
+_kotlin_function_return_type_node = _kt._kotlin_function_return_type_node
+_scala_collect_type_refs = _kt._scala_collect_type_refs
+_kotlin_extra_walk = _kt._kotlin_extra_walk
+_kotlin_package_name = _kt._kotlin_package_name
+_kotlin_nav_identifier_segments = _kt._kotlin_nav_identifier_segments
+
+# Ruby helpers
+_ruby_new_class_name = _rb._ruby_new_class_name
+_ruby_local_class_bindings = _rb._ruby_local_class_bindings
+_ruby_const_last_name = _rb._ruby_const_last_name
+_ruby_const_full_name = _rb._ruby_const_full_name
+_ruby_body_has_lookup_barrier = _rb._ruby_body_has_lookup_barrier
+_ruby_file_has_refinement_barrier = _rb._ruby_file_has_refinement_barrier
+_ruby_external_method_owners = _rb._ruby_external_method_owners
+_ruby_extra_walk = _rb._ruby_extra_walk
+_RUBY_CLASS_FACTORIES = _rb._RUBY_CLASS_FACTORIES
+
+# PHP helpers
+_php_name_text = _ph._php_name_text
+_php_collect_type_refs = _ph._php_collect_type_refs
+_php_method_return_type_node = _ph._php_method_return_type_node
+
+# C/C++ helpers
+_C_PRIMITIVE_TYPE_NODES = _cc._C_PRIMITIVE_TYPE_NODES
+_c_collect_type_refs = _cc._c_collect_type_refs
+_cpp_collect_type_refs = _cc._cpp_collect_type_refs
+_get_cpp_func_name = _cc._get_cpp_func_name
+_cpp_declarator_name = _cc._cpp_declarator_name
+_cpp_local_var_types = _cc._cpp_local_var_types
+
+# Python helpers
+_PYTHON_TYPE_CONTAINERS = _py._PYTHON_TYPE_CONTAINERS
+_PYTHON_ANNOTATION_NOISE = _py._PYTHON_ANNOTATION_NOISE
+_PYTHON_DECORATOR_NOISE = _py._PYTHON_DECORATOR_NOISE
+_python_collect_type_refs = _py._python_collect_type_refs
+_python_collect_param_refs = _py._python_collect_param_refs
+_python_param_names = _py._python_param_names
+_python_collect_assignment_targets = _py._python_collect_assignment_targets
+_python_local_bound_names = _py._python_local_bound_names
+_python_module_bound_names = _py._python_module_bound_names
+_scan_python_nested_function_declarations = _py._scan_python_nested_function_declarations
+_python_decorator_name = _py._python_decorator_name
+_python_pre_scan_underscore_collisions = _py._python_pre_scan_underscore_collisions
+_python_underscore_salted_nid = _py._python_underscore_salted_nid
+
+# JavaScript helpers
+_js_pre_scan_member_collisions = _js._js_pre_scan_member_collisions
+_js_member_salted_nid = _js._js_member_salted_nid
+_js_collect_pattern_idents = _js._js_collect_pattern_idents
+_js_local_bound_names = _js._js_local_bound_names
+_js_module_bound_names = _js._js_module_bound_names
+_js_import_binds_external = _js._js_import_binds_external
+_js_external_import_names = _js._js_external_import_names
+_js_dispatch_value_idents = _js._js_dispatch_value_idents
+_dynamic_import_js = _js._dynamic_import_js
+_ts_receiver_type_table = _js._ts_receiver_type_table
+_find_require_call = _js._find_require_call
+_require_imports_js = _js._require_imports_js
+_scan_js_nested_function_declarations = _js._scan_js_nested_function_declarations
+_js_topmost_closures = _js._js_topmost_closures
+_js_member_assignment_target = _js._js_member_assignment_target
+_js_scan_member_assignments = _js._js_scan_member_assignments
+_js_extra_walk = _js._js_extra_walk
+_ts_extra_walk = _js._ts_extra_walk
+_ts_decorator_name = _js._ts_decorator_name
+_ts_method_name = _js._ts_method_name
+_ts_descendant_decorators = _js._ts_descendant_decorators
+_ts_emit_decorator_edges = _js._ts_emit_decorator_edges
+_JS_SCOPE_BOUNDARY = _js._JS_SCOPE_BOUNDARY
+_JS_FUNCTION_VALUE_TYPES = _js._JS_FUNCTION_VALUE_TYPES
+
+# Lua helpers
+_lua_is_require_call = _lu._lua_is_require_call
 
 
 def _first_parse_error_line(root) -> int:
@@ -311,8 +321,11 @@ def _extract_generic(
     # same-named, explicitly typed receiver in a different method.
     csharp_field_types: dict[str, dict[str, str]] = {}
     csharp_method_scopes: dict[int, tuple[object, str]] = {}
+    csharp_caller_class: dict[str, str] = {}
 
     csharp_interface_names: set[str] = set()
+    csharp_method_info: dict[tuple[int, int], tuple[str, int, bool]] = {}
+    csharp_class_methods: dict[tuple[str, str], list[tuple[str, int]]] = {}
     if config.ts_module == "tree_sitter_c_sharp":
         csharp_interface_names = _csharp_pre_scan_interfaces(root, source)
 
@@ -523,6 +536,58 @@ def _extract_generic(
                 ):
                     metadata = dict(metadata or {})
                     metadata["is_partial"] = True
+                if t in (
+                    "class_declaration",
+                    "struct_declaration",
+                    "interface_declaration",
+                    "record_declaration",
+                ):
+                    c_body = node.child_by_field_name("body")
+                    if not c_body:
+                        for c in node.children:
+                            if c.type == "declaration_list":
+                                c_body = c
+                                break
+                    if c_body:
+                        m_by_name: dict[str, list[tuple[object, int, str]]] = {}
+                        for member in c_body.children:
+                            if member.type == "method_declaration":
+                                mn_node = member.child_by_field_name("name")
+                                if not mn_node:
+                                    continue
+                                m_raw = _read_text(mn_node, source)
+                                if not m_raw:
+                                    continue
+                                m_san = (
+                                    config.sanitize_symbol_name_fn(m_raw)
+                                    if config.sanitize_symbol_name_fn is not None
+                                    else m_raw
+                                )
+                                plist = member.child_by_field_name("parameters")
+                                ar = (
+                                    sum(1 for p in plist.children if p.type == "parameter")
+                                    if plist
+                                    else 0
+                                )
+                                m_by_name.setdefault(m_san, []).append((member, ar, m_raw))
+
+                        for m_san, mlist in m_by_name.items():
+                            is_ov = len(mlist) >= 2
+                            seen_ar: set[int] = set()
+                            for idx, (mnode, ar, m_raw) in enumerate(mlist):
+                                if is_ov:
+                                    if ar not in seen_ar:
+                                        m_nid = _make_id(class_nid, f"{m_san}_a{ar}")
+                                        seen_ar.add(ar)
+                                    else:
+                                        m_nid = _make_id(class_nid, f"{m_san}_a{ar}_{idx}")
+                                else:
+                                    m_nid = _make_id(class_nid, m_san)
+                                m_key = (mnode.start_byte, mnode.end_byte)
+                                csharp_method_info[m_key] = (m_nid, ar, is_ov)
+                                csharp_class_methods.setdefault((class_nid, m_san), []).append((m_nid, ar))
+                                if m_raw != m_san:
+                                    csharp_class_methods.setdefault((class_nid, m_raw), []).append((m_nid, ar))
             if config.ts_module == "tree_sitter_ruby":
                 ruby_body = _find_body(node, config)
                 if ruby_absolute_declaration or ruby_reopened or (
@@ -1698,7 +1763,19 @@ def _extract_generic(
                     func_nid = _js_member_salted_nid(
                         func_nid, sanitized_name, js_member_groups
                     )
+                elif config.ts_module == "tree_sitter_c_sharp":
+                    key = (node.start_byte, node.end_byte)
+                    if key in csharp_method_info:
+                        func_nid = csharp_method_info[key][0]
                 ruby_method_metadata = None
+                csharp_method_metadata = None
+                if config.ts_module == "tree_sitter_c_sharp":
+                    key = (node.start_byte, node.end_byte)
+                    if key in csharp_method_info:
+                        _, arity, is_overload = csharp_method_info[key]
+                        csharp_method_metadata = {"arity": arity}
+                        if is_overload:
+                            csharp_method_metadata["csharp_overload"] = True
                 if ruby_method_kind is not None:
                     kinds = ruby_method_kinds.setdefault(func_nid, set())
                     kinds.add(ruby_method_kind)
@@ -1722,7 +1799,7 @@ def _extract_generic(
                     func_nid,
                     f".{func_name}()",
                     line,
-                    metadata=ruby_method_metadata,
+                    metadata=ruby_method_metadata or csharp_method_metadata,
                 )
                 add_edge(parent_class_nid, func_nid, "method", line)
             else:
@@ -2087,6 +2164,7 @@ def _extract_generic(
                     java_method_scopes[id(body)] = (node, parent_class_nid)
                 if config.ts_module == "tree_sitter_c_sharp" and parent_class_nid:
                     csharp_method_scopes[id(body)] = (node, parent_class_nid)
+                    csharp_caller_class[func_nid] = parent_class_nid
                 function_bodies.append((func_nid, body))
                 if config.ts_module in (
                     "tree_sitter_javascript", "tree_sitter_typescript"
@@ -2097,6 +2175,8 @@ def _extract_generic(
                         callable_def_nids=callable_def_nids,
                         local_bound_names=local_bound_names,
                         function_bodies=function_bodies,
+                        scope_parents=scope_parents,
+                        lexical_nids_by_scope=lexical_nids_by_scope,
                     )
                 if config.ts_module == "tree_sitter_python":
                     _scan_python_nested_function_declarations(
@@ -2200,7 +2280,9 @@ def _extract_generic(
                               nodes, edges, seen_ids, function_bodies,
                               parent_class_nid, add_node, add_edge,
                               callable_def_nids, local_bound_names,
-                              closure_locals_by_body, config=config):
+                              closure_locals_by_body, config=config,
+                              scope_parents=scope_parents,
+                              lexical_nids_by_scope=lexical_nids_by_scope):
                 return
 
         # TS enum members, and namespace / module containers
@@ -2628,6 +2710,7 @@ def _extract_generic(
             member_receiver: str | None = None
             kotlin_qualified_prefix: str | None = None
             csharp_qualified_prefix: str | None = None
+            csharp_arg_count: int | None = None
 
             # Special handling per language
             if config.ts_module == "tree_sitter_swift":
@@ -2729,7 +2812,13 @@ def _extract_generic(
                     callee_name = type_info[0]
                     if type_info[1] and type_info[2]:
                         csharp_qualified_prefix = type_info[2]
+                args_node = node.child_by_field_name("arguments")
+                if args_node is not None:
+                    csharp_arg_count = sum(1 for c in args_node.children if c.type == "argument")
             elif config.ts_module == "tree_sitter_c_sharp" and node.type == "invocation_expression":
+                args_node = node.child_by_field_name("arguments")
+                if args_node is not None:
+                    csharp_arg_count = sum(1 for c in args_node.children if c.type == "argument")
                 # C#: the invoked function is the `function` field. A member call
                 # `recv.Method(...)` is a member_access_expression (receiver in its
                 # `expression` field, method in `name`). Capture a simple-identifier
@@ -3054,7 +3143,9 @@ def _extract_generic(
                 ):
                     tgt_nid = None
                 else:
-                    if config.ts_module == "tree_sitter_python" and not is_member_call:
+                    if config.ts_module in (
+                        "tree_sitter_python", "tree_sitter_javascript", "tree_sitter_typescript"
+                    ) and not is_member_call:
                         curr_scope = caller_nid
                         tgt_nid = None
                         while curr_scope:
@@ -3065,7 +3156,20 @@ def _extract_generic(
                         if not tgt_nid:
                             tgt_nid = label_to_nid.get(callee_name)
                     else:
-                        tgt_nid = label_to_nid.get(callee_name)
+                        if config.ts_module == "tree_sitter_c_sharp":
+                            overload_tgt = None
+                            caller_class = csharp_caller_class.get(caller_nid)
+                            if caller_class and (caller_class, callee_name) in csharp_class_methods:
+                                candidates = csharp_class_methods[(caller_class, callee_name)]
+                                if csharp_arg_count is not None:
+                                    matched = [c_nid for c_nid, c_ar in candidates if c_ar == csharp_arg_count]
+                                    if len(matched) == 1:
+                                        overload_tgt = matched[0]
+                                if not overload_tgt and len(candidates) == 1:
+                                    overload_tgt = candidates[0][0]
+                            tgt_nid = overload_tgt or label_to_nid.get(callee_name)
+                        else:
+                            tgt_nid = label_to_nid.get(callee_name)
                     # A qualified `new A.B.Foo()` whose bare name matches only a
                     # sourceless stub in this file would bind the call to the stub
                     # and never reach _resolve_csharp_qualified_calls, the one pass
@@ -3136,6 +3240,8 @@ def _extract_generic(
                         # class fields/properties are the base scope.
                         if config.ts_module == "tree_sitter_c_sharp":
                             rc_entry["lang"] = "csharp"
+                            if csharp_arg_count is not None:
+                                rc_entry["arg_count"] = csharp_arg_count
                             if csharp_qualified_prefix:
                                 rc_entry["qualified_prefix"] = csharp_qualified_prefix
                             receiver_type = _csharp_scoped_receiver_type(

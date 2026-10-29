@@ -855,7 +855,7 @@ def _resolve_csharp_member_calls(
 
     # (type_node_id, method_key) -> method_node_id, and caller -> enclosing type.
     # C# owns its methods via `method` edges.
-    method_index: dict[tuple[str, str], str] = {}
+    method_index: dict[tuple[str, str], list[tuple[str, int | None]]] = {}
     enclosing_type: dict[str, str] = {}
     for e in all_edges:
         if e.get("relation") != "method":
@@ -865,7 +865,12 @@ def _resolve_csharp_member_calls(
         if tnode is None:
             continue
         enclosing_type.setdefault(tgt, src)
-        method_index[(src, _key(tnode.get("label", "")))] = tgt
+        arity = tnode.get("metadata", {}).get("arity")
+        if arity is None and "_a" in tgt:
+            m = re.search(r"_a(\d+)", tgt)
+            if m:
+                arity = int(m.group(1))
+        method_index.setdefault((src, _key(tnode.get("label", ""))), []).append((tgt, arity))
 
     # Base-class chain from `inherits` edges (C# files only). The type-reference
     # pass has already re-pointed each resolvable base to its real definition and
@@ -891,7 +896,7 @@ def _resolve_csharp_member_calls(
             if tgt not in bucket:
                 bucket.append(tgt)
 
-    def _method_on_type_or_bases(type_nid: str, callee_key: str) -> str | None:
+    def _method_on_type_or_bases(type_nid: str, callee_key: str, arg_count: int | None = None) -> str | None:
         """The method's definition on the type or its resolvable base chain.
 
         A type that declares the method directly wins (overrides shadow the
@@ -899,7 +904,7 @@ def _resolve_csharp_member_calls(
         walk actually reaches poisons the lookup (no edge), as does anything
         other than exactly one declaration found.
         """
-        hits: set[str] = set()
+        hits: list[tuple[str, int | None]] = []
         seen: set[str] = set()
         frontier = [type_nid]
         while frontier:
@@ -907,14 +912,22 @@ def _resolve_csharp_member_calls(
             if nid in seen:
                 continue
             seen.add(nid)
-            method_nid = method_index.get((nid, callee_key))
-            if method_nid:
-                hits.add(method_nid)
+            candidates = method_index.get((nid, callee_key), [])
+            if candidates:
+                hits.extend(candidates)
                 continue  # an override shadows anything above it
             if nid in unresolved_base:
                 return None  # the method may live on the out-of-corpus base
             frontier.extend(bases_of.get(nid, []))
-        return next(iter(hits)) if len(hits) == 1 else None
+        if not hits:
+            return None
+        if len(hits) == 1:
+            return hits[0][0]
+        if arg_count is not None:
+            matching = [h[0] for h in hits if h[1] == arg_count]
+            if len(matching) == 1:
+                return matching[0]
+        return None
 
     def _resolve_type_name_nid(type_name: str | None, caller_node: dict | None,
                                src_file: str) -> str | None:
@@ -1001,7 +1014,7 @@ def _resolve_csharp_member_calls(
                 _park_if_absent(type_name, caller_node, rc)
                 continue
             type_qualified = False
-        method_nid = _method_on_type_or_bases(type_nid, _key(callee))
+        method_nid = _method_on_type_or_bases(type_nid, _key(callee), rc.get("arg_count"))
         if not method_nid:
             continue  # receiver typed, but the type has no such method — skip
         if method_nid == caller or (caller, method_nid) in existing_pairs:

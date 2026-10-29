@@ -266,8 +266,17 @@ def extract_terraform(path: Path) -> dict:
             key_node = node.child_by_field_name("key") or (
                 node.children[0] if node.children else None
             )
-            if key_node is not None and _read(key_node) == "depends_on":
-                rel = "depends_on"
+            if key_node is not None:
+                k_name = _clean_val_str(_read(key_node).strip())
+                if k_name == "depends_on":
+                    rel = "depends_on"
+                elif k_name == "provider":
+                    val_node = node.named_children[-1] if node.named_children else None
+                    if val_node:
+                        p_val = _clean_val_str(_read(val_node).strip().strip('"\''))
+                        if not p_val.startswith(("var.", "local.", "module.", "data.")):
+                            _add_edge(owner_nid, f"provider.{p_val}", "references", node.start_point[0] + 1)
+                            return
         if node.type == "variable_expr":
             addr = _ref_address(node)
             if addr:
@@ -430,7 +439,23 @@ def extract_terraform(path: Path) -> dict:
             nodes_by_id[owner]["config_type"] = "output"
             nodes_by_id[owner]["config_name"] = labels[0]
         elif btype == "provider" and labels:
-            owner = _add_node(f"provider.{labels[0]}", f"provider.{labels[0]}", line)
+            prov_name = labels[0]
+            alias_val = None
+            if blk_body is not None:
+                for child in blk_body.children:
+                    if child.type == "attribute":
+                        k_node = child.child_by_field_name("key") or (child.children[0] if child.children else None)
+                        if k_node and _clean_val_str(_read(k_node).strip()) == "alias":
+                            v_node = child.named_children[-1] if child.named_children else None
+                            if v_node:
+                                alias_val = _clean_val_str(_read(v_node).strip().strip('"\''))
+                                break
+            if alias_val:
+                owner = _add_node(f"provider.{prov_name}.{alias_val}", f"provider.{prov_name}.{alias_val}", line)
+                nodes_by_id[owner]["alias"] = alias_val
+            else:
+                owner = _add_node(f"provider.{prov_name}", f"provider.{prov_name}", line)
+            nodes_by_id[owner]["provider_name"] = prov_name
         elif btype == "locals" and blk_body is not None:
             for attr in blk_body.children:
                 if attr.type != "attribute":
