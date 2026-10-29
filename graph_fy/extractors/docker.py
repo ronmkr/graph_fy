@@ -124,6 +124,86 @@ def extract_dockerfile(path: Path) -> dict[str, Any]:
                     "source_location": f"L{line_idx}",
                 })
 
+        # ENV KEY=VALUE or ENV KEY VALUE
+        env_match = re.match(r"^ENV\s+(.+)$", line)
+        if env_match:
+            rest = env_match.group(1).strip()
+            if "=" in rest:
+                pairs = re.findall(r'([A-Za-z_][A-Za-z0-9_]*)=', rest)
+                for var_name in pairs:
+                    env_nid = _make_id("docker_env", str_path, var_name)
+                    nodes.append({
+                        "id": env_nid,
+                        "label": f"Docker:Env:{var_name}",
+                        "type": "config_decl",
+                        "file_type": "code",
+                        "config_type": "env",
+                        "config_name": var_name,
+                        "source_file": str_path,
+                        "source_location": f"L{line_idx}",
+                        "text": f"Docker environment variable {var_name}",
+                    })
+                    edges.append({
+                        "source": build_nid,
+                        "target": env_nid,
+                        "relation": "declares_env",
+                        "confidence": "EXTRACTED",
+                        "weight": 1.0,
+                        "source_file": str_path,
+                        "source_location": f"L{line_idx}",
+                    })
+            else:
+                parts = rest.split(None, 1)
+                if parts:
+                    var_name = parts[0]
+                    env_nid = _make_id("docker_env", str_path, var_name)
+                    nodes.append({
+                        "id": env_nid,
+                        "label": f"Docker:Env:{var_name}",
+                        "type": "config_decl",
+                        "file_type": "code",
+                        "config_type": "env",
+                        "config_name": var_name,
+                        "source_file": str_path,
+                        "source_location": f"L{line_idx}",
+                        "text": f"Docker environment variable {var_name}",
+                    })
+                    edges.append({
+                        "source": build_nid,
+                        "target": env_nid,
+                        "relation": "declares_env",
+                        "confidence": "EXTRACTED",
+                        "weight": 1.0,
+                        "source_file": str_path,
+                        "source_location": f"L{line_idx}",
+                    })
+
+        # ARG KEY or ARG KEY=VALUE
+        arg_match = re.match(r"^ARG\s+([A-Za-z_][A-Za-z0-9_]*)", line)
+        if arg_match:
+            arg_name = arg_match.group(1)
+            arg_nid = _make_id("docker_arg", str_path, arg_name)
+            nodes.append({
+                "id": arg_nid,
+                "label": f"Docker:Arg:{arg_name}",
+                "type": "config_decl",
+                "file_type": "code",
+                "config_type": "arg",
+                "config_name": arg_name,
+                "source_file": str_path,
+                "source_location": f"L{line_idx}",
+                "text": f"Docker build argument {arg_name}",
+            })
+            edges.append({
+                "source": build_nid,
+                "target": arg_nid,
+                "relation": "declares_arg",
+                "confidence": "EXTRACTED",
+                "weight": 1.0,
+                "source_file": str_path,
+                "source_location": f"L{line_idx}",
+            })
+
     return {"nodes": nodes, "edges": edges}
 
 
@@ -223,6 +303,28 @@ def extract_docker_compose(path: Path) -> dict[str, Any]:
             "source_file": str_path,
             "source_location": "L1",
         })
+        for ev in env_vars:
+            ev_nid = _make_id("compose_env", str_path, str(svc_name), ev)
+            nodes.append({
+                "id": ev_nid,
+                "label": f"Compose:Env:{ev}",
+                "type": "config_decl",
+                "file_type": "code",
+                "config_type": "env",
+                "config_name": ev,
+                "source_file": str_path,
+                "source_location": "L1",
+                "text": f"Compose service {svc_name} environment variable {ev}",
+            })
+            edges.append({
+                "source": svc_nid,
+                "target": ev_nid,
+                "relation": "declares_env",
+                "confidence": "EXTRACTED",
+                "weight": 1.0,
+                "source_file": str_path,
+                "source_location": "L1",
+            })
 
         for sec in secrets:
             sec_nid = _make_id("secret", sec)

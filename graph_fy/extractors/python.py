@@ -5,6 +5,7 @@ import hashlib
 import re
 import textwrap
 from pathlib import Path
+from typing import Any
 
 from graph_fy.extractors.base import _file_stem, _make_id, _read_text, _find_body
 from graph_fy.ids import normalize_id
@@ -623,6 +624,12 @@ def extract_python(path: Path) -> dict:
             from graph_fy.extractors.frameworks import extract_python_frameworks
             source_text = path.read_text(encoding="utf-8", errors="ignore")
             extract_python_frameworks(path, source_text, result)
+        except Exception:
+            pass
+        try:
+            from graph_fy.extractors.config_keys import extract_config_keys_from_source
+            source_text = path.read_text(encoding="utf-8", errors="ignore")
+            extract_config_keys_from_source(path, source_text, result)
         except Exception:
             pass
     return result

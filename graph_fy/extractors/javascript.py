@@ -1546,6 +1546,12 @@ def extract_js(path: Path) -> dict:
             extract_js_frameworks(path, source_text, result)
         except Exception:
             pass
+        try:
+            from graph_fy.extractors.config_keys import extract_config_keys_from_source
+            source_text = path.read_text(encoding="utf-8", errors="ignore")
+            extract_config_keys_from_source(path, source_text, result)
+        except Exception:
+            pass
         if is_rtk_file(path):
             try:
                 rtk_res = extract_rtk(path)

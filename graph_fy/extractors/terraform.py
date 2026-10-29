@@ -421,8 +421,14 @@ def extract_terraform(path: Path) -> dict:
                     nodes_by_id[owner]["module_source_location"] = f"L{attr.start_point[0] + 1}"
         elif btype == "variable" and labels:
             owner = _add_node(f"var.{labels[0]}", f"var.{labels[0]}", line)
+            nodes_by_id[owner]["type"] = "config_decl"
+            nodes_by_id[owner]["config_type"] = "variable"
+            nodes_by_id[owner]["config_name"] = labels[0]
         elif btype == "output" and labels:
             owner = _add_node(f"output.{labels[0]}", f"output.{labels[0]}", line)
+            nodes_by_id[owner]["type"] = "config_decl"
+            nodes_by_id[owner]["config_type"] = "output"
+            nodes_by_id[owner]["config_name"] = labels[0]
         elif btype == "provider" and labels:
             owner = _add_node(f"provider.{labels[0]}", f"provider.{labels[0]}", line)
         elif btype == "locals" and blk_body is not None:

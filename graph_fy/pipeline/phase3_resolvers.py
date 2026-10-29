@@ -1021,4 +1021,11 @@ def run_resolution_phase(
     except Exception:
         pass
 
+    # Cross-layer configuration & environment variable lineage resolution (#28)
+    try:
+        from graph_fy.resolvers.config_lineage import resolve_config_lineage
+        resolve_config_lineage(all_nodes, all_edges, root=root)
+    except Exception:
+        pass
+
     return all_nodes, all_edges

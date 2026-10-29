@@ -524,4 +524,11 @@ def extract_rust(path: Path) -> dict:
         if src in valid_ids and (tgt in valid_ids or edge["relation"] in ("imports", "imports_from")):
             clean_edges.append(edge)
 
-    return {"nodes": nodes, "edges": clean_edges, "raw_calls": raw_calls}
+    ret = {"nodes": nodes, "edges": clean_edges, "raw_calls": raw_calls}
+    try:
+        from graph_fy.extractors.config_keys import extract_config_keys_from_source
+        extract_config_keys_from_source(path, source.decode("utf-8", errors="replace"), ret)
+    except Exception:
+        pass
+
+    return ret

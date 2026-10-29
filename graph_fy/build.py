@@ -903,6 +903,13 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
     except Exception:
         pass
 
+    # Cross-layer configuration & environment variable lineage resolution (#28)
+    try:
+        from graph_fy.resolvers.config_lineage import resolve_config_lineage
+        resolve_config_lineage(extraction.get("nodes", []), extraction.get("edges", []), root=_root)
+    except Exception:
+        pass
+
     # Apply labeling improvements (Phase 8: slugs, categories, synonym mappings, typed edge aliases)
     try:
         from graph_fy.labeling import apply_labeling_improvements

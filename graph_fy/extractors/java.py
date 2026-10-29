@@ -462,7 +462,15 @@ _GROOVY_CONFIG = LanguageConfig(
 def extract_java(path: Path) -> dict:
     """Extract classes, interfaces, methods, constructors, and imports from a .java file."""
     from graph_fy.extractors.engine import _extract_generic
-    return _extract_generic(path, _JAVA_CONFIG)
+    result = _extract_generic(path, _JAVA_CONFIG)
+    if "error" not in result:
+        try:
+            from graph_fy.extractors.config_keys import extract_config_keys_from_source
+            source_text = path.read_text(encoding="utf-8", errors="ignore")
+            extract_config_keys_from_source(path, source_text, result)
+        except Exception:
+            pass
+    return result
 
 
 def _is_spock_file(path: Path, ts_result: dict) -> bool:
