@@ -4,6 +4,19 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 ## 0.3.1 (Unreleased)
 
+- Security: Dependabot Vulnerability Remediation & Python 3.11+ Modernization:
+  - **Dependabot CVE Remediation**: Resolved all 70 open security alerts across lockfile dependencies:
+    - Upgraded `Pillow` to `13.0.0` (resolves 41 alerts).
+    - Upgraded `filelock` to `4.2.4` (resolves 14 alerts).
+    - Upgraded `pypdf` to `6.21.4` (resolves 11 alerts).
+    - Upgraded `certifi` to `2026.10.23` (resolves 1 alert).
+    - Upgraded `msgpack` to `1.2.4` (resolves 1 alert).
+    - Upgraded `opentelemetry-api` to `1.45.2` (resolves 1 alert).
+    - Upgraded `setuptools` to `84.2.1` (resolves 1 alert).
+  - **Python Baseline Modernization**: Advanced `requires-python` to `>=3.11`, removing legacy Python 3.10 slices and unblocking patched upstream libraries.
+  - **DreamMaker Parser Pinning**: Constrained `tree-sitter-dm>=0.25.4,<0.26.0` to preserve AST compatibility and pass all DM grammar tests.
+
+
 - Feature: Framework & Microservice Lineage Resolution (PR [#87](https://github.com/ronmkr/graph_fy/pull/87)):
   - **Structural YAML AST Extraction** ([#68](https://github.com/ronmkr/graph_fy/issues/68)): Added composed AST node parsing for `.yaml` and `.yml` files via PyYAML `compose_all(Loader=SafeLoader)`. Preserves exact written string representations for keys (preventing YAML 1.1 boolean folding e.g. `on:`, `yes:`, `off:` -> `True`/`False`), maps 1-based source lines, and applies a 500-pair cap protection (`graph_fy/extractors/yaml_config.py`).
   - **Pydantic V2 & SQLAlchemy Bidirectional Schema Lineage** ([#60](https://github.com/ronmkr/graph_fy/issues/60)): Added AST and regex extractors for Pydantic V2 `@field_validator` / `@validator` (`validates_field`), SQLAlchemy `relationship()` (`relates_to_model` bidirectional edges), and `ForeignKey()` (`foreign_key_to` edges), establishing complete request-to-ORM schema lineage (`graph_fy/extractors/frameworks.py`).
