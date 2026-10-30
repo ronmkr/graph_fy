@@ -255,23 +255,47 @@ def _resolve_python_member_calls(
     def _key(label: str) -> str:
         return re.sub(r"[^a-zA-Z0-9]+", "", str(label)).lower()
 
+    def _is_python_file(source_file: object) -> bool:
+        if not source_file:
+            return True
+        sf = str(source_file)
+        ext = os.path.splitext(sf)[1]
+        if not ext:
+            return True
+        ext_lower = ext.lower()
+        if ext_lower in (".py", ".pyi"):
+            return True
+        from graph_fy.extract import _DISPATCH
+        return ext not in _DISPATCH and ext_lower not in _DISPATCH
+
     node_by_id: dict[str, dict] = {n.get("id"): n for n in all_nodes}
 
     # A class owns methods: it is the source of one or more `method` edges. Index
     # class label -> owning class node ids (len != 1 is the god-node guard), and
-    # (class_node_id, method_key) -> method_node_id.
+    # (class_node_id, method_key) -> list of method_node_ids.
     class_def_nids: dict[str, list[str]] = {}
-    method_index: dict[tuple[str, str], str] = {}
+    method_index: dict[tuple[str, str], list[str]] = {}
     for e in all_edges:
         if e.get("relation") != "method":
             continue
         src, tgt = e.get("source"), e.get("target")
         cnode = node_by_id.get(src)
-        if cnode is not None:
+        if cnode is not None and _is_python_file(cnode.get("source_file")):
             class_def_nids.setdefault(_key(cnode.get("label", "")), []).append(src)
         tnode = node_by_id.get(tgt)
         if tnode is not None:
-            method_index[(src, _key(tnode.get("label", "")))] = tgt
+            slot = method_index.setdefault((src, _key(tnode.get("label", ""))), [])
+            if tgt not in slot:
+                slot.append(tgt)
+
+    def _method_of(cls: str, callee: str) -> "str | None":
+        hits = method_index.get((cls, _key(callee)), [])
+        if len(hits) > 1:
+            hits = [
+                m for m in hits
+                if str(node_by_id.get(m, {}).get("label", "")).strip().lstrip(".").removesuffix("()") == callee
+            ]
+        return hits[0] if len(hits) == 1 else None
     # A class with N methods produced N entries; collapse to a unique set. (No
     # early return when there are no classes: the module arm below resolves
     # `module.func()` where the callable is a plain function, not a method.)
@@ -322,6 +346,9 @@ def _resolve_python_member_calls(
 
     def _emit_call(caller: str, target_nid: "str | None", rc: dict) -> None:
         if not target_nid or target_nid == caller or (caller, target_nid) in existing_pairs:
+            return
+        target_file = node_by_id.get(target_nid, {}).get("source_file")
+        if target_file and not _is_python_file(target_file):
             return
         existing_pairs.add((caller, target_nid))
         # EXTRACTED: a qualified call (`ClassName.method()` or `module.func()`) is
@@ -400,6 +427,8 @@ def _resolve_python_member_calls(
     for rc in all_raw_calls:
         if not rc.get("is_member_call"):
             continue
+        if not _is_python_file(rc.get("source_file")):
+            continue
         receiver = rc.get("receiver")
         callee = rc.get("callee")
         caller = rc.get("caller_nid")
@@ -411,7 +440,7 @@ def _resolve_python_member_calls(
             class_nids = class_def_nids.get(_key(receiver), [])
             if len(class_nids) != 1:  # absent or ambiguous -> bail (god-node guard)
                 continue
-            _emit_call(caller, method_index.get((class_nids[0], _key(callee))), rc)
+            _emit_call(caller, _method_of(class_nids[0], callee), rc)
         elif rc.get("_python_fixture_param"):
             # Fixture arm (#45, #4332, #4333): a member call on a pytest fixture parameter
             # is typed from the fixture's returned class according to pytest scoping.
@@ -442,7 +471,7 @@ def _resolve_python_member_calls(
                 if len(candidates) == 1:
                     target_class_nid = candidates[0]
             if target_class_nid:
-                method_nid = method_index.get((target_class_nid, _key(callee)))
+                method_nid = _method_of(target_class_nid, callee)
                 if method_nid and method_nid != caller and (caller, method_nid) not in existing_pairs:
                     existing_pairs.add((caller, method_nid))
                     all_edges.append({

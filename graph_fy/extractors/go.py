@@ -42,6 +42,21 @@ _GO_PREDECLARED_FUNCS = frozenset({
     "recover",
 })
 
+
+def _go_alias_re_exports(alias_node, source: bytes) -> bool:
+    """Whether `type A = pkg.A` (or `pkg.A[...]`) re-exports another package's type
+    under its own name. Such an alias denotes that very type and declares no new
+    name, so it gets no node: references to `A` keep resolving to the original
+    instead of tying between the two. Any other alias introduces a name."""
+    target = alias_node.child_by_field_name("type")
+    if target is not None and target.type == "generic_type":
+        target = target.child_by_field_name("type")
+    if target is None or target.type != "qualified_type":
+        return False
+    name, target_name = alias_node.child_by_field_name("name"), target.child_by_field_name("name")
+    return (name is not None and target_name is not None
+            and _read_text(name, source) == _read_text(target_name, source))
+
 def _go_collect_type_refs(node, source: bytes, generic: bool, out: list[tuple[str, str]]) -> None:
     """Walk a Go type expression; append (name, role) tuples."""
     if node is None:
@@ -262,7 +277,9 @@ def extract_go(path: Path) -> dict:
                 case_groups.setdefault(found[0], set()).add(found[1])
                 case_groups.setdefault(_make_id(pkg_scope, found[1]), set()).add(found[1])
             return
-        if node.type == "type_spec":
+        if node.type == "type_spec" or (
+            node.type == "type_alias" and not _go_alias_re_exports(node, source)
+        ):
             name_node = node.child_by_field_name("name")
             if name_node:
                 tname = _read_text(name_node, source)
@@ -339,7 +356,9 @@ def extract_go(path: Path) -> dict:
 
         if t == "type_declaration":
             for child in node.children:
-                if child.type != "type_spec":
+                if child.type not in ("type_spec", "type_alias"):
+                    continue
+                if child.type == "type_alias" and _go_alias_re_exports(child, source):
                     continue
                 name_node = child.child_by_field_name("name")
                 if not name_node:
@@ -351,6 +370,11 @@ def extract_go(path: Path) -> dict:
                 type_nid = symbol_nid(_make_id(pkg_scope, type_name), type_name)
                 add_node(type_nid, type_name, line)
                 add_edge(file_nid, type_nid, "contains", line)
+                if child.type == "type_alias":
+                    # `type A = B` is a declaration like `type A B`: references to
+                    # it land here instead of minting a sourceless stub. Its
+                    # right-hand side is not walked.
+                    continue
                 # Type body: struct fields (with embeds) or interface embedding.
                 type_body = None
                 for tc in child.children:

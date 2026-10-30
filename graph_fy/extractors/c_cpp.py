@@ -23,6 +23,70 @@ def _get_c_func_name(node, source: bytes) -> str | None:
     return None
 
 
+def _cpp_declarator_type_name(declarator, source: bytes) -> str | None:
+    """The name a typedef declarator introduces: `Handle`, `*HandlePtr`,
+    `(*Fn)(int)`, `Arr[4]` each wrap one `type_identifier`."""
+    node = declarator
+    while node is not None and node.type != "type_identifier":
+        inner = node.child_by_field_name("declarator")
+        if inner is None and node.type == "parenthesized_declarator":
+            inner = next(iter(node.named_children), None)
+        node = inner
+    return _read_text(node, source) if node is not None else None
+
+
+def _cpp_type_last_name(type_node, source: bytes) -> str | None:
+    """`Bar` for `ns::Bar` or `ns::Bar<T>`: the name a qualified type ends in."""
+    if type_node is not None and type_node.type == "type_descriptor":
+        type_node = type_node.child_by_field_name("type")
+    if type_node is None or type_node.type != "qualified_identifier":
+        return None
+    while type_node is not None and type_node.type == "qualified_identifier":
+        type_node = type_node.child_by_field_name("name")
+    if type_node is not None and type_node.type == "template_type":
+        type_node = type_node.child_by_field_name("name")
+    return _read_text(type_node, source) if type_node is not None else None
+
+
+def _cpp_alias_names(node, source: bytes) -> list[str]:
+    """The type names a namespace- or file-scope `using X = ...;` or `typedef`
+    declares. A member alias (`using value_type = T;` in a class) is not one: it
+    sits in every container and C++ member ids are not class-qualified, so they
+    would fold into one hub. Neither is the struct a C-style
+    `typedef struct Foo {...} Foo;` names (the struct's own node is it), nor a
+    same-name re-export (`using Bar = ns::Bar;`), which denotes the original
+    type and declares no new name. An include guard or `#if`/`#ifdef` block is
+    a conditional wrapper, not a scope, so an alias inside one keeps the scope
+    around it."""
+    scope = node.parent
+    while scope is not None and (
+            scope.type == "template_declaration" or scope.type.startswith("preproc_")):
+        scope = scope.parent
+    if scope is None or scope.type not in ("translation_unit", "declaration_list"):
+        return []
+    target = node.child_by_field_name("type")
+    if node.type == "alias_declaration":
+        name_node = node.child_by_field_name("name")
+        candidates = [_read_text(name_node, source)] if name_node is not None else []
+    else:
+        candidates = [_cpp_declarator_type_name(d, source)
+                      for d in node.children_by_field_name("declarator")]
+    own_names = {_cpp_type_last_name(target, source)}
+    if target is not None and target.type in (
+            "struct_specifier", "class_specifier", "union_specifier", "enum_specifier"):
+        spec_name = target.child_by_field_name("name")
+        if spec_name is not None:
+            own_names.add(_read_text(spec_name, source))
+    # A set, not `in names`: one typedef can declare thousands of names.
+    names: list[str] = []
+    seen = set(own_names)
+    for name in candidates:
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
 def _import_c(node, source: bytes, file_nid: str, stem: str, edges: list, str_path: str, scope_stack: list[str] | None = None) -> None:
     for child in node.children:
         if child.type in ("string_literal", "system_lib_string", "string"):

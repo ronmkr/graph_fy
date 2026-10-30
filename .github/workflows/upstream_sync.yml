@@ -24,8 +24,8 @@ jobs:
 
       - name: Configure upstream remote
         run: |
-          git remote add upstream https://github.com/safouanechergui/graphify.git || git remote set-url upstream https://github.com/safouanechergui/graphify.git
-          git fetch upstream main --tags
+          git remote add upstream https://github.com/Graphify-Labs/graphify.git || git remote set-url upstream https://github.com/Graphify-Labs/graphify.git
+          git fetch upstream main v8 --tags
 
       - name: Detect Upstream Drift
         id: drift
@@ -58,7 +58,7 @@ jobs:
               ? fs.readFileSync('upstream_diff_summary.md', 'utf8') 
               : 'New commits detected in upstream repository.';
             
-            const title = `[Upstream Sync Alert] ${steps.drift.outputs.behind_count} new commit(s) on safouanechergui/graphify`;
+            const title = `[Upstream Sync Alert] ${steps.drift.outputs.behind_count} new commit(s) on Graphify-Labs/graphify`;
             const body = `Automated upstream tracking detected new commits on \`upstream/main\`.\n\n${summary}\n\n### Sync Instructions\n\`\`\`bash\ngit fetch upstream main\ngit checkout -b sync/upstream-main\ngit merge upstream/main\n# Resolve any conflicts strictly in core extractors\npytest\n\`\`\``;
             
             // Search for existing open issue with this title prefix

@@ -53,6 +53,108 @@ def _is_ast_tier(item: dict) -> bool:
     return isinstance(loc, str) and bool(_AST_LOC_RE.match(loc))
 
 
+def _lost_saved_semantic_nodes(
+    saved_nodes: list,
+    new_nodes: list,
+    deleted_sources: set[str] | None = None,
+    folded: dict[str, str] | None = None,
+) -> list[dict]:
+    """Saved semantic nodes whose ids are absent from the new graph.
+
+    A node created in this run is not in ``saved_nodes``, so a sourceless stub
+    cannot stand in for a missing id. ``deleted_sources`` is the files the user
+    removed. A code rebuild is not a deletion: do not pass the rebuilt set.
+
+    An auto-minted import stub (``external`` true, or ``type`` ``external``) is
+    rebuilt from the import edges of this run. Dropping one is not a lost
+    rationale or document node.
+
+    ``folded`` (when given) maps each saved node id that build_from_json merged
+    into an AST twin to that twin's id, so a caller comparing node counts can
+    discount it.
+    """
+    deleted = {
+        norm
+        for source in (deleted_sources or ())
+        if (norm := _norm_source_file(source))
+    }
+    new_ids = {node.get("id") for node in new_nodes if isinstance(node, dict)}
+    # A semantic ghost deduplicated into its AST twin (#1145) loses its id but
+    # the symbol survives at the same (source_file, label).
+    new_ast_loc_nodes: dict[tuple[str, str], str] = {}
+    ast_loc_collisions: set[tuple[str, str]] = set()
+    # AST file nodes, for the label-only fold of build_from_json Pass 2b (#3344).
+    new_ast_file_nodes: list[tuple[str, str]] = []
+    for node in new_nodes:
+        # Match build_from_json's strict canonical-AST check (#2334).
+        if not isinstance(node, dict) or node.get("_origin") != "ast":
+            continue
+        sf = node.get("source_file")
+        if not isinstance(sf, str) or not sf:
+            continue
+        lbl = str(node.get("label", "")).strip()
+        if not lbl:
+            continue
+        if _is_file_node_label(lbl, sf):
+            new_ast_file_nodes.append((str(node.get("id")), sf))
+        norm_sf = _norm_source_file(sf)
+        if not norm_sf:
+            continue
+        key = (norm_sf, lbl)
+        if key in new_ast_loc_nodes:
+            ast_loc_collisions.add(key)
+        new_ast_loc_nodes[key] = str(node.get("id"))
+    # cluster-only and build_from_json rewrite a legacy semantic id to its
+    # canonical stem, then fold a bare doc id into its `_doc` twin. That id
+    # is the same node. A missing rationale id has no such successor.
+    stem_remap = _semantic_id_remap(saved_nodes, None)
+    rewritten = [
+        {**node, "id": stem_remap[node["id"]]}
+        if isinstance(node, dict) and node.get("id") in stem_remap
+        else node
+        for node in saved_nodes
+    ]
+    doc_remap = _doc_twin_remap(rewritten)
+
+    def _renamed_present(node_id: str) -> bool:
+        renamed = stem_remap.get(node_id, node_id)
+        renamed = doc_remap.get(renamed, renamed)
+        return renamed in new_ids
+
+    lost: list[dict] = []
+    for node in saved_nodes:
+        if not isinstance(node, dict) or _is_ast_tier(node):
+            continue
+        if node.get("external") is True or node.get("type") == "external":
+            continue
+        node_id = node.get("id")
+        if node_id in new_ids:
+            continue
+        if isinstance(node_id, str) and _renamed_present(node_id):
+            continue
+        sf_val = node.get("source_file")
+        source = _norm_source_file(sf_val) if isinstance(sf_val, str) else None
+        lbl = str(node.get("label", "")).strip()
+        if source and lbl:
+            loc_key = (source, lbl)
+            if loc_key in new_ast_loc_nodes and loc_key not in ast_loc_collisions:
+                if folded is not None:
+                    folded[str(node_id)] = new_ast_loc_nodes[loc_key]
+                continue
+        # A document that names a file stamps the file's name as label but its
+        # own path as source_file; Pass 2b folds it into the one AST file node
+        # that label names. Two or more matches stay unmerged there.
+        file_twins = [nid for nid, sf in new_ast_file_nodes if _is_file_node_label(lbl, sf)] if lbl else []
+        if len(file_twins) == 1:
+            if folded is not None:
+                folded[str(node_id)] = file_twins[0]
+            continue
+        if source and source in deleted:
+            continue
+        lost.append(node)
+    return lost
+
+
 # Relations that say only "these two symbols appear together", with no claim about
 # HOW. An extractor that finds a specific fact for a pair — a call, an import, an
 # inheritance — routinely emits one of these for the same pair as well, so when the
@@ -1228,6 +1330,7 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
     # direction in _src/_tgt; when two edges collapse onto the same node pair the
     # last write wins, so an unstable iteration order flips _src/_tgt run-to-run
     # and makes the serialized graph churn. Sorting fixes the last-write outcome.
+    dropped_schema_edges = 0
     for edge in sorted(
         extraction.get("edges", []),
         key=lambda e: (
@@ -1304,6 +1407,9 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
             )
         if "source_file" in attrs:
             attrs["source_file"] = _norm_source_file(attrs["source_file"], _root)
+        if "relation" not in attrs:
+            dropped_schema_edges += 1
+            continue
         if attrs.get("definition_file"):
             # Same portability rule as source_file (#3223); heals a graph
             # written before the fix on its next rebuild.
@@ -1389,6 +1495,12 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
                 ):
                     continue
             G.add_edge(src, tgt, **attrs)
+    if dropped_schema_edges:
+        print(
+            f"[graph_fy] WARNING: dropped {dropped_schema_edges} schema-invalid edge(s) "
+            "missing required field 'relation'.",
+            file=sys.stderr,
+        )
     hyperedges = extraction.get("hyperedges", [])
     if hyperedges:
         # Relativize hyperedge source_file the same way nodes and edges are

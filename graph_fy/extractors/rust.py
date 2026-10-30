@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import hashlib
+import re
 from graph_fy.extractors.base import _LANGUAGE_BUILTIN_GLOBALS, _file_stem, _make_id, _read_text
 
 
@@ -81,6 +82,7 @@ def extract_rust(path: Path) -> dict:
     nodes: list[dict] = []
     edges: list[dict] = []
     seen_ids: set[str] = set()
+    use_roots: dict[str, set[str]] = {}
     function_bodies: list[tuple[str, object]] = []
 
     def add_node(nid: str, label: str, line: int) -> None:
@@ -115,7 +117,7 @@ def extract_rust(path: Path) -> dict:
     def _scan_rust_declarations(node, parent_impl: str | None = None) -> None:
         t = node.type
         if t in ("function_item", "function_signature_item", "struct_item", "enum_item",
-                 "trait_item", "type_item", "const_item", "static_item"):
+                 "trait_item", "union_item", "type_item", "const_item", "static_item"):
             name_node = node.child_by_field_name("name")
             if name_node:
                 name = _read_text(name_node, source)
@@ -254,7 +256,13 @@ def extract_rust(path: Path) -> dict:
                 emit_param_return_refs(node, func_nid, line)
             return
 
-        if t in ("struct_item", "enum_item", "trait_item"):
+        # An associated type in an `impl` body (`type Output = Meters;`) is a
+        # type_item too, but not a file-level item: it would mint one colliding
+        # `Output` node per `impl Add`. Only an alias at module level is one.
+        if t == "type_item" and node.parent is not None and node.parent.parent is not None \
+                and node.parent.parent.type == "impl_item":
+            return
+        if t in ("struct_item", "enum_item", "trait_item", "union_item", "type_item"):
             name_node = node.child_by_field_name("name")
             if name_node:
                 item_name = _read_text(name_node, source)
@@ -283,7 +291,7 @@ def extract_rust(path: Path) -> dict:
                                 else:
                                     add_edge(item_nid, tgt, "references", line,
                                              context="generic_arg")
-                if t == "struct_item":
+                if t in ("struct_item", "union_item"):
                     for c in node.children:
                         if c.type != "field_declaration_list":
                             continue
@@ -440,12 +448,52 @@ def extract_rust(path: Path) -> dict:
         if t == "use_declaration":
             arg = node.child_by_field_name("argument")
             if arg:
-                raw = _read_text(arg, source)
-                clean = raw.split("{")[0].rstrip(":").rstrip("*").rstrip(":")
-                module_name = clean.split("::")[-1].strip()
-                if module_name:
-                    tgt_nid = _make_id(module_name)
-                    add_edge(file_nid, tgt_nid, "imports_from", node.start_point[0] + 1, context="import")
+                raw = _read_text(arg, source).strip()
+                scope_mods = {
+                    _read_text(name_node, source)
+                    for sibling in (node.parent.children if node.parent is not None else ())
+                    if sibling.type == "mod_item"
+                    and (name_node := sibling.child_by_field_name("name")) is not None
+                }
+                visibility = next(
+                    (child for child in node.children if child.type == "visibility_modifier"),
+                    None,
+                )
+                reexport = visibility is not None and _read_text(visibility, source).strip() == "pub"
+                line = node.start_point[0] + 1
+
+                def record_use(written: str, path_str: str) -> None:
+                    first = path_str.lstrip(": ").split("::")[0].strip()
+                    bound = written.split(" as ")[-1].strip()
+                    ident = re.match(r"[A-Za-z_][A-Za-z0-9_]*", first)
+                    is_local = first in ("crate", "self", "super") or (
+                        ident is not None
+                        and ident.group() in scope_mods
+                        and not path_str.lstrip().startswith("::")
+                    )
+                    tgt_nid = _make_id(bound)
+                    add_edge(file_nid, tgt_nid, "imports_from", line, context="import")
+                    if is_local:
+                        edges[-1]["_rust_use_name"] = written.split(" as ")[0].strip()
+                        use_roots.setdefault(bound, set()).add("crate")
+                    else:
+                        use_roots.setdefault(bound, set()).add(first)
+                        if reexport and bound.isidentifier():
+                            edges[-1]["_rust_pub_use"] = {"label": bound, "root": first}
+
+                if "{" in raw:
+                    prefix, rest = raw.split("{", 1)
+                    prefix = prefix.strip().rstrip("::")
+                    items = rest.split("}")[0].split(",")
+                    for it in items:
+                        it = it.strip()
+                        if it:
+                            record_use(it, f"{prefix}::{it}")
+                else:
+                    clean = raw.rstrip(";").rstrip(":")
+                    module_name = clean.split("::")[-1].strip()
+                    if module_name:
+                        record_use(module_name, clean)
             return
 
         for child in node.children:
@@ -523,6 +571,10 @@ def extract_rust(path: Path) -> dict:
         src, tgt = edge["source"], edge["target"]
         if src in valid_ids and (tgt in valid_ids or edge["relation"] in ("imports", "imports_from")):
             clean_edges.append(edge)
+
+    for node in nodes:
+        if not node.get("source_file") and node.get("label") in use_roots:
+            node["_rust_use_roots"] = sorted(use_roots[node["label"]])
 
     ret = {"nodes": nodes, "edges": clean_edges, "raw_calls": raw_calls}
     try:
