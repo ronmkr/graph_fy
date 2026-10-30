@@ -89,7 +89,37 @@ Three core leaks drive token explosion:
 
 ---
 
-## 4. End-to-End Workflow: The 10x AI Engineer Setup
+## 4. Frontier Reasoning Models & Test-Time Compute (Sonnet 5.5, Opus 5.5, o3)
+
+With next-generation reasoning models utilizing **extended test-time compute** (dynamic Chain-of-Thought, internal tree search, self-correction) and 1M–10M+ token windows, token efficiency changes fundamentally:
+
+> **It is no longer about fitting within context limits; it is about preventing "context rot" and the "overthinking tax."**
+
+### A. The "Context Rot" & Attention Dilution Law
+Frontier models can ingest millions of tokens, but multi-hop reasoning degrades steeply past 32k–64k tokens of raw text (the *Needle-in-a-Haystack Fallacy* vs true causal dependency reasoning). Dumping raw source files floods the model's attention heads with syntactic boilerplate, causing:
+1. **Goal Drift**: The model loses track of global architectural invariants set in earlier turns.
+2. **Hallucinated Dependency Branches**: Syntactic noise triggers speculative investigations of unrelated code.
+3. **AST Topologies Win**: Deterministic AST skeletons (Tier 1) and ego-networks provide a noise-free topological map, yielding higher SWE-bench resolution rates than raw whole-file dumps.
+
+### B. The "Overthinking Tax" on Test-Time Compute
+When reasoning models process bloated context windows:
+* **Error Propagation in Thinking Loops**: Extraneous code lines inject ambiguity, causing reasoning models to explore dead-end hypotheses and multiply their internal Chain-of-Thought generation by **3x to 5x** (*Ockham's Razor on token generation*).
+* **Cost Multiplication**: Test-time compute costs scale with thinking token length. Clean, noise-free structural context allows the reasoning model to lock onto the root cause immediately, spending its cognitive compute budget strictly on the implementation fix.
+
+### C. Prefix Freezing & Provider KV-Cache Economics
+In high-tier frontier models, prompt cache hits reduce input token costs by **80–90%** and slash Time-To-First-Token (TTFT) by up to 10x:
+* **Byte-Identical Invariant**: The repository topology, system prompts, and tool definitions must remain 100% byte-identical across sequential turns.
+* **Deterministic Serialization**: AST symbols and graphs in `graph_fy` are deterministically ordered by `(source_path, line_number)` to guarantee persistent KV-cache hits.
+* **Zero Dynamic Noise in Prefixes**: Dynamic timestamps, random request IDs, or variable metadata must never be placed in prefix headers.
+
+### D. System 1 vs System 2 Division of Labor
+* **System 1 (Deterministic / Local / $0.00)**: `graph_fy` handles AST extraction, call graph resolution, PageRank centrality, and git co-changes in <45ms locally on CPU.
+* **System 2 (Frontier Reasoning Model)**: Frontier models handle high-level architectural trade-offs, complex refactoring, and subtle concurrency bug isolation.
+* *Never spend $15/M-token reasoning compute on tasks standard AST parsers solve deterministically for free.*
+
+---
+
+## 5. End-to-End Workflow: The 10x AI Engineer Setup
 
 ### Step 1: Pre-Task Briefing (Zero-LLM First)
 
@@ -147,7 +177,7 @@ Takes ~1–2 seconds, updates graph topology locally with zero network calls and
 
 ---
 
-## 5. The $10 Spec-Driven Enterprise Setup (Language-Agnostic)
+## 6. The $10 Spec-Driven Enterprise Setup (Language-Agnostic)
 
 How to build an enterprise-grade application (Java, TypeScript, Python, Go, Rust) where **Claude writes all the code** and you provide **only specs and docs**, staying strictly within a **$10 budget**:
 
@@ -230,7 +260,7 @@ headroom wrap claude
 
 ---
 
-## 6. Quick Comparison Matrix
+## 7. Quick Comparison Matrix
 
 | Capability | `graph_fy` | `headroom` | `serena` | `RTK / snip` |
 | :--- | :---: | :---: | :---: | :---: |
@@ -246,7 +276,7 @@ headroom wrap claude
 
 ---
 
-## 7. Golden Rules for Maximum Determinism & Token Savings
+## 8. Golden Rules for Maximum Determinism & Token Savings
 
 1. **Never let an agent read a file before querying its skeleton**: Call `get_code_skeleton` or `get_agent_context` first. 90% of tasks only need signatures and docstrings.
 2. **Never print full passing test suites**: Use targeted test runs (`pytest -k "test_feature"` or `-q`) or let a tool like Headroom/RTK filter out green passes.
@@ -256,7 +286,7 @@ headroom wrap claude
 
 ---
 
-## 8. Companion Guides & Deep Dives
+## 9. Companion Guides & Deep Dives
 
 * [**Complete Skills & Tools Installation Guide**](file:///Users/raunak/Documents/projects/graphify/docs/SKILLS_INSTALLATION_GUIDE.md): Step-by-step setup for Matt Pocock skills, `graph_fy`, `headroom`, `serena`, and MCP configurations.
 * [**The $10 Spec-Driven Enterprise Setup**](file:///Users/raunak/Documents/projects/graphify/docs/SPEC_DRIVEN_ENTERPRISE_SETUP.md): Tool configs (`headroom`, `graph_fy`, `serena`), `mcp.json`, and agent rules.
