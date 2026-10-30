@@ -169,3 +169,19 @@ Measured on the full `graph_fy` codebase self-index (13,927 nodes, 28,636 edges)
 - **Per-query graph rebuilding eliminated**: Canonical search views cached directly in `G.graph["_canonical_search_views"]`.
 - **Query Latency**: 53.85 ms median reduced to **0.31 – 0.34 ms** (**159.8x speedup / 99.4% latency drop**).
 - **Semantic Impedance**: Traversal favors execution links (`calls`, `routes_to`, `imports`) over structural boundary links (`defines`, `contains`), avoiding false-shortcut AST containment edges.
+
+---
+
+## 8. Track 1 Immediate Priority Benchmarks
+
+Measured on local CPU with zero external API calls (`tests/bench_track1_immediate_priority.py`):
+
+| Capability / Benchmark Scenario | Metric | Naive / Upstream | `graph_fy` Local AST | Speedup / Impact |
+| :--- | :--- | :--- | :--- | :--- |
+| **Structural YAML Extraction (#68)** | Parsing Latency & Accuracy | ⚠️ Key folding (`on:` $\to$ `True`) | **17.07 ms** (composed AST nodes) | **Exact written keys & 1-based source lines** |
+| **Pydantic V2 & SQLAlchemy Lineage (#60)** | Extraction & Graph Linking | ❌ 0% (missing validators & ORM rels) | **8.12 ms** (23 bidirectional edges) | **Full schema-to-API lineage** |
+| **Angular Template Reactive Binding (#59)** | HTML Template Parsing Latency | ❌ Unparsed HTML markup | **1.15 ms** (`template_binds_to`) | **Sub-2ms UI-to-component AST linkage** |
+| **Angular UI Reverse Blast Radius (#59)** | Method Renaming Impact Latency | ⚠️ Manual grep search (10-30s) | **0.039 ms** (39 µs reverse BFS) | **Instant UI impact surfacing** |
+| **Spring Cloud Feign & RPC Resolution (#58)** | Cross-Service Endpoint Resolution | ❌ Disconnected interface stubs | **0.61 ms** (`calls_feign_rpc`) | **Sub-millisecond distributed endpoint matching** |
+| **Spring Feign Reverse Blast Radius (#58)** | Provider Controller Impact Latency | ⚠️ Multi-repo manual grep | **0.081 ms** (81 µs reverse BFS) | **Instant upstream microservice caller identification** |
+
