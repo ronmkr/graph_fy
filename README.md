@@ -206,6 +206,10 @@ Benchmarked on **Spring Boot Microservices** (`macrozheng/mall`, 524 Java files)
 | **Context Retrieval Latency** | 10.2s / task | 724.0ms *(graph CLI only)* | **4.3s (Spring) / 880ms (Angular)** |
 | **AST Code Skeletons** | ❌ Full file bloat | ❌ None *(flat edge list only)* | **✅ Tier 1 AST (exact types, annotations)** |
 | **Modern Angular 18+ Signals & DI** | ⚠️ Requires full file reads | ❌ Misses `inject()` edges | **✅ Verbatim `inject()`, `rxResource`, `computed`** |
+| **Angular Template Reactive Binding** | ⚠️ Manual HTML markup search | ❌ None *(unparsed `.component.html`)* | **✅ HTML-to-TS bindings (`(click)`, `[prop]`, `*ngFor` $\to$ `template_binds_to`)** |
+| **Distributed Microservice RPC** | ⚠️ Multi-turn grep across submodules | ❌ 0% *(disconnected interface stubs)* | **✅ `@FeignClient` $\to$ `@RestController` resolution (`calls_feign_rpc`)** |
+| **Python ORM & Schema Lineage** | ⚠️ Fragmented model file reads | ❌ 0% *(misses validators & relations)* | **✅ Pydantic V2 `@field_validator` + SQLAlchemy `relationship()` & `ForeignKey()`** |
+| **Structural YAML AST** | ⚠️ Flat string reads | ❌ Key folding bug (`on:` $\to$ `True`) | **✅ Composed YAML AST nodes with exact written keys & 1-based source lines** |
 | **Build Systems & Infrastructure** | ⚠️ Manual file search | ❌ 0% *(misses Docker & CI)* | **✅ CMake, Gradle, Qt UI, Docker & GitHub CI** |
 | **Junk Node Pollution** | N/A | ❌ 660 junk nodes *(minified JS & manifests)* | **✅ 0 junk nodes (clean AST extraction)** |
 | **Storage & Query Engine** | Flat files | In-memory NetworkX JSON | **ACID SQLite WAL `graph.db` + Recursive CTEs** |

@@ -1028,6 +1028,13 @@ def run_resolution_phase(
     except Exception:
         pass
 
+    # Spring Cloud Feign & RPC cross-microservice endpoint resolution (#58)
+    try:
+        from graph_fy.resolvers.feign_rpc import resolve_spring_feign_rpc
+        resolve_spring_feign_rpc(all_nodes, all_edges, root=root)
+    except Exception:
+        pass
+
     for e in all_edges:
         e.pop("_rust_pub_use", None)
         e.pop("_rust_use_name", None)
