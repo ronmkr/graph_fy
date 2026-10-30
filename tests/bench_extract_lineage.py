@@ -1,7 +1,7 @@
-"""Benchmark & Verification Suite for Track 1 Immediate Priority Features.
+"""Benchmark & Verification Suite for Framework & Microservice Lineage Features.
 
 Evaluates performance, extraction speed, token compression, and blast radius
-traversal across all 4 immediate priority roadmap items:
+traversal across framework lineage extractors:
 1. Structural YAML Extraction (#68)
 2. Pydantic V2 & SQLAlchemy Schema Lineage (#60)
 3. Angular Component Template HTML-to-TypeScript Reactive Binding (#59)
@@ -295,7 +295,7 @@ public class OrderApiController {
     }
 
 
-def test_track1_benchmark_suite(tmp_path: Path) -> None:
+def test_framework_lineage_benchmark_suite(tmp_path: Path) -> None:
     yaml_bench = benchmark_yaml_extraction(tmp_path)
     py_bench = benchmark_pydantic_sqlalchemy_lineage(tmp_path)
     ng_bench = benchmark_angular_template_binding(tmp_path)
@@ -329,7 +329,7 @@ if __name__ == "__main__":
         ng = benchmark_angular_template_binding(p)
         rpc = benchmark_spring_feign_rpc(p)
 
-        print("\n=== Track 1 Immediate Priority Benchmark Results ===\n")
+        print("\n=== Framework & Microservice Lineage Benchmark Results ===\n")
         print("1. Structural YAML Extraction (#68):")
         print(f"   - Extraction Latency: {y['duration_ms']:.2f} ms")
         print(f"   - Nodes Extracted: {int(y['nodes_count'])}")

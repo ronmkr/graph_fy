@@ -172,9 +172,9 @@ Measured on the full `graph_fy` codebase self-index (13,927 nodes, 28,636 edges)
 
 ---
 
-## 8. Track 1 Immediate Priority Benchmarks
+## 8. Framework & Microservice Lineage Benchmarks
 
-Measured on local CPU with zero external API calls (`tests/bench_track1_immediate_priority.py`):
+Measured on local CPU with zero external API calls (`tests/bench_extract_lineage.py`):
 
 | Capability / Benchmark Scenario | Metric | Naive / Upstream | `graph_fy` Local AST | Speedup / Impact |
 | :--- | :--- | :--- | :--- | :--- |
