@@ -385,15 +385,20 @@ def to_wiki(
             resolver.setdefault(node_data['label'], slug)
 
     # Second pass: render and write each article with the full resolver in hand.
+    produced: set[str] = set()
     for cid, nodes in communities.items():
         label = labels.get(cid, f"Community {cid}")
         article = _community_article(G, cid, nodes, label, labels, cohesion.get(cid), node_community, resolver)
-        (out / f"{community_slugs[cid]}.md").write_text(article, encoding="utf-8")
+        fname = f"{community_slugs[cid]}.md"
+        (out / fname).write_text(article, encoding="utf-8")
+        produced.add(fname)
         count += 1
 
     for nid, slug in god_articles:
         article = _god_node_article(G, nid, labels, node_community, resolver)
-        (out / f"{slug}.md").write_text(article, encoding="utf-8")
+        fname = f"{slug}.md"
+        (out / fname).write_text(article, encoding="utf-8")
+        produced.add(fname)
         count += 1
 
     # Index
@@ -401,5 +406,26 @@ def to_wiki(
         _index_md(communities, labels, god_nodes_data, G.number_of_nodes(), G.number_of_edges(), resolver),
         encoding="utf-8",
     )
+    produced.add("index.md")
+
+    # Sweep orphans: remove only the *.md this run did not produce, so a relabelled
+    # community's stale page is still cleaned up without rewriting the survivors.
+    produced_by_fold = {name.casefold(): name for name in produced}
+    for old_article in out.glob("*.md"):
+        wanted = produced_by_fold.get(old_article.name.casefold())
+        if wanted is None:
+            old_article.unlink(missing_ok=True)
+        elif old_article.name != wanted:
+            # Case-only relabel. On a case-SENSITIVE filesystem, this run wrote
+            # to `out / wanted` as a DISTINCT file; unlink the stale twin.
+            # On case-INSENSITIVE systems (macOS APFS / Windows NTFS), rename through
+            # a temp file so the new casing reaches disk and resolves links.
+            target = out / wanted
+            if target.exists() and not target.samefile(old_article):
+                old_article.unlink(missing_ok=True)
+            else:
+                temp = out / f".{wanted}.case-tmp"
+                old_article.rename(temp)
+                temp.rename(target)
 
     return count

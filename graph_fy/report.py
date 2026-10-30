@@ -31,10 +31,10 @@ def _portable_root_label(root: str) -> str:
 
 
 def _safe_community_name(label: str) -> str:
-    """Mirrors export.safe_name so community hub filenames and report wikilinks always agree."""
-    cleaned = re.sub(r'[\\/*?:"<>|#^[\]]', "", label.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")).strip()
-    cleaned = re.sub(r"\.(md|mdx|markdown)$", "", cleaned, flags=re.IGNORECASE)
-    return cleaned or "unnamed"
+    """The community hub wikilink target, computed the same way the actual
+    `_COMMUNITY_*.md` filename is (`export._obsidian_safe_stem`)."""
+    from graph_fy.export import _obsidian_safe_stem
+    return _obsidian_safe_stem(label)
 
 
 def load_learning_for_report(graph_path) -> dict | None:

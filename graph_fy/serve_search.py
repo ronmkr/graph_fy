@@ -65,6 +65,7 @@ _QUERY_STOPWORDS = frozenset({
     "some", "such", "than", "too", "very", "about", "above", "across",
     "after", "before", "behind", "below", "between", "during", "under",
     "until", "while", "work", "works", "working",
+    "get", "gets", "got", "getting",
     # German
     "wie", "was", "warum", "wann", "wo", "woher", "wohin", "wer", "wen", "wem",
     "funktioniert", "funktionieren", "macht", "machen", "tut",

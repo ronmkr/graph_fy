@@ -585,6 +585,50 @@ def _find_require_call(value_node):
         return _find_require_call(obj)
     return None
 
+
+def _js_value_is_require(value_node, source: bytes) -> bool:
+    """True only when `value_node` is a literal `require(...)` call (or
+    `require(...).x`). `_find_require_call` matches any `identifier(...)` callee,
+    so the module-scope binding guard must name-check the callee; otherwise it
+    also suppresses real `const x = factory()` nodes and breaks #2604/#2552
+    (#4634)."""
+    call = _find_require_call(value_node)
+    if call is None:
+        return False
+    fn = call.child_by_field_name("function")
+    return fn is not None and _read_text(fn, source) == "require"
+
+
+def _js_require_specifier(value_node, source: bytes) -> str | None:
+    """The string literal argument of a `require(...)` call, or None."""
+    call = _find_require_call(value_node)
+    if call is None:
+        return None
+    args = call.child_by_field_name("arguments")
+    if args is None:
+        return None
+    for arg in args.children:
+        if arg.type == "string":
+            raw = _read_text(arg, source).strip("'\"` ")
+            if raw:
+                return raw
+    return None
+
+
+def _js_require_resolves_locally(value_node, source: bytes, str_path: str) -> bool:
+    """True when a `require(...)` binding's specifier resolves to a file in the
+    corpus. A require of an external package (`require('some-plugin')`) has no
+    file to redirect `new X()`/`extends X` to, so suppressing its local node the
+    same way as a resolvable require leaves the use with no edge at all (#4688)
+    -- the caller should only suppress the node for the resolvable case."""
+    raw = _js_require_specifier(value_node, source)
+    if raw is None:
+        return False
+    resolved = _resolve_js_import_target(raw, str_path)
+    # An unresolved specifier (external package) still returns a `ref:`-namespaced
+    # id with no resolved path -- only a real local-file resolution has one.
+    return resolved is not None and resolved[1] is not None
+
 def _require_imports_js(node, source: bytes, importer_nid: str, stem: str, edges: list, str_path: str) -> bool:
     """Detect CommonJS require imports inside lexical_declaration / variable_declaration.
 
@@ -1104,11 +1148,25 @@ def _js_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
                                 )
                             arrow_found = True
                     elif value and (
-                        is_exported_scalar_binding
-                        or value.type in (
-                            "object", "array", "as_expression",
-                            "satisfies_expression", "call_expression",
-                            "new_expression",
+                        # A `const X = require('./m')` binding minted a node that
+                        # shadowed the class the required file exports, so
+                        # `new X()` bound to the local node instead of the
+                        # required one (#4621). `var` never produced one either.
+                        # Only suppress it when the specifier actually resolves
+                        # to a file in the corpus -- a require of an external
+                        # package has no required class to redirect to, so
+                        # suppressing it there just drops the use entirely (#4688).
+                        not (
+                            _js_value_is_require(value, source)
+                            and _js_require_resolves_locally(value, source, str_path)
+                        )
+                        and (
+                            is_exported_scalar_binding
+                            or value.type in (
+                                "object", "array", "as_expression",
+                                "satisfies_expression", "call_expression",
+                                "new_expression",
+                            )
                         )
                     ):
                         # Simple exported identifiers are part of the module API
@@ -1303,26 +1361,60 @@ def _ts_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
     return False
 
 
+def _ts_decorator_target_name(expr, source: bytes) -> str | None:
+    """The symbol a decorator expression applies: the outermost call's name.
+
+    `f` -> f; `f()` / `x.f()` -> f; `@Component({...})` -> Component. A
+    parenthesized decorator is unwrapped first. tree-sitter-typescript 0.23.2
+    cannot parse a call chain in decorator position (`@(Link().toMany())`): it
+    wraps `Link().` in an ERROR and parses `toMany()` as a SIBLING of the ERROR
+    inside the parentheses. The applied decorator is still that outermost call,
+    which is the last named call child, never the one buried in the ERROR
+    (#4711). Without this the whole parenthesized decorator contributed no edge,
+    though most of its expression parsed.
+    """
+    if expr is None:
+        return None
+    if expr.type == "parenthesized_expression":
+        calls = [c for c in expr.named_children if c.type == "call_expression"]
+        if calls:
+            return _ts_decorator_target_name(calls[-1], source)
+        # A recovered non-call expression (an invalid `@(A, B)` sequence lands
+        # here as ERROR + `B`) is not a decorator name: do not guess one.
+        if any(c.type == "ERROR" for c in expr.named_children):
+            return None
+        named = [c for c in expr.named_children if c.type != "ERROR"]
+        return _ts_decorator_target_name(named[0], source) if named else None
+    if expr.type == "call_expression":
+        fn = expr.child_by_field_name("function")
+        if fn is None:
+            return None
+        if fn.type == "member_expression":
+            prop = fn.child_by_field_name("property")
+            return _read_text(prop, source) if prop else None
+        if fn.type == "identifier":
+            return _read_text(fn, source)
+        return None
+    if expr.type == "member_expression":
+        prop = expr.child_by_field_name("property")
+        return _read_text(prop, source) if prop else None
+    if expr.type == "identifier":
+        return _read_text(expr, source)
+    return None
+
+
 def _ts_decorator_name(deco_node, source: bytes) -> str | None:
     """Return the head symbol of a TS `decorator` node.
 
     `@Injectable` -> the identifier; `@Component({...})` / `@Input()` -> the
     `function` of the call_expression; `@ng.Component()` / `@core.Injectable` ->
     the `property` of the member_expression (the imported symbol, not the
-    namespace alias).
+    namespace alias); `@(Link().toMany())` -> the outermost call, `toMany`.
     """
     for child in deco_node.children:
         if not child.is_named:
             continue
-        target = child
-        if target.type == "call_expression":
-            target = target.child_by_field_name("function") or target
-        if target.type == "member_expression":
-            prop = target.child_by_field_name("property")
-            return _read_text(prop, source) if prop else None
-        if target.type == "identifier":
-            return _read_text(target, source)
-        return None
+        return _ts_decorator_target_name(child, source)
     return None
 
 def _ts_method_name(method_node, source: bytes) -> str | None:

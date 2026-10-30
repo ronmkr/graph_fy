@@ -87,6 +87,49 @@ def _python_collect_type_refs(node, source: bytes, generic: bool, out: list[tupl
                 _python_collect_type_refs(c, source, generic, out)
 
 
+_PY_TYPE_ALIAS_ANNOTATIONS = frozenset({
+    "TypeAlias", "typing.TypeAlias", "typing_extensions.TypeAlias",
+})
+_PY_NEW_TYPE_CALLEES = frozenset({"NewType", "typing.NewType", "typing_extensions.NewType"})
+
+
+def _python_alias_name(stmt, source: bytes) -> str | None:
+    """The type name a module-level statement declares as an explicit alias.
+
+    `type Vector = ...` / `type Pair[T] = ...` (PEP 695), `Matrix: TypeAlias = ...`
+    and `UserId = NewType("UserId", int)` each declare one. A bare
+    `JsonValue = Union[...]` is an alias by convention only and is not one.
+    A same-name re-export (`Field: TypeAlias = core.Field`, `type Field =
+    core.Field[int]`, or `Field: TypeAlias = Field` after `from core import
+    Field`) denotes the original type and declares no new name, so it
+    returns None: references keep resolving to the one real `Field`.
+    """
+    if stmt.type == "type_alias_statement":
+        left, right = stmt.child_by_field_name("left"), stmt.child_by_field_name("right")
+        name = _read_text(left, source).split("[", 1)[0].strip() if left is not None else ""
+    elif stmt.type == "expression_statement" and len(stmt.named_children) == 1:
+        assign = stmt.named_children[0]
+        left = assign.child_by_field_name("left") if assign.type == "assignment" else None
+        if left is None or left.type != "identifier":
+            return None
+        name, right = _read_text(left, source), assign.child_by_field_name("right")
+        annotation = assign.child_by_field_name("type")
+        if annotation is None:
+            callee = right.child_by_field_name("function") if right is not None and right.type == "call" else None
+            # NewType always mints a new type, even under its own name.
+            return name if callee is not None and _read_text(callee, source) in _PY_NEW_TYPE_CALLEES else None
+        if _read_text(annotation, source).strip() not in _PY_TYPE_ALIAS_ANNOTATIONS:
+            return None
+    else:
+        return None
+    if not name.isidentifier():
+        return None
+    target = _read_text(right, source).split("[", 1)[0].strip() if right is not None else ""
+    if target.rsplit(".", 1)[-1] == name:
+        return None
+    return name
+
+
 def _python_pre_scan_underscore_collisions(root_node, source: bytes, stem: str) -> dict[str, Any]:
     """Pre-scan a Python module for name differences and duplicate/kind declarations that collapse to one node id (#42, #3302)."""
     raw_groups: dict[str, list[tuple[str, str]]] = {}
@@ -101,7 +144,10 @@ def _python_pre_scan_underscore_collisions(root_node, source: bytes, stem: str) 
 
     classes: list = []
     for child in map(_undecorated, root_node.children):
-        if child.type == "function_definition":
+        alias_name = _python_alias_name(child, source)
+        if alias_name:
+            _record(_make_id(stem, alias_name), alias_name, "type")
+        elif child.type == "function_definition":
             name_node = child.child_by_field_name("name")
             if name_node is not None:
                 name = _read_text(name_node, source)

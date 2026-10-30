@@ -290,10 +290,12 @@ def to_json(G: nx.Graph, communities: dict[int, list[str]], output_path: str, *,
                 # Empty/whitespace existing file (e.g. a freshly touched path):
                 # no nodes to lose, so any new graph is a growth — proceed.
                 existing_n = 0
+                existing_nodes = []
             else:
                 try:
                     existing_data = json.loads(raw)
-                    existing_n = len(existing_data.get("nodes", []))
+                    existing_nodes = existing_data.get("nodes", []) if isinstance(existing_data, dict) else []
+                    existing_n = len(existing_nodes)
                 except Exception as exc:
                     # Non-empty but unparseable existing graph (corrupt or a
                     # mid-write): we cannot verify the new graph is not a silent
@@ -310,7 +312,28 @@ def to_json(G: nx.Graph, communities: dict[int, list[str]], output_path: str, *,
                     )
                     return False
             new_n = G.number_of_nodes()
-            if new_n < existing_n:
+            from graph_fy.build import _lost_saved_semantic_nodes
+            new_node_list = [
+                {"id": node_id, **{key: value for key, value in attrs.items() if key != "id"}}
+                for node_id, attrs in G.nodes(data=True)
+            ]
+            folded: dict[str, str] = {}
+            missing = _lost_saved_semantic_nodes(existing_nodes, new_node_list, set(), folded)
+            if missing:
+                import sys as _sys
+                ids = ", ".join(str(node.get("id")) for node in missing)
+                print(
+                    "[graph_fy] WARNING: Refusing to overwrite — saved semantic "
+                    f"node(s) are missing from the new graph: {ids}.",
+                    file=_sys.stderr,
+                )
+                return False
+            # A saved semantic node merged into an AST twin that was already
+            # saved is one node, not two; a reload-and-recluster folds it (#4389).
+            # A twin new to this run does not offset some other node's loss.
+            existing_ids = {n.get("id") for n in existing_nodes if isinstance(n, dict)}
+            merged = sum(twin in existing_ids for twin in folded.values())
+            if new_n < existing_n - merged:
                 import sys as _sys
                 print(
                     f"[graph_fy] WARNING: new graph has {new_n} nodes but existing "
@@ -821,9 +844,9 @@ def to_obsidian(
 
         # Build tags for this node
         ftype = data.get("file_type", "")
-        ftype_tag = _FTYPE_TAG.get(ftype, f"graph_fy/{ftype}" if ftype else "graph_fy/document")
+        ftype_tag = _FTYPE_TAG.get(ftype, f"graph_fy/{_obsidian_tag(ftype)}" if ftype else "graph_fy/document")
         dom_conf = _dominant_confidence(node_id)
-        conf_tag = f"graph_fy/{dom_conf}"
+        conf_tag = f"graph_fy/{_obsidian_tag(dom_conf)}"
         comm_tag = f"community/{_obsidian_tag(community_name)}"
         node_tags = [ftype_tag, conf_tag, comm_tag]
 

@@ -562,7 +562,7 @@ def run_resolution_phase(
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning("Cross-file import resolution failed, skipping: %s", exc)
-    _rewire_unique_stub_nodes(all_nodes, all_edges)
+    _rewire_unique_stub_nodes(all_nodes, all_edges, root=root)
 
     # Cross-file Java import resolution
     java_paths = [p for p in paths if p.suffix == ".java"]
@@ -1027,5 +1027,11 @@ def run_resolution_phase(
         resolve_config_lineage(all_nodes, all_edges, root=root)
     except Exception:
         pass
+
+    for e in all_edges:
+        e.pop("_rust_pub_use", None)
+        e.pop("_rust_use_name", None)
+    for n in all_nodes:
+        n.pop("_rust_use_roots", None)
 
     return all_nodes, all_edges

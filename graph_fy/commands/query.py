@@ -53,12 +53,14 @@ def cmd_query(
     find_graph_path_fn: Callable[[str], Path],
 ) -> int:
     """Handle `graph_fy query` command."""
+    _query_usage = 'Usage: graph_fy query "<text>" [--limit N] [--hops N] [--dfs] [--context C] [--budget N] [--graph path] [--fast-grep [target]] [--terse] [--caveman]'
     if len(argv) < 3:
-        print(
-            'Usage: graph_fy query "<text>" [--limit N] [--hops N] [--dfs] [--context C] [--budget N] [--graph path] [--fast-grep [target]] [--terse] [--caveman]',
-            file=sys.stderr,
-        )
+        print(_query_usage, file=sys.stderr)
         return 1
+
+    if len(argv) == 3 and argv[2] in ("--help", "-h"):
+        print(_query_usage)
+        return 0
 
     from graph_fy.serve import _query_graph_text
     from graph_fy.security import sanitize_label
@@ -465,6 +467,10 @@ def cmd_explain(
     find_graph_path_fn: Callable[[str], Path],
 ) -> int:
     """Handle `graph_fy explain` command."""
+    _explain_usage = 'Usage: graph_fy explain "<node>" [--graph path] [--terse] [--caveman]'
+    if len(argv) == 3 and argv[2] in ("--help", "-h"):
+        print(_explain_usage)
+        return 0
     raw_args = argv[2:]
     positional = []
     graph_path = default_graph_path_fn()

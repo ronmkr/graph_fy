@@ -110,6 +110,7 @@ _cpp_collect_type_refs = _cc._cpp_collect_type_refs
 _get_cpp_func_name = _cc._get_cpp_func_name
 _cpp_declarator_name = _cc._cpp_declarator_name
 _cpp_local_var_types = _cc._cpp_local_var_types
+_cpp_alias_names = _cc._cpp_alias_names
 
 # Python helpers
 _PYTHON_TYPE_CONTAINERS = _py._PYTHON_TYPE_CONTAINERS
@@ -172,6 +173,28 @@ def _first_parse_error_line(root) -> int:
         if child is None:
             return node.start_point[0] + 1
         node = child
+
+
+def _first_multiline_error_line(root) -> int:
+    """1-based line of the first ERROR that spans more than one line.
+
+    The #2551 warning gate selects on a multiline region (or a total loss), so
+    that region is the actionable location. Earlier single-line recoveries can
+    sit far above it: in a decorator-heavy TS file, `@(Link().toMany())` errors
+    on line 14 but keeps every symbol, while the multiline chain on line 33 is
+    the one the reader needs (#4711).
+    """
+    best = None
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type == "ERROR" and n.end_point[0] > n.start_point[0]:
+            if best is None or n.start_byte < best.start_byte:
+                best = n
+        stack.extend(c for c in n.children if c.has_error)
+    if best is None:
+        return _first_parse_error_line(root)
+    return best.start_point[0] + 1
 
 
 def _has_multiline_error(root) -> bool:
@@ -444,6 +467,15 @@ def _extract_generic(
             config.import_handler(node, source, file_nid, stem, edges, str_path, scope_stack)
             return
 
+        # C++ using / typedef aliases
+        if config.ts_module == "tree_sitter_cpp" and t in ("alias_declaration", "type_definition"):
+            line = node.start_point[0] + 1
+            for alias_name in _cpp_alias_names(node, source):
+                alias_nid = _make_id(stem, alias_name)
+                if alias_nid not in seen_ids:
+                    add_node(alias_nid, alias_name, line)
+                    add_edge(file_nid, alias_nid, "contains", line)
+
         # Import types
         if t in config.import_types:
             if config.import_handler:
@@ -478,6 +510,22 @@ def _extract_generic(
                     for child in node.children:
                         walk(child, parent_class_nid)
             return
+
+        # An explicit module-level type alias declares a type name: give it a
+        # node so annotations using it reference it instead of minting a
+        # sourceless stub. The statement is then walked as usual.
+        if (t in ("type_alias_statement", "expression_statement")
+                and config.ts_module == "tree_sitter_python" and parent_class_nid is None
+                and node.parent is not None and node.parent.type == "module"):
+            from graph_fy.extractors.python import _python_alias_name
+            alias_name = _python_alias_name(node, source)
+            if alias_name:
+                alias_line = node.start_point[0] + 1
+                alias_nid = _python_underscore_salted_nid(
+                    _make_id(stem, alias_name), alias_name, python_underscore_groups, kind="type"
+                )
+                add_node(alias_nid, alias_name, alias_line)
+                add_edge(file_nid, alias_nid, "contains", alias_line)
 
         # Class types
         if t in config.class_types:
@@ -3655,10 +3703,15 @@ def _extract_generic(
     # error's line so extract() can warn instead of reporting silent success.
     # Rides on the result dict, so it survives the per-file AST cache.
     if root.has_error:
+        _multiline = _has_multiline_error(root)
         result["parse_errors"] = {
             "first_error_line": _first_parse_error_line(root),
-            "multiline_error": _has_multiline_error(root),
+            "multiline_error": _multiline,
         }
+        if _multiline:
+            result["parse_errors"]["lossy_error_line"] = (
+                _first_multiline_error_line(root)
+            )
     # Kotlin (#2526/#2550): the declared package qualifies every node in the
     # file; the import-target and qualified-call resolvers key their per-package
     # symbol indexes off it.

@@ -168,10 +168,11 @@ def run_worker_phase(
         if len(_res.get("nodes", [])) <= 1 or _pe.get("multiline_error"):
             _rel = os.path.relpath(str(_p), str(root)).replace("\\", "/")
             _kept = max(len(_res.get("nodes", [])) - 1, 0)
-            _syntax_error_files.append((_rel, _pe.get("first_error_line"), _kept))
+            _line = _pe.get("lossy_error_line") or _pe.get("first_error_line")
+            _syntax_error_files.append((_rel, _line, _kept))
     if _syntax_error_files:
         def _describe_syntax_error(rel: str, line: "int | None", kept: int) -> str:
-            _where = f"first error at line {line}" if line else "syntax error"
+            _where = f"error region at line {line}" if line else "syntax error"
             _got = "no symbols extracted" if kept == 0 else f"{kept} symbol(s) extracted"
             return f"{rel} ({_where}, {_got})"
 

@@ -2257,6 +2257,84 @@ def test_fortran_capital_F_parses_preprocessed():
     assert any("compute_volume" in l for l in labels)
 
 
+def test_fortran_subroutine_call_to_another_module_is_sourceless(tmp_path):
+    """A `call` to a subroutine implemented in another module resolves to a
+    sourceless stub the corpus rewire can collapse, never a dangling edge.
+
+    The target id used to be computed directly from this file's own stem
+    (`_make_id(stem, callee)`), which never matched the callee's real node in
+    its own file, so every cross-file `call` dangled permanently."""
+    src = tmp_path / "caller.f90"
+    src.write_text(
+        "program caller\n"
+        "  use greeter_mod\n"
+        "  call greet()\n"
+        "end program caller\n",
+        encoding="utf-8",
+    )
+    r = extract_fortran(src)
+    node_ids = {n["id"] for n in r["nodes"]}
+    for e in r["edges"]:
+        assert e["source"] in node_ids and e["target"] in node_ids, e
+    stub = next(n for n in r["nodes"] if n["label"] == "greet")
+    assert stub["source_file"] == ""
+    assert ("caller", "greet") in _edge_labels(r, "calls")
+
+
+def test_fortran_subroutine_call_resolves_across_files(tmp_path):
+    """End to end: a cross-file `call` lands on the callee's real node, not a
+    dangling stub, once the corpus rewire runs over both files together."""
+    from graph_fy.extract import extract
+
+    mod = tmp_path / "greeter_mod.f90"
+    mod.write_text(
+        "module greeter_mod\n"
+        "contains\n"
+        "  subroutine greet()\n"
+        "    print *, \"hello\"\n"
+        "  end subroutine greet\n"
+        "end module greeter_mod\n",
+        encoding="utf-8",
+    )
+    caller = tmp_path / "caller.f90"
+    caller.write_text(
+        "program caller\n"
+        "  use greeter_mod\n"
+        "  call greet()\n"
+        "end program caller\n",
+        encoding="utf-8",
+    )
+    result = extract([mod, caller], cache_root=tmp_path / "cache")
+    labels = {n["id"]: n["label"] for n in result["nodes"]}
+    call_edges = [
+        (labels.get(e["source"]), labels.get(e["target"]))
+        for e in result["edges"] if e["relation"] == "calls"
+    ]
+    assert ("caller", "greet()") in call_edges, call_edges
+    # the target really is the subroutine's own sourced node, not a leftover stub
+    real_greet = next(n for n in result["nodes"] if n["label"] == "greet()")
+    assert real_greet["source_file"].endswith("greeter_mod.f90")
+
+
+def test_fortran_same_file_subroutine_call_is_unaffected(tmp_path):
+    """Control: a same-file call must keep resolving to its own file's node."""
+    src = tmp_path / "samefile.f90"
+    src.write_text(
+        "program samefile\n"
+        "  call helper()\n"
+        "contains\n"
+        "  subroutine helper()\n"
+        "    print *, \"hi\"\n"
+        "  end subroutine helper\n"
+        "end program samefile\n",
+        encoding="utf-8",
+    )
+    r = extract_fortran(src)
+    assert ("samefile", "helper") in _edge_labels(r, "calls")
+    helper = next(n for n in r["nodes"] if n["label"] == "helper()")
+    assert helper["source_file"] != ""
+
+
 # ── PowerShell ───────────────────────────────────────────────────────────────
 
 def test_powershell_no_error():
@@ -4231,6 +4309,79 @@ def test_zig_enum_and_union_methods_are_extracted(tmp_path):
         for e in r["edges"] if e["relation"] == "calls"
     }
     assert (".area()", "helper()") in calls, "call from union method body dropped"
+
+
+@_needs_zig
+def test_zig_bare_call_does_not_cross_resolve_to_a_same_named_method(tmp_path):
+    """A bare call (`helper()`) must bind to the free function of that name,
+    never to an unrelated struct's method sharing the name.
+
+    `is_member_call` was computed but never consulted: the lookup matched
+    either `f"{callee}()"` or `f".{callee}()"` for every call regardless of
+    whether it was written with a receiver, so a bare call landed on whichever
+    of the two happened to come first in the file's own node list.
+    """
+    src = (
+        "const Box = struct {\n"
+        "    pub fn helper(self: Box) i32 {\n"
+        "        return 1;\n"
+        "    }\n"
+        "};\n"
+        "\n"
+        "fn helper() i32 {\n"
+        "    return 2;\n"
+        "}\n"
+        "\n"
+        "fn caller() i32 {\n"
+        "    return helper();\n"
+        "}\n"
+    )
+    f = tmp_path / "zigtest.zig"
+    f.write_text(src)
+    r = extract_zig(f)
+    assert "error" not in r
+    id_to_label = {n["id"]: n["label"] for n in r["nodes"]}
+    calls = {
+        (id_to_label.get(e["source"], e["source"]),
+         id_to_label.get(e["target"], e["target"]))
+        for e in r["edges"] if e["relation"] == "calls"
+    }
+    assert ("caller()", "helper()") in calls
+    assert ("caller()", ".helper()") not in calls
+
+
+@_needs_zig
+def test_zig_member_call_does_not_cross_resolve_to_a_same_named_free_function(tmp_path):
+    """The reverse control: a member call (`b.helper()`) must bind to the
+    receiver's own method, never to an unrelated free function of the same
+    name."""
+    src = (
+        "const Box = struct {\n"
+        "    pub fn helper(self: Box) i32 {\n"
+        "        return 1;\n"
+        "    }\n"
+        "};\n"
+        "\n"
+        "fn helper() i32 {\n"
+        "    return 2;\n"
+        "}\n"
+        "\n"
+        "fn caller(b: Box) i32 {\n"
+        "    return b.helper();\n"
+        "}\n"
+    )
+    f = tmp_path / "zigtest.zig"
+    f.write_text(src)
+    r = extract_zig(f)
+    assert "error" not in r
+    id_to_label = {n["id"]: n["label"] for n in r["nodes"]}
+    calls = {
+        (id_to_label.get(e["source"], e["source"]),
+         id_to_label.get(e["target"], e["target"]))
+        for e in r["edges"] if e["relation"] == "calls"
+    }
+    assert ("caller()", ".helper()") in calls
+    assert ("caller()", "helper()") not in calls
 
 
 @_needs_commonlisp

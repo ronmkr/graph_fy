@@ -1,6 +1,6 @@
 # Upstream Fork Synchronization Strategy & Architecture
 
-This document outlines the hexagonal boundary architecture, automated drift tracking, and upstream patch contribution playbook between `ronmkr/graph_fy` and upstream `safouanechergui/graphify`.
+This document outlines the hexagonal boundary architecture, automated drift tracking, and upstream patch contribution playbook between `ronmkr/graph_fy` and upstream `Graphify-Labs/graphify`.
 
 ---
 
@@ -22,7 +22,7 @@ To minimize merge conflicts and prevent fork rot as upstream evolves Tree-sitter
                                      |
                                      v (Consumes graph data structures)
 +--------------------------------------------------------------------------+
-| Upstream Core Layer (Aligned with safouanechergui/graphify conventions)  |
+| Upstream Core Layer (Aligned with Graphify-Labs/graphify conventions)   |
 |                                                                          |
 |  - graph_fy/extractors/        (Language AST parsers & schema extractors)|
 |  - graph_fy/build.py           (Core graph pipeline & cross-resolutions) |
@@ -42,7 +42,7 @@ To minimize merge conflicts and prevent fork rot as upstream evolves Tree-sitter
 
 An automated GitHub Action runs daily at `02:00 UTC` (`.github/workflows/upstream_sync.yml`):
 
-- Fetches `upstream/main` (`https://github.com/safouanechergui/graphify.git`).
+- Fetches `upstream/main` and `upstream/v8` (`https://github.com/Graphify-Labs/graphify.git`).
 - Calculates commit distance between `HEAD` and `upstream/main`.
 - If new upstream commits or releases are detected, it compiles a diff summary and opens/updates an automated tracking issue with tag `upstream-sync`.
 
@@ -50,10 +50,10 @@ An automated GitHub Action runs daily at `02:00 UTC` (`.github/workflows/upstrea
 
 ```bash
 # Add upstream remote if not already present
-git remote add upstream https://github.com/safouanechergui/graphify.git
+git remote add upstream https://github.com/Graphify-Labs/graphify.git
 
 # Fetch latest upstream commits and tags
-git fetch upstream main --tags
+git fetch upstream main v8 --tags
 
 # Check commit difference
 git log --oneline HEAD..upstream/main

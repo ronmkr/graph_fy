@@ -303,7 +303,10 @@ def _parse_pom(text: str) -> dict | None:
         return None
     name = f"{gid}:{aid}" if gid else aid
     deps: list[str] = []
-    for dep in root.findall(".//dependencies/dependency"):
+    # Only the project's own <dependencies> (and those of its profiles) are
+    # dependencies. <dependencyManagement> only pins versions, and a plugin's
+    # <dependencies> belong to the build tool.
+    for dep in root.findall("dependencies/dependency") + root.findall("profiles/profile/dependencies/dependency"):
         da = dep.findtext("artifactId")
         dg = dep.findtext("groupId")
         if da:
