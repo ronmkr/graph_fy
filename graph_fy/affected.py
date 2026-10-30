@@ -32,6 +32,11 @@ DEFAULT_AFFECTED_RELATIONS = (
     "calls_ffi",
     "imports_native",
     "connects_signal_slot",
+    "template_binds_to",
+    "validates_field",
+    "relates_to_model",
+    "foreign_key_to",
+    "calls_feign_rpc",
     "covered_by_test",
     "covers",
 )

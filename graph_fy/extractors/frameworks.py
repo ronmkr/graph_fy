@@ -169,6 +169,10 @@ def _extract_python_frameworks_ast(path: Path, source_bytes: bytes, result: dict
         func_nodes[lbl] = n
         if lbl.endswith("()"):
             func_nodes[lbl[:-2]] = n
+        if lbl.startswith("."):
+            func_nodes[lbl[1:]] = n
+            if lbl[1:].endswith("()"):
+                func_nodes[lbl[1:-2]] = n
 
     def _find_enclosing_func_node(ast_node: Any) -> dict[str, Any] | None:
         curr = ast_node.parent
@@ -306,6 +310,108 @@ def _extract_python_frameworks_ast(path: Path, source_bytes: bytes, result: dict
             _walk(child)
 
     _walk(tree.root_node)
+
+    # 3. Pydantic V2 & SQLAlchemy Lineage (AST post-pass)
+    def _walk_models(ast_node: Any, current_class_nid: str | None = None) -> None:
+        if ast_node.type == "class_definition":
+            cname_node = ast_node.child_by_field_name("name")
+            cls_name = source_bytes[cname_node.start_byte:cname_node.end_byte].decode("utf-8", errors="ignore") if cname_node else ""
+            cls_nid = func_nodes.get(cls_name, {}).get("id") or _make_id(_file_stem(path), cls_name)
+            body = ast_node.child_by_field_name("body")
+            if body:
+                for child in body.children:
+                    _walk_models(child, current_class_nid=cls_nid)
+            return
+
+        if current_class_nid:
+            # Pydantic @field_validator("field_name") / @validator / @model_validator
+            if ast_node.type == "decorated_definition":
+                inner_fn = ast_node.child_by_field_name("definition")
+                fn_name = ""
+                if inner_fn and inner_fn.type in ("function_definition", "async_function_definition"):
+                    name_n = inner_fn.child_by_field_name("name")
+                    if name_n:
+                        fn_name = source_bytes[name_n.start_byte:name_n.end_byte].decode("utf-8", errors="ignore")
+                for c in ast_node.children:
+                    if c.type == "decorator":
+                        deco_txt = source_bytes[c.start_byte:c.end_byte].decode("utf-8", errors="ignore")
+                        line_num = c.start_point[0] + 1
+                        validator_nid = func_nodes.get(fn_name, {}).get("id") or _make_id(current_class_nid, fn_name)
+                        if "@field_validator" in deco_txt or "@validator" in deco_txt:
+                            m_fields = re.findall(r"['\"]([A-Za-z0-9_]+)['\"]", deco_txt)
+                            for field_name in m_fields:
+                                target_nid = _make_id(current_class_nid, field_name)
+                                edges.append({
+                                    "source": validator_nid,
+                                    "target": target_nid,
+                                    "relation": "validates_field",
+                                    "context": "pydantic_validator",
+                                    "confidence": "EXTRACTED",
+                                    "source_file": str_path,
+                                    "source_location": f"L{line_num}",
+                                    "weight": 1.0,
+                                })
+                        elif "@model_validator" in deco_txt:
+                            edges.append({
+                                "source": validator_nid,
+                                "target": current_class_nid,
+                                "relation": "validates_field",
+                                "context": "pydantic_validator",
+                                "confidence": "EXTRACTED",
+                                "source_file": str_path,
+                                "source_location": f"L{line_num}",
+                                "weight": 1.0,
+                            })
+
+            # SQLAlchemy relationship(...) and ForeignKey(...)
+            if ast_node.type in ("expression_statement", "assignment"):
+                txt = source_bytes[ast_node.start_byte:ast_node.end_byte].decode("utf-8", errors="ignore")
+                line_num = ast_node.start_point[0] + 1
+                # relationship("TargetClass", back_populates="...")
+                m_rel = re.search(r'\brelationship\s*\(\s*(?:[\'"]([A-Za-z0-9_]+)[\'"]|([A-Z][A-Za-z0-9_]*))', txt)
+                if m_rel:
+                    target_model = m_rel.group(1) or m_rel.group(2)
+                    if target_model and target_model not in ("back_populates", "secondary", "cascade"):
+                        target_nid = func_nodes.get(target_model, {}).get("id") or _make_id(target_model)
+                        edges.append({
+                            "source": current_class_nid,
+                            "target": target_nid,
+                            "relation": "relates_to_model",
+                            "context": "sqlalchemy_relationship",
+                            "confidence": "EXTRACTED",
+                            "source_file": str_path,
+                            "source_location": f"L{line_num}",
+                            "weight": 1.0,
+                        })
+                        edges.append({
+                            "source": target_nid,
+                            "target": current_class_nid,
+                            "relation": "relates_to_model",
+                            "context": "sqlalchemy_relationship",
+                            "confidence": "EXTRACTED",
+                            "source_file": str_path,
+                            "source_location": f"L{line_num}",
+                            "weight": 1.0,
+                        })
+                # ForeignKey("table.id")
+                for m_fk in re.finditer(r'\bForeignKey\s*\(\s*[\'"]([^.\'"]+)\.([^\'"]+)[\'"]', txt):
+                    fk_table = m_fk.group(1)
+                    target_nid = func_nodes.get(fk_table, {}).get("id") or _make_id(fk_table)
+                    edges.append({
+                        "source": current_class_nid,
+                        "target": target_nid,
+                        "relation": "foreign_key_to",
+                        "context": "sqlalchemy_fk",
+                        "confidence": "EXTRACTED",
+                        "source_file": str_path,
+                        "source_location": f"L{line_num}",
+                        "weight": 1.0,
+                    })
+
+        for child in ast_node.children:
+            _walk_models(child, current_class_nid=current_class_nid)
+
+    _walk_models(tree.root_node)
     return True
 
 
@@ -322,6 +428,10 @@ def _extract_python_frameworks_regex(path: Path, source_text: str, result: dict[
         func_nodes[lbl] = n
         if lbl.endswith("()"):
             func_nodes[lbl[:-2]] = n
+        if lbl.startswith("."):
+            func_nodes[lbl[1:]] = n
+            if lbl[1:].endswith("()"):
+                func_nodes[lbl[1:-2]] = n
 
     # 1. FastAPI / Starlette Dependency Injection
     for match in _FASTAPI_DEPENDS_RE.finditer(source_text):
@@ -425,6 +535,75 @@ def _extract_python_frameworks_regex(path: Path, source_text: str, result: dict[
                     if rc.get("receiver") in fix_params:
                         rc["_python_fixture_param"] = True
                         rc["lang"] = "python"
+
+    # 3. Pydantic & SQLAlchemy Regex Fallback
+    for cls_match in re.finditer(r"^(?:class\s+([A-Za-z0-9_]+)[^:]*:)([\s\S]*?)(?=^class|\Z)", source_text, re.MULTILINE):
+        cls_name = cls_match.group(1)
+        cls_body = cls_match.group(2)
+        cls_nid = func_nodes.get(cls_name, {}).get("id") or _make_id(_file_stem(path), cls_name)
+        cls_start_line = source_text[:cls_match.start()].count("\n") + 1
+
+        # Pydantic validators
+        for val_match in re.finditer(r"(@(?:field_validator|validator)\s*\([^)]+\))\s*\n\s*def\s+([A-Za-z0-9_]+)", cls_body):
+            deco_txt = val_match.group(1)
+            fn_name = val_match.group(2)
+            val_line = cls_start_line + cls_body[:val_match.start()].count("\n") + 1
+            validator_nid = func_nodes.get(fn_name, {}).get("id") or _make_id(cls_nid, fn_name)
+            for f_name in re.findall(r"['\"]([A-Za-z0-9_]+)['\"]", deco_txt):
+                target_nid = _make_id(cls_nid, f_name)
+                edges.append({
+                    "source": validator_nid,
+                    "target": target_nid,
+                    "relation": "validates_field",
+                    "context": "pydantic_validator",
+                    "confidence": "EXTRACTED",
+                    "source_file": str_path,
+                    "source_location": f"L{val_line}",
+                    "weight": 1.0,
+                })
+
+        # SQLAlchemy relationship
+        for rel_match in re.finditer(r'\brelationship\s*\(\s*(?:[\'"]([A-Za-z0-9_]+)[\'"]|([A-Z][A-Za-z0-9_]*))', cls_body):
+            target_model = rel_match.group(1) or rel_match.group(2)
+            if target_model and target_model not in ("back_populates", "secondary", "cascade"):
+                rel_line = cls_start_line + cls_body[:rel_match.start()].count("\n") + 1
+                target_nid = func_nodes.get(target_model, {}).get("id") or _make_id(target_model)
+                edges.append({
+                    "source": cls_nid,
+                    "target": target_nid,
+                    "relation": "relates_to_model",
+                    "context": "sqlalchemy_relationship",
+                    "confidence": "EXTRACTED",
+                    "source_file": str_path,
+                    "source_location": f"L{rel_line}",
+                    "weight": 1.0,
+                })
+                edges.append({
+                    "source": target_nid,
+                    "target": cls_nid,
+                    "relation": "relates_to_model",
+                    "context": "sqlalchemy_relationship",
+                    "confidence": "EXTRACTED",
+                    "source_file": str_path,
+                    "source_location": f"L{rel_line}",
+                    "weight": 1.0,
+                })
+
+        # SQLAlchemy ForeignKey
+        for fk_match in re.finditer(r'\bForeignKey\s*\(\s*[\'"]([^.\'"]+)\.([^\'"]+)[\'"]', cls_body):
+            fk_table = fk_match.group(1)
+            fk_line = cls_start_line + cls_body[:fk_match.start()].count("\n") + 1
+            target_nid = func_nodes.get(fk_table, {}).get("id") or _make_id(fk_table)
+            edges.append({
+                "source": cls_nid,
+                "target": target_nid,
+                "relation": "foreign_key_to",
+                "context": "sqlalchemy_fk",
+                "confidence": "EXTRACTED",
+                "source_file": str_path,
+                "source_location": f"L{fk_line}",
+                "weight": 1.0,
+            })
 
 
 def extract_python_frameworks(path: Path, source_text: str, result: dict[str, Any]) -> None:

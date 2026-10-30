@@ -50,6 +50,7 @@ from graph_fy.extractors.elixir import extract_elixir  # noqa: F401
 from graph_fy.extractors.fortran import _cpp_preprocess, extract_fortran  # noqa: F401
 from graph_fy.extractors.go import _GO_PREDECLARED_FUNCS, extract_go  # noqa: F401
 from graph_fy.extractors.json_config import extract_json  # noqa: F401
+from graph_fy.extractors.yaml_config import extract_yaml  # noqa: F401
 from graph_fy.extractors.commonlisp import extract_commonlisp  # noqa: F401
 from graph_fy.extractors.markdown import extract_markdown, extract_pdf, _MD_LINK_INDEX_CACHE  # noqa: F401
 from graph_fy.extractors.ocaml import extract_ocaml  # noqa: F401
@@ -89,6 +90,7 @@ from graph_fy.extractors.rtk import extract_rtk, is_rtk_file  # noqa: F401
 from graph_fy.extractors.cmake import extract_cmake, is_cmake_file  # noqa: F401
 from graph_fy.extractors.qt_ui import extract_qt_ui, is_qt_ui_file  # noqa: F401
 from graph_fy.extractors.gradle import extract_gradle, is_gradle_file  # noqa: F401
+from graph_fy.extractors.angular import extract_angular_template, is_angular_template  # noqa: F401
 from graph_fy.security import sanitize_metadata, _redact_rationale_labels
 from graph_fy.paths import disambiguate_ambiguous_candidates
 
@@ -634,6 +636,8 @@ _DISPATCH: dict[str, Any] = {
     ".sh": extract_bash,
     ".bash": extract_bash,
     ".json": extract_json,
+    ".yaml": extract_yaml,
+    ".yml": extract_yaml,
     ".tf": extract_terraform,
     ".tfvars": extract_terraform,
     ".hcl": extract_terraform,
@@ -809,6 +813,8 @@ def _get_extractor(path: Path) -> Any | None:
         return extract_cmake
     if is_qt_ui_file(path):
         return extract_qt_ui
+    if is_angular_template(path):
+        return extract_angular_template
     if is_gradle_file(path):
         return extract_gradle
     if path.suffix.lower() == ".txt":
