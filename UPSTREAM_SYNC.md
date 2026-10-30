@@ -68,7 +68,20 @@ pytest tests/
 
 ---
 
-## 3. Upstream Contribution Playbook (Giving Back)
+## 3. Synchronized Batches & History
+
+### Batch 2: Upstream v0.9.97 Release Track Parity (PR #84)
+- **Resolved Issues**: #72 through #83 (12 issues closed).
+- **Hardened Components**:
+  - Multi-language AST: SystemVerilog task calls, Pascal records, OCaml chained module/class bindings, Razor `@implements`, Fortran subroutine resolution, Blade `wire:click` modifier trimming, COBOL nested program stack, Zig bare vs member call dispatch, Dart unnamed extensions, TypeScript parenthesized decorator chain recovery, Rust multi-crate workspace scoping.
+  - Type Aliases: Go `type A = B`, C++ `using`/`typedef`, Rust `type`/`union` aliases extracted as first-class type nodes.
+  - Manifests & Dependencies: `package.json` explicit dependency nodes, Maven POM `dependencyManagement` scoping, external JS `require()` call retention.
+  - SQL Lineage: `GO` batch separator normalization, stored procedure `reads_from`/`writes_to` lineage, column default table error recovery, T-SQL bracketed identifier stripping.
+  - Security & Storage: SSRF IPv4 (`224.0.0.0/4`) and IPv6 (`ff00::/8`) multicast blocking, frontmatter description colon/newline sanitization, safe case-only community relabeling on case-insensitive filesystems, edge `relation` key invariant, and shrink guard semantic file twin tracking.
+
+---
+
+## 4. Upstream Contribution Playbook (Giving Back)
 
 Generic algorithmic improvements, parser bug fixes, and performance optimizations developed in `graph_fy` are isolated into surgical branches for upstream submission:
 
