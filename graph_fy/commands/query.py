@@ -540,18 +540,18 @@ def cmd_explain(
         return 1
     nid = matches[0]
     d = G.nodes[nid]
-    from graph_fy.build import edge_data
+    from graph_fy.build import edge_datas
     connections: list[tuple[str, str, dict]] = []  # (direction, neighbor_id, edge_data)
     for nb in G.successors(nid):
-        _ed = edge_data(G, nid, nb)
-        connections.append(
-            ("out" if _ed.get("_src", nid) == nid else "in", nb, _ed)
-        )
+        for _ed in edge_datas(G, nid, nb):
+            connections.append(
+                ("out" if _ed.get("_src", nid) == nid else "in", nb, _ed)
+            )
     for nb in G.predecessors(nid):
-        _ed = edge_data(G, nb, nid)
-        connections.append(
-            ("in" if _ed.get("_src", nb) == nb else "out", nb, _ed)
-        )
+        for _ed in edge_datas(G, nb, nid):
+            connections.append(
+                ("in" if _ed.get("_src", nb) == nb else "out", nb, _ed)
+            )
     connections.sort(key=lambda c: G.degree(c[1]), reverse=True)
 
     if terse:

@@ -92,13 +92,59 @@ def test_the_call_to_the_interface_method_is_kept(tmp_path):
     assert (_find(r, ".Go()", "runner"), _find(r, ".Build()", "ireport")) in calls
 
 
-def test_two_implementers_produce_no_edge(tmp_path):
-    dispatch, _ = _extract(tmp_path, {"S.cs": (
+def test_two_implementers_both_get_an_edge_at_lower_confidence(tmp_path):
+    dispatch, r = _extract(tmp_path, {"S.cs": (
         "public interface IR { void M(); }\n"
         "public class A : IR { public void M() { } }\n"
         "public class B : IR { public void M() { } }\n"
     )})
-    assert not dispatch
+    iface_m = _find(r, ".M()", "ir")
+    assert dispatch == {
+        (iface_m, _find(r, ".M()", "s_a")),
+        (iface_m, _find(r, ".M()", "s_b")),
+    }
+    for edge in r["edges"]:
+        if edge["relation"] == "dispatches_to":
+            assert edge["confidence"] == "INFERRED"
+            assert edge["confidence_score"] == 0.75
+
+
+def test_three_implementers_floor_at_the_weak_inference_tier(tmp_path):
+    dispatch, r = _extract(tmp_path, {"S.cs": (
+        "public interface IR { void M(); }\n"
+        "public class A : IR { public void M() { } }\n"
+        "public class B : IR { public void M() { } }\n"
+        "public class C : IR { public void M() { } }\n"
+    )})
+    assert len(dispatch) == 3
+    for edge in r["edges"]:
+        if edge["relation"] == "dispatches_to":
+            assert edge["confidence_score"] == 0.65
+
+
+def test_one_ambiguous_implementer_does_not_suppress_its_siblings(tmp_path):
+    from graph_fy.csharp_dispatch import resolve_csharp_interface_dispatch
+
+    nodes = [
+        {"id": "iface", "label": "IR", "source_file": "a.cs", "_callable_class": True},
+        {"id": "a", "label": "A", "source_file": "a.cs", "_callable_class": True},
+        {"id": "b", "label": "B", "source_file": "a.cs", "_callable_class": True},
+        {"id": "iface_m", "label": ".M()", "source_file": "a.cs", "_callable": True},
+        {"id": "a_m", "label": ".M()", "source_file": "a.cs", "_callable": True},
+        {"id": "b_m1", "label": ".M()", "source_file": "a.cs", "_callable": True},
+        {"id": "b_m2", "label": ".M()", "source_file": "a.cs", "_callable": True},
+    ]
+    edges = [
+        {"source": "a", "target": "iface", "relation": "implements"},
+        {"source": "b", "target": "iface", "relation": "implements"},
+        {"source": "iface", "target": "iface_m", "relation": "method"},
+        {"source": "a", "target": "a_m", "relation": "method"},
+        {"source": "b", "target": "b_m1", "relation": "method"},
+        {"source": "b", "target": "b_m2", "relation": "method"},
+    ]
+    resolve_csharp_interface_dispatch([], nodes, edges)
+    dispatch = {(e["source"], e["target"]) for e in edges if e["relation"] == "dispatches_to"}
+    assert dispatch == {("iface_m", "a_m")}
 
 
 def test_no_matching_member_produces_no_edge(tmp_path):

@@ -16,7 +16,7 @@ from graph_fy.extractors.base import (
     _find_body,
     REFERENCE_CONTEXTS,
 )
-from graph_fy.ids import normalize_id
+from graph_fy.ids import DeclIdRegistry, normalize_id
 from graph_fy.extractors.models import LanguageConfig
 from graph_fy.extractors.resolution import _resolve_js_import_target
 from graph_fy.security import sanitize_metadata
@@ -83,6 +83,7 @@ _kotlin_collect_type_refs = _kt._kotlin_collect_type_refs
 _kotlin_property_type_node = _kt._kotlin_property_type_node
 _kotlin_function_return_type_node = _kt._kotlin_function_return_type_node
 _scala_collect_type_refs = _kt._scala_collect_type_refs
+_scala_extension_receiver_name = _kt._scala_extension_receiver_name
 _kotlin_extra_walk = _kt._kotlin_extra_walk
 _kotlin_package_name = _kt._kotlin_package_name
 _kotlin_nav_identifier_segments = _kt._kotlin_nav_identifier_segments
@@ -408,12 +409,15 @@ def _extract_generic(
         edges.append(edge)
 
     def ensure_named_node(name: str, line: int) -> str:
+        declared = decl_registry.lookup(name)
+        if declared is not None:
+            return declared
         nid = _make_id(stem, ".".join(namespace_stack), name)
         if config.ts_module == "tree_sitter_python":
             nid = _python_underscore_salted_nid(nid, name, python_underscore_groups)
         elif config.ts_module in ("tree_sitter_javascript", "tree_sitter_typescript"):
             nid = _js_member_salted_nid(nid, name, js_member_groups)
-        if nid in seen_ids:
+        if nid in seen_ids and nid != file_nid:
             return nid
         nid = _make_id(name)
         if nid not in seen_ids:
@@ -437,6 +441,29 @@ def _extract_generic(
 
     file_nid = _make_id(str(path))
     add_node(file_nid, path.name, 1)
+
+    decl_registry = DeclIdRegistry(reserved_ids=(file_nid,))
+
+    def _php_const_ref_target(cca) -> "str | None":
+        # #4648: resolve a Scope::MEMBER class scope to a real local node; skip
+        # self::/static::/parent:: and never mint a stub for an unknown scope.
+        first = next((c for c in cca.children if c.is_named), None)
+        if first is None or first.type not in ("name", "qualified_name"):
+            return None
+        name = _read_text(first, source)
+        if first.type == "qualified_name":
+            name = name.rsplit("\\", 1)[-1]
+        declared = decl_registry.lookup(name)
+        if declared is not None:
+            return declared
+        nid = _make_id(stem, ".".join(namespace_stack), name)
+        return nid if (nid in seen_ids and nid != file_nid) else None
+
+    def decl_node(nid: str, name: str, kind: str, label: str, line: int,
+                  **kwargs) -> str:
+        resolved = decl_registry.resolve(nid, name, kind, seen_ids)
+        add_node(resolved, label, line, **kwargs)
+        return resolved
     if config.ts_module == "tree_sitter_ruby":
         file_node = next(n for n in nodes if n["id"] == file_nid)
         file_metadata = {"ruby_resolution_schema": 1}
@@ -475,6 +502,14 @@ def _extract_generic(
                 if alias_nid not in seen_ids:
                     add_node(alias_nid, alias_name, line)
                     add_edge(file_nid, alias_nid, "contains", line)
+
+        if config.ts_module == "tree_sitter_scala" and t == "extension_definition":
+            receiver = _scala_extension_receiver_name(node, source)
+            if receiver is not None:
+                receiver_nid = ensure_named_node(receiver, node.start_point[0] + 1)
+                for member in node.children_by_field_name("body"):
+                    walk(member, parent_class_nid=receiver_nid)
+                return
 
         # Import types
         if t in config.import_types:
@@ -651,7 +686,8 @@ def _extract_generic(
                         ruby_body, source
                     ):
                         metadata["ruby_lookup_unsafe"] = True
-            add_node(class_nid, class_name, line, metadata=metadata)
+            class_nid = decl_node(class_nid, class_name, "type", class_name, line,
+                                  metadata=metadata)
             if config.ts_module == "tree_sitter_ruby" and metadata:
                 # Reopened declarations collapse onto the same file-local id;
                 # merge fail-closed markers that add_node intentionally skips.
@@ -1492,6 +1528,22 @@ def _extract_generic(
                              line, context=ctx)
             return
 
+        if (config.ts_module == "tree_sitter_php" and parent_class_nid
+                and t in ("const_declaration", "property_declaration")):
+            # #4648: Scope::MEMBER accesses in class-level initializers sit
+            # outside any function body, so emit their references_constant here.
+            seen_here: set[str] = set()
+            stack = list(node.children)
+            while stack:
+                sub = stack.pop()
+                if sub.type == "class_constant_access_expression":
+                    tgt = _php_const_ref_target(sub)
+                    if tgt is not None and tgt != parent_class_nid and tgt not in seen_here:
+                        seen_here.add(tgt)
+                        add_edge(parent_class_nid, tgt, "references_constant",
+                                 sub.start_point[0] + 1)
+                stack.extend(sub.children)
+
         if (config.ts_module == "tree_sitter_php"
                 and t == "property_declaration"
                 and parent_class_nid):
@@ -1715,11 +1767,22 @@ def _extract_generic(
             # init_declarator → field_identifier recursion in _get_cpp_func_name.
             for decl in decls:
                 name = _get_cpp_func_name(decl, source)
-                if name:
-                    line = decl.start_point[0] + 1
-                    field_nid = _make_id(parent_class_nid, name)
-                    add_node(field_nid, name, line)
-                    add_edge(parent_class_nid, field_nid, "defines", line, context="field")
+                if not name:
+                    continue
+                line = decl.start_point[0] + 1
+                member_nid = _make_id(parent_class_nid, name)
+                decl_is_method = (
+                    decl.type == "function_declarator"
+                    or (decl.type in ("pointer_declarator", "reference_declarator")
+                        and any(c.type == "function_declarator" for c in decl.children))
+                )
+                if decl_is_method:
+                    add_node(member_nid, f".{name}()", line)
+                    add_edge(parent_class_nid, member_nid, "method", line)
+                    callable_def_nids.add(member_nid)
+                else:
+                    add_node(member_nid, name, line)
+                    add_edge(parent_class_nid, member_nid, "defines", line, context="field")
             return
 
         # Ruby's `class << self` contains ordinary `method` nodes. Keep them
@@ -1860,7 +1923,8 @@ def _extract_generic(
                     func_nid = _js_member_salted_nid(
                         func_nid, sanitized_name, js_member_groups
                     )
-                add_node(func_nid, f"{func_name}()", line)
+                func_nid = decl_node(func_nid, sanitized_name, "fn",
+                                     f"{func_name}()", line)
                 add_edge(file_nid, func_nid, "contains", line)
             callable_def_nids.add(func_nid)  # function / method def is callable
             if config.ts_module == "tree_sitter_python":
@@ -2015,6 +2079,20 @@ def _extract_generic(
                                 fctx = "generic_arg" if role == "generic_arg" else "field"
                                 add_edge(parent_class_nid, target_nid, "references",
                                          line, context=fctx)
+                        # #4648: a Scope::MEMBER in a parameter default is outside
+                        # the body, so emit its references_constant edge here.
+                        const_src = parent_class_nid or func_nid
+                        seen_param: set[str] = set()
+                        pstack = list(p.children)
+                        while pstack:
+                            psub = pstack.pop()
+                            if psub.type == "class_constant_access_expression":
+                                ptgt = _php_const_ref_target(psub)
+                                if ptgt is not None and ptgt != const_src and ptgt not in seen_param:
+                                    seen_param.add(ptgt)
+                                    add_edge(const_src, ptgt, "references_constant",
+                                             psub.start_point[0] + 1)
+                            pstack.extend(psub.children)
                 return_node = _php_method_return_type_node(node)
                 if return_node is not None:
                     refs = []
@@ -2329,6 +2407,8 @@ def _extract_generic(
                               parent_class_nid, add_node, add_edge,
                               callable_def_nids, local_bound_names,
                               closure_locals_by_body, config=config,
+                              decl_node_fn=decl_node,
+                              decl_lookup_fn=decl_registry.lookup,
                               scope_parents=scope_parents,
                               lexical_nids_by_scope=lexical_nids_by_scope):
                 return
@@ -2337,7 +2417,8 @@ def _extract_generic(
         if config.ts_module == "tree_sitter_typescript":
             if _ts_extra_walk(node, source, file_nid, stem, str_path,
                               nodes, edges, seen_ids, function_bodies,
-                              parent_class_nid, add_node, add_edge, walk):
+                              parent_class_nid, add_node, add_edge, walk,
+                              decl_node_fn=decl_node):
                 return
 
         if config.ts_module == "tree_sitter_c_sharp":
@@ -2631,6 +2712,42 @@ def _extract_generic(
                 if el.type == "identifier":
                     yield el
 
+    def _python_dispatch_value_attrs(coll_node):
+        """Yield the ``module.func`` value-nodes of a dict/list/set/tuple literal: the
+        same value positions as ``_python_dispatch_value_idents``, written with a module
+        prefix (``{"card": card.card_charge}``). Only a bare-name receiver qualifies; a
+        longer chain (``a.b.c``) or a call result has no single receiver to resolve."""
+        if coll_node.type == "dictionary":
+            values = (p.child_by_field_name("value") for p in coll_node.children if p.type == "pair")
+        else:  # list / set / tuple
+            values = iter(coll_node.children)
+        for val in values:
+            if val is None or val.type != "attribute":
+                continue
+            obj = val.child_by_field_name("object")
+            if obj is not None and obj.type == "identifier" and val.child_by_field_name("attribute") is not None:
+                yield val
+
+    def _emit_indirect_member_ref(attr_node, scope_nid: str, enclosing_locals, context: str) -> None:
+        """``module.func`` listed in a dispatch table: defer it to the Python member-call
+        resolver as an ``indirect`` member raw_call. That resolver binds it only when the
+        receiver is a module imported into this file holding exactly one callable of that
+        name, and emits an INFERRED ``indirect_call`` like the bare-name path. A receiver
+        bound as a param/local (or ``self``/``cls``) names a value, not a module."""
+        receiver = _read_text(attr_node.child_by_field_name("object"), source)
+        if receiver in enclosing_locals or receiver in ("self", "cls"):
+            return
+        raw_calls.append({
+            "caller_nid": scope_nid,
+            "callee": _read_text(attr_node.child_by_field_name("attribute"), source),
+            "is_member_call": True,
+            "receiver": receiver,
+            "indirect": True,
+            "context": context,
+            "source_file": str_path,
+            "source_location": f"L{attr_node.start_point[0] + 1}",
+        })
+
     def _python_ref_value_idents(value_node):
         """Identifiers on the VALUE side of an assignment RHS or a return: a bare name
         (`cb = handler`, `return handler`) or the elements of a bare unpack
@@ -2757,6 +2874,7 @@ def _extract_generic(
             swift_receiver: str | None = None
             member_receiver: str | None = None
             kotlin_qualified_prefix: str | None = None
+            kotlin_object_receiver: str | None = None
             csharp_qualified_prefix: str | None = None
             csharp_arg_count: int | None = None
 
@@ -2807,6 +2925,11 @@ def _extract_generic(
                         segments = _kotlin_nav_identifier_segments(first, source)
                         if segments is not None and len(segments) >= 3:
                             kotlin_qualified_prefix = ".".join(segments[:-1])
+                        elif (
+                            segments is not None and len(segments) == 2
+                            and segments[0][:1].isupper()
+                        ):
+                            kotlin_object_receiver = segments[0]
             elif config.ts_module == "tree_sitter_scala":
                 # Scala: first child
                 first = node.children[0] if node.children else None
@@ -3307,6 +3430,14 @@ def _extract_generic(
                         if kotlin_qualified_prefix:
                             rc_entry["lang"] = "kotlin"
                             rc_entry["qualified_prefix"] = kotlin_qualified_prefix
+                        # Kotlin object/class-qualified member call (#1698): the
+                        # receiver + lang tag let _resolve_kotlin_member_calls
+                        # claim it once the in-file bare-name lookup above (the
+                        # only reason a real definition reaches raw_calls at
+                        # all) has already failed.
+                        if kotlin_object_receiver:
+                            rc_entry["lang"] = "kotlin"
+                            rc_entry["kotlin_object_receiver"] = kotlin_object_receiver
                         raw_calls.append(rc_entry)
 
             # Indirect dispatch: a function passed BY NAME as a call argument
@@ -3491,6 +3622,8 @@ def _extract_generic(
             enclosing_locals = local_bound_names.get(caller_nid, frozenset()) | extra_locals
             for ident in _python_dispatch_value_idents(node):
                 _emit_indirect_ref(ident, caller_nid, enclosing_locals, "collection")
+            for attr in _python_dispatch_value_attrs(node):
+                _emit_indirect_member_ref(attr, caller_nid, enclosing_locals, "collection")
         elif config.ts_module in ("tree_sitter_javascript", "tree_sitter_typescript") \
                 and node.type in ("object", "array"):
             enclosing_locals = local_bound_names.get(caller_nid, frozenset()) | extra_locals
@@ -3615,6 +3748,8 @@ def _extract_generic(
             if n.type in ("dictionary", "list", "set", "tuple"):
                 for ident in _python_dispatch_value_idents(n):
                     _emit_indirect_ref(ident, file_nid, module_bound, "collection")
+                for attr in _python_dispatch_value_attrs(n):
+                    _emit_indirect_member_ref(attr, file_nid, module_bound, "collection")
             elif n.type == "assignment":
                 # Module-level alias / re-export: CALLBACK = handler
                 for ident in _python_ref_value_idents(n.child_by_field_name("right")):

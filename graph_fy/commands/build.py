@@ -1181,7 +1181,7 @@ def cmd_build(
                             "file_type": _node.get("file_type"),
                             "type": _node.get("type"),
                         }
-                        for _marker in ("_callable", "_callable_class"):
+                        for _marker in ("_callable", "_callable_class", "_go_fields", "_elixir_module"):
                             if _node.get(_marker):
                                 _ctx_node[_marker] = _node[_marker]
                         _metadata = _node.get("metadata")
@@ -1688,11 +1688,17 @@ def cmd_build(
                     _cleared_semantic = _shrink[2]
             merged["nodes"] = _dedupe_nodes(merged["nodes"])
             merged["edges"] = _dedupe_edges(merged["edges"])
+            from graph_fy.build import has_parallel_links as _has_parallel_links
+            merged["multigraph"] = _has_parallel_links(
+                merged["edges"], directed=bool(merged.get("directed", False))
+            )
             # Disambiguate colliding-basename file-node labels (#2032). This raw
             # --no-cluster path bypasses build_from_json (where the clustered path
             # gets this), so apply it directly on the merged node list.
             from graph_fy.build import disambiguate_file_labels_in_nodes as _disamb_labels
             _disamb_labels(merged["nodes"])
+            from graph_fy.build import qualify_csharp_method_labels_in_nodes as _qualify_cs_methods
+            _qualify_cs_methods(merged["nodes"], merged["edges"])
             # Backfill source_file from endpoint nodes — this raw path bypasses
             # build_from_json's backfill, and semantic edges sometimes omit it (#1279).
             _node_sf = {n.get("id"): n.get("source_file") for n in merged["nodes"]}

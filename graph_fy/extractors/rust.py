@@ -6,6 +6,7 @@ from pathlib import Path
 import hashlib
 import re
 from graph_fy.extractors.base import _LANGUAGE_BUILTIN_GLOBALS, _file_stem, _make_id, _read_text
+from graph_fy.ids import DeclIdRegistry
 
 
 def _rust_collect_type_refs(node, source: bytes, generic: bool, out: list[tuple[str, str]]) -> None:
@@ -148,18 +149,18 @@ def extract_rust(path: Path) -> dict:
 
     _scan_rust_declarations(root)
 
-    def symbol_nid(plain_nid: str, name: str) -> str:
-        names = case_groups.get(plain_nid) or set()
-        if len(names) < 2:
-            return plain_nid
-        upper = [n for n in names if n[:1].isupper()]
-        if len(upper) == 1 and name == upper[0]:
-            return plain_nid
-        salt = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
-        return _make_id(plain_nid, salt)
-
     file_nid = _make_id(str(path))
     add_node(file_nid, path.name, 1)
+    decl_registry = DeclIdRegistry(reserved_ids=(file_nid,))
+
+    def symbol_nid(plain_nid: str, name: str) -> str:
+        nid = plain_nid
+        names = case_groups.get(plain_nid) or set()
+        if len(names) >= 2 and not (len([n for n in names if n[:1].isupper()]) == 1
+                                    and name == [n for n in names if n[:1].isupper()][0]):
+            salt = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
+            nid = _make_id(plain_nid, salt)
+        return decl_registry.resolve(nid, name, "type", seen_ids)
 
     def ensure_named_node(name: str, line: int) -> str:
         nid = symbol_nid(_make_id(stem, name), name)

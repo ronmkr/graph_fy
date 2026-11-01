@@ -392,7 +392,12 @@ def test_affected_absolute_seed_outside_root_misses_cleanly(tmp_path, monkeypatc
     monkeypatch.setattr(mainmod, "_check_skill_version", lambda _: None)
     monkeypatch.setattr(mainmod.sys, "argv",
                         ["graph_fy", "affected", outside_seed, "--graph", str(gp)])
-    mainmod.main()
+    import pytest
+    from graph_fy.cli import EXIT_NOT_FOUND
+
+    with pytest.raises(SystemExit) as excinfo:
+        mainmod.main()
+    assert excinfo.value.code == EXIT_NOT_FOUND
 
     out = capsys.readouterr().out
     assert "Affected nodes for Foo" not in out          # must NOT resolve to the in-root Foo

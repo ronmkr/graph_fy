@@ -503,8 +503,10 @@ def run_resolution_phase(
     _repoint_python_package_imports(paths, all_nodes, all_edges, root)
     _repoint_python_sibling_imports(paths, all_nodes, all_edges, root)
     _merge_swift_extensions(per_file, all_nodes, all_edges)
-    _merge_csharp_partial_class_nodes(per_file, all_nodes, all_edges, paths, root)
+    from graph_fy.resolvers.go import _merge_go_package_types
+    _merge_go_package_types(all_nodes, all_edges)
     _disambiguate_colliding_node_ids(all_nodes, all_edges, all_raw_calls, root)
+    _merge_csharp_partial_class_nodes(per_file, all_nodes, all_edges, paths, root)
     _canonicalize_csharp_namespace_nodes(all_nodes, all_edges)
     # PHP namespace/use disambiguation must run BEFORE the unique-stub rewire:
     # the false merge (#1923) happens inside the rewire when a bare-name stub
@@ -682,6 +684,17 @@ def run_resolution_phase(
             if _lang_is_case_insensitive(n.get("source_file")):
                 global_label_to_nids_ci.setdefault(normalised.lower(), []).append(n["id"])
 
+    # Top-level Elixir module names per file, for scoping unqualified Elixir
+    # calls below. Read from `resolution_nodes` so an unchanged file's modules
+    # stay visible on an incremental rebuild (`_elixir_module` is carried by the
+    # resolution-context allow-list).
+    _elixir_modules_by_file: dict[str, set[str]] = {}
+    for n in resolution_nodes:
+        if n.get("_elixir_module") and n.get("source_file"):
+            _elixir_modules_by_file.setdefault(str(n["source_file"]), set()).add(
+                str(n.get("label", ""))
+            )
+
     # Callable-def ids for the indirect_call callable guard, read from the `_callable`
     # marker on the FINAL (post-remap) nodes — so a callback resolves only to a real
     # function/method/class, never a same-named data symbol, and the guard never goes
@@ -694,6 +707,11 @@ def run_resolution_phase(
     # as descriptive values (`select(Model)`, exception tuples), not invoked. Exclude
     # them from the indirect_call guard below to avoid false edges (#2137).
     class_nids = {n["id"] for n in resolution_nodes if n.get("_callable_class")}
+
+    # JVM name resolution: Java and Kotlin share one package/type namespace.
+    # Run before the Kotlin-only resolver and before call evidence is built.
+    from graph_fy.member_resolution import _resolve_jvm_references
+    _resolve_jvm_references(per_file, paths, all_nodes, all_edges)
 
     # Kotlin import targets (#2526): rewrite each `imports` edge from the bare
     # last-segment id to the node its written FQN names, via the per-file
@@ -835,6 +853,23 @@ def run_resolution_phase(
             ]
             if not candidates:
                 continue
+        # Scope unqualified Elixir calls to the caller's lexical scope: its own module
+        # (resolved in-file by the extractor), Kernel, or a module imported or
+        # used in the caller's lexical scope (the extractor records those as
+        # `elixir_call_scope`). A same-named def in any other module is out of
+        # scope: binding to it by name landed every migration's `table(:users)`
+        # (Ecto.Migration, pulled in by `use`) on an unrelated Phoenix
+        # component's `table/1` and made it the top god node (#4001).
+        elixir_call_scope = rc.get("elixir_call_scope")
+        if elixir_call_scope is not None:
+            scope = set(elixir_call_scope)
+            candidates = [
+                candidate for candidate in candidates
+                if _elixir_modules_by_file.get(nid_to_source_file.get(candidate, ""), set()) & scope
+            ]
+            if not candidates:
+                continue
+
         # Imported Go selectors carry exact package evidence. External package
         # calls yield no internal candidate instead of binding by bare name.
         go_exact_import = False

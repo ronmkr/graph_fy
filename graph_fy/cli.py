@@ -40,6 +40,10 @@ from graph_fy.commands.hook_guard import (
 )
 from graph_fy.paths import graph_fy_OUT as _graph_fy_OUT
 
+EXIT_AMBIGUOUS = 3
+EXIT_NOT_FOUND = 4
+
+
 
 def _default_graph_path() -> str:
     from graph_fy.paths import default_graph_json

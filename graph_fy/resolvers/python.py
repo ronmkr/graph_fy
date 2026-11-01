@@ -122,6 +122,38 @@ def _python_workspace_package_roots(root: Path) -> list[Path]:
     return roots
 
 
+_PYTHON_STDLIB_MODULE_NAMES = frozenset({
+    "abc", "aifc", "annotationlib", "antigravity", "argparse", "array", "ast", "asynchat",
+    "asyncio", "asyncore", "atexit", "audioop", "base64", "bdb", "binascii", "bisect",
+    "builtins", "bz2", "cProfile", "calendar", "cgi", "cgitb", "chunk", "cmath", "cmd",
+    "code", "codecs", "codeop", "collections", "colorsys", "compileall", "compression",
+    "concurrent", "configparser", "contextlib", "contextvars", "copy", "copyreg", "crypt",
+    "csv", "ctypes", "curses", "dataclasses", "datetime", "dbm", "decimal", "difflib",
+    "dis", "doctest", "email", "encodings", "ensurepip", "enum", "errno", "faulthandler",
+    "fcntl", "filecmp", "fileinput", "fnmatch", "fractions", "ftplib", "functools", "gc",
+    "genericpath", "getopt", "getpass", "gettext", "glob", "graphlib", "grp", "gzip",
+    "hashlib", "heapq", "hmac", "html", "http", "idlelib", "imaplib", "imghdr", "imp",
+    "importlib", "inspect", "io", "ipaddress", "itertools", "json", "keyword", "lib2to3",
+    "linecache", "locale", "logging", "lzma", "mailbox", "mailcap", "marshal", "math",
+    "mimetypes", "mmap", "modulefinder", "msilib", "msvcrt", "multiprocessing", "netrc",
+    "nis", "nntplib", "nt", "ntpath", "nturl2path", "numbers", "opcode", "operator",
+    "optparse", "os", "ossaudiodev", "pathlib", "pdb", "pickle", "pickletools", "pipes",
+    "pkgutil", "platform", "plistlib", "poplib", "posix", "posixpath", "pprint", "profile",
+    "pstats", "pty", "pwd", "py_compile", "pyclbr", "pydoc", "pydoc_data", "pyexpat",
+    "queue", "quopri", "random", "re", "readline", "reprlib", "resource", "rlcompleter",
+    "runpy", "sched", "secrets", "select", "selectors", "shelve", "shlex", "shutil",
+    "signal", "site", "smtpd", "smtplib", "sndhdr", "socket", "socketserver", "spwd",
+    "sqlite3", "sre_compile", "sre_constants", "sre_parse", "ssl", "stat", "statistics",
+    "string", "stringprep", "struct", "subprocess", "sunau", "symtable", "sys", "sysconfig",
+    "syslog", "tabnanny", "tarfile", "telnetlib", "tempfile", "termios", "textwrap", "this",
+    "threading", "time", "timeit", "tkinter", "token", "tokenize", "tomllib", "trace",
+    "traceback", "tracemalloc", "tty", "turtle", "turtledemo", "types", "typing",
+    "unicodedata", "unittest", "urllib", "uu", "uuid", "venv", "warnings", "wave",
+    "weakref", "webbrowser", "winreg", "winsound", "wsgiref", "xdrlib", "xml", "xmlrpc",
+    "zipapp", "zipfile", "zipimport", "zlib", "zoneinfo",
+})
+
+
 def _resolve_python_module_path(module_name: str, current_path: Path, root: Path, level: int) -> Path | None:
     if level > 0:
         base = current_path.parent
@@ -131,7 +163,18 @@ def _resolve_python_module_path(module_name: str, current_path: Path, root: Path
         return _probe_python_module_candidate(candidate)
 
     rel = module_name.replace(".", "/")
-    hit = _probe_python_module_candidate(root / rel)
+    stdlib_shadow = module_name.split(".", 1)[0] in _PYTHON_STDLIB_MODULE_NAMES
+
+    def _accept(candidate: Path | None) -> Path | None:
+        if (
+            candidate is not None
+            and stdlib_shadow
+            and candidate.name not in ("__init__.py", "__init__.pyi")
+        ):
+            return None
+        return candidate
+
+    hit = _accept(_probe_python_module_candidate(root / rel))
     if hit is not None:
         return hit
     for anc in current_path.parents:

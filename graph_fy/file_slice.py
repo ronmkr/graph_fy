@@ -79,7 +79,7 @@ def unit_source_text(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="replace")
     try:
         st = path.stat()
-        key = (str(path), st.st_size, st.st_mtime_ns)
+        key = (str(path.resolve()), st.st_size, st.st_mtime_ns)
     except OSError:
         return _pdf_text(path)
     hit = _CONVERTED_TEXT_CACHE.get(key)

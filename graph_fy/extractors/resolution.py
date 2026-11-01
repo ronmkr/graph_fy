@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from graph_fy.ids import normalize_id
+
 # Re-export all resolvers from graph_fy.resolvers
 from graph_fy.resolvers.c_cpp import (
     _DECLDEF_HEADER_SUFFIXES,
@@ -117,6 +119,7 @@ from graph_fy.resolvers.python import (
     _resolve_python_module_path,
     _resolve_python_namespace_dir,
     _walk_python_tree,
+    _PYTHON_STDLIB_MODULE_NAMES,
 )
 
 from graph_fy.extractors.base import (
@@ -562,6 +565,58 @@ def _apply_symbol_resolution_facts(
             use_fact.line,
             use_fact.file_path,
         )
+
+    # #4854: a reference to an imported name can be minted before the imported
+    # declaration is known, as a sourceless stub (or as this file's own id when
+    # the name equals the extension). Bind it to the declaration in the target
+    # file, keyed by (path, name) so two modules may declare the same symbol.
+    if facts.imports:
+        declared: dict[tuple[Path, str], str] = {}
+        for node in nodes:
+            node_path = _js_source_path(str(node.get("source_file") or ""), root)
+            if node_path is None:
+                continue
+            label = str(node.get("label") or "").strip()
+            if not label or label.startswith("."):
+                continue
+            bare = label[:-2] if label.endswith("()") else label
+            if "." in bare:
+                continue
+            declared.setdefault((node_path, normalize_id(bare)), node["id"])
+        node_by_id = {node.get("id"): node for node in nodes}
+        refs_by_source: dict[Path, list[dict]] = {}
+        for edge in edges:
+            if edge.get("relation") != "references":
+                continue
+            edge_source = _js_source_path(str(edge.get("source_file") or ""), root)
+            if edge_source is not None:
+                refs_by_source.setdefault(edge_source, []).append(edge)
+        for fact in facts.imports:
+            if Path(fact.file_path).suffix.lower() not in (
+                ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"
+            ):
+                continue
+            source_path = _resolve_cached(fact.file_path)
+            target_path = _resolve_cached(fact.target_path)
+            names = {normalize_id(fact.imported_name), normalize_id(fact.local_name)}
+            target_nid = next(
+                (declared[(target_path, name)] for name in names
+                 if (target_path, name) in declared),
+                None,
+            )
+            if not target_nid:
+                continue
+            for edge in refs_by_source.get(source_path, ()):
+                if edge.get("target") == target_nid:
+                    continue
+                node = node_by_id.get(edge.get("target"))
+                if node is None or node.get("source_file"):
+                    continue
+                stub_label = normalize_id(
+                    str(node.get("label") or "").strip("()").lstrip(".")
+                )
+                if stub_label in names:
+                    edge["target"] = target_nid
 
 
 def _augment_symbol_resolution_edges(

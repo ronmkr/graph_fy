@@ -145,6 +145,19 @@ def _prefer_file_node(
     return None
 
 
+def resolve_reference_forms(graph: nx.Graph, query: str) -> str | None:
+    """Resolve the reference forms `explain` accepts but `resolve_seed` did not (#4792)."""
+    from graph_fy.serve import _find_node_tiers
+
+    source_exact, exact, _prefix, _substring = _find_node_tiers(graph, query)
+    for tier in (source_exact, exact):
+        if len(tier) == 1:
+            return str(tier[0])
+        if tier:
+            break
+    return None
+
+
 def resolve_seed(graph: nx.Graph, query: str, root: Path | None = None) -> str | None:
     # A trailing path separator must not change a source-file match — serve's
     # _find_node tokenizes the path (which drops it), so strip it here for parity
@@ -152,6 +165,9 @@ def resolve_seed(graph: nx.Graph, query: str, root: Path | None = None) -> str |
     query = query.rstrip("/\\") or query
     if query in graph:
         return query
+    qualified = resolve_reference_forms(graph, query)
+    if qualified is not None:
+        return qualified
     query_lower = _normalize_label(query)
     exact_label_matches = [
         str(node_id)
@@ -287,6 +303,20 @@ def affected_nodes(
     return hits
 
 
+def resolve_seed_outcome(
+    graph: nx.Graph, query: str, root: Path | None = None
+) -> tuple[str | None, list[str]]:
+    """Resolve a seed and report why it failed, so the CLI can set an exit code (#4792)."""
+    seed = resolve_seed(graph, query, root)
+    if seed is not None:
+        return seed, []
+    from graph_fy.serve import find_node_ambiguity
+
+    normalized = query.rstrip("/\\") or query
+    rivals = find_node_ambiguity(graph, normalized)
+    return None, [str(node_id) for node_id in rivals]
+
+
 def format_affected(
     graph: nx.Graph,
     query: str,
@@ -294,9 +324,11 @@ def format_affected(
     relations: Iterable[str] = DEFAULT_AFFECTED_RELATIONS,
     depth: int = 2,
     root: Path | None = None,
+    seed: str | None = None,
 ) -> str:
     relation_list = tuple(relations)
-    seed = resolve_seed(graph, query, root)
+    if seed is None:
+        seed = resolve_seed(graph, query, root)
     if seed is None:
         return f"No unique node match for {query}"
 

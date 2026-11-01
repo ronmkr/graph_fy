@@ -232,15 +232,78 @@ def _kotlin_function_return_type_node(func_node):
                 return c
     return None
 
-def _scala_collect_type_refs(node, source: bytes, generic: bool, out: list[tuple[str, str]]) -> None:
+def _scala_type_parameters_in_scope(node, source: bytes) -> frozenset[str]:
+    """Return Scala type-parameter names visible from ``node``."""
+    names: set[str] = set()
+    scope = node
+    while scope is not None:
+        for child in scope.children:
+            if child.type != "type_parameters":
+                continue
+            for param in child.children:
+                if param.type in ("identifier", "type_identifier"):
+                    name = _read_text(param, source)
+                    if name:
+                        names.add(name)
+                elif param.type in ("covariant_type_parameter", "contravariant_type_parameter"):
+                    for sub in param.children:
+                        if sub.type in ("identifier", "type_identifier"):
+                            name = _read_text(sub, source)
+                            if name:
+                                names.add(name)
+                            break
+        scope = scope.parent
+    return frozenset(names)
+
+
+def _scala_extension_receiver_name(node, source: bytes) -> str | None:
+    """The type an `extension_definition` extends, or None if it names no type."""
+    clause = next(
+        (c for c in node.children
+         if c.type == "parameters" and not any(cc.type == "using" for cc in c.children)),
+        None,
+    )
+    if clause is None:
+        return None
+    param = next((c for c in clause.children if c.type == "parameter"), None)
+    if param is None:
+        return None
+    type_node = next(
+        (c for c in param.children
+         if c.type in ("type_identifier", "generic_type", "stable_type_identifier")),
+        None,
+    )
+    if type_node is not None and type_node.type == "generic_type":
+        type_node = next(
+            (c for c in type_node.children
+             if c.type in ("type_identifier", "stable_type_identifier")),
+            None,
+        )
+    if type_node is not None and type_node.type == "stable_type_identifier":
+        type_node = next(
+            (c for c in reversed(type_node.children) if c.type == "type_identifier"),
+            None,
+        )
+    if type_node is None:
+        return None
+    name = _read_text(type_node, source).strip()
+    if not name or name in _scala_type_parameters_in_scope(node, source):
+        return None
+    return name
+
+
+def _scala_collect_type_refs(node, source: bytes, generic: bool, out: list[tuple[str, str]],
+                             skip: frozenset[str] | None = None) -> None:
     """Walk a Scala type expression; append (name, role) tuples.
     Handles type_identifier, generic_type (List[T]), and common type wrappers."""
     if node is None:
         return
+    if skip is None:
+        skip = _scala_type_parameters_in_scope(node, source)
     t = node.type
     if t == "type_identifier":
         text = _read_text(node, source)
-        if text:
+        if text and text not in skip:
             out.append((text, "generic_arg" if generic else "type"))
         return
     if t == "generic_type":
@@ -252,19 +315,19 @@ def _scala_collect_type_refs(node, source: bytes, generic: bool, out: list[tuple
                     break
         if base is not None and base.type == "type_identifier":
             text = _read_text(base, source)
-            if text:
+            if text and text not in skip:
                 out.append((text, "generic_arg" if generic else "type"))
         for c in node.children:
             if c.type == "type_arguments":
                 for arg in c.children:
                     if arg.is_named:
-                        _scala_collect_type_refs(arg, source, True, out)
+                        _scala_collect_type_refs(arg, source, True, out, skip)
         return
     if t in ("compound_type", "infix_type", "function_type", "tuple_type",
              "annotated_type", "projected_type"):
         for c in node.children:
             if c.is_named:
-                _scala_collect_type_refs(c, source, generic, out)
+                _scala_collect_type_refs(c, source, generic, out, skip)
 
 def _kotlin_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
                        nodes: list, edges: list, seen_ids: set, function_bodies: list,

@@ -8,7 +8,7 @@ from graph_fy.extractors.base import _LANGUAGE_BUILTIN_GLOBALS, _file_stem, _mak
 from graph_fy.ids import normalize_id
 from graph_fy.extractors.models import LanguageConfig
 from graph_fy.extractors.resolution import _resolve_js_import_target
-from graph_fy.extractors.ts_normalize import _normalize_ts_import_types
+from graph_fy.extractors.ts_normalize import _normalize_ts_import_types, _normalize_ts_export_type_star
 from graph_fy.extractors.js_web import _extract_js_rationale, _rescue_js_dynamic_imports
 from graph_fy.extractors.rtk import is_rtk_file, extract_rtk
 
@@ -942,8 +942,17 @@ def _js_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
                    closure_locals_by_body: dict | None = None,
                    config=None,
                    scope_parents: dict[str, str] | None = None,
-                   lexical_nids_by_scope: dict[str, dict[str, str]] | None = None) -> bool:
+                   lexical_nids_by_scope: dict[str, dict[str, str]] | None = None,
+                   decl_node_fn=None, decl_lookup_fn=None) -> bool:
     """Handle lexical_declaration (arrow functions, CJS requires, module-level const literals) for JS/TS. Returns True if handled."""
+    def _decl(nid, name, kind, label, line):
+        if decl_node_fn is not None:
+            return decl_node_fn(nid, name, kind, label, line)
+        add_node_fn(nid, label, line)
+        return nid
+
+    def _lookup(name):
+        return decl_lookup_fn(name) if decl_lookup_fn is not None else None
     # CommonJS / prototype member assignments whose value is a function:
     #   exports.X = () => {}     → file-contained function  X()
     #   module.exports.X = fn    → file-contained function  X()
@@ -1001,12 +1010,12 @@ def _js_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
                     if value.type in _JS_FUNCTION_VALUE_TYPES:
                         handled = False
                         if kind == "exports":
-                            nid = _make_id(stem, member_name)
-                            add_node_fn(nid, f"{member_name}()", line)
+                            nid = _decl(_make_id(stem, member_name), member_name,
+                                        "fn", f"{member_name}()", line)
                             add_edge_fn(file_nid, nid, "contains", line)
                             handled = True
                         elif kind == "prototype":
-                            owner_nid = _make_id(stem, owner_name)
+                            owner_nid = _lookup(owner_name) or _make_id(stem, owner_name)
                             nid = _make_id(owner_nid, member_name)
                             add_node_fn(nid, f".{member_name}()", line)
                             add_edge_fn(owner_nid, nid, "method", line)
@@ -1032,8 +1041,8 @@ def _js_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
                             closures: list = []
                             _js_topmost_closures(inner, closures)
                             if closures:
-                                nid = _make_id(stem, member_name)
-                                add_node_fn(nid, f"{member_name}()", line)
+                                nid = _decl(_make_id(stem, member_name), member_name,
+                                            "fn", f"{member_name}()", line)
                                 add_edge_fn(file_nid, nid, "contains", line)
                                 if callable_def_nids is not None:
                                     callable_def_nids.add(nid)  # exported HOF is callable
@@ -1113,8 +1122,8 @@ def _js_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
                             # leak the scan path (#1899); skip it (no graph signal).
                             if not normalize_id(func_name):
                                 continue
-                            func_nid = _make_id(stem, func_name)
-                            add_node_fn(func_nid, f"{func_name}()", line)
+                            func_nid = _decl(_make_id(stem, func_name), func_name,
+                                             "fn", f"{func_name}()", line)
                             add_edge_fn(file_nid, func_nid, "contains", line)
                             if callable_def_nids is not None:
                                 callable_def_nids.add(func_nid)  # `const f = () =>` is callable
@@ -1217,15 +1226,15 @@ def _js_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
                                     export_name = None
                                 if not export_name or not normalize_id(export_name):
                                     continue
-                                prop_nid = _make_id(stem, export_name)
-                                add_node_fn(prop_nid, export_name, line)
+                                prop_nid = _decl(_make_id(stem, export_name),
+                                                 export_name, "var", export_name, line)
                                 add_edge_fn(file_nid, prop_nid, "contains", line)
                             const_found = True
                         elif name_node:
                             const_name = _read_text(name_node, source)
                             line = child.start_point[0] + 1
-                            const_nid = _make_id(stem, const_name)
-                            add_node_fn(const_nid, const_name, line)
+                            const_nid = _decl(_make_id(stem, const_name), const_name,
+                                              "var", const_name, line)
                             add_edge_fn(file_nid, const_nid, "contains", line)
                             const_found = True
                             # #2552: `const handler = wrapper(async (req) => …)`
@@ -1272,7 +1281,7 @@ def _js_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
 def _ts_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
                    nodes: list, edges: list, seen_ids: set, function_bodies: list,
                    parent_class_nid: str | None, add_node_fn, add_edge_fn,
-                   walk_fn) -> bool:
+                   walk_fn, decl_node_fn=None) -> bool:
     """Emit enum member nodes, and a container node for a TS `namespace`/`module`.
 
     `namespace Foo {}` parses as `internal_module` (with `name`/`body` fields);
@@ -1287,6 +1296,11 @@ def _ts_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
     The guard requires `is_named` because the anonymous `module` keyword token
     shares the `module` type string and would otherwise match here.
     """
+    def _decl(nid, name, kind, label, line):
+        if decl_node_fn is not None:
+            return decl_node_fn(nid, name, kind, label, line)
+        add_node_fn(nid, label, line)
+        return nid
     if (parent_class_nid
             and node.parent is not None
             and node.parent.type == "enum_body"
@@ -1350,9 +1364,8 @@ def _ts_extra_walk(node, source: bytes, file_nid: str, stem: str, str_path: str,
             if name_node.type == "string":
                 ns_name = ns_name.strip("'\"`")
             if ns_name:
-                ns_nid = _make_id(stem, ns_name)
                 line = node.start_point[0] + 1
-                add_node_fn(ns_nid, ns_name, line)
+                ns_nid = _decl(_make_id(stem, ns_name), ns_name, "ns", ns_name, line)
                 add_edge_fn(file_nid, ns_nid, "contains", line)
         if body is not None:
             for child in body.children:
@@ -1642,7 +1655,10 @@ def extract_js(path: Path) -> dict:
     if is_ts:
         try:
             source = path.read_bytes()
-            source_override = _normalize_ts_import_types(source, tsx=suffix == ".tsx")
+            working = _normalize_ts_export_type_star(source) or source
+            normalized = _normalize_ts_import_types(working, tsx=suffix == ".tsx")
+            working = normalized if normalized is not None else working
+            source_override = working if working is not source else None
         except OSError:
             pass
     result = _extract_generic(path, config, source_override=source_override)

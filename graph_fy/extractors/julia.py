@@ -1,6 +1,7 @@
 """julia — moved verbatim from graph_fy/extract.py."""
 from __future__ import annotations
 
+from graph_fy.ids import DeclIdRegistry
 from graph_fy.extractors.base import _file_stem, _make_id, _read_text, _semantic_reference_edge
 from pathlib import Path
 
@@ -58,6 +59,10 @@ def extract_julia(path: Path) -> dict:
 
     file_nid = _make_id(str(path))
     add_node(file_nid, path.name, 1)
+    decl_registry = DeclIdRegistry(reserved_ids=(file_nid,))
+
+    def decl_id(nid: str, name: str, kind: str) -> str:
+        return decl_registry.resolve(nid, name, kind, seen_ids)
 
     def ensure_named_node(name: str, line: int) -> str:
         nid = _make_id(stem, name)
@@ -144,7 +149,7 @@ def extract_julia(path: Path) -> dict:
             name_node = next((c for c in node.children if c.type == "identifier"), None)
             if name_node:
                 mod_name = _read_text(name_node, source)
-                mod_nid = _make_id(stem, mod_name)
+                mod_nid = decl_id(_make_id(stem, mod_name), mod_name, "ns")
                 line = node.start_point[0] + 1
                 add_node(mod_nid, mod_name, line)
                 add_edge(file_nid, mod_nid, "defines", line)
@@ -161,7 +166,7 @@ def extract_julia(path: Path) -> dict:
             struct_name, super_name = _type_head_names(type_head)
             if not struct_name:
                 return
-            struct_nid = _make_id(stem, struct_name)
+            struct_nid = decl_id(_make_id(stem, struct_name), struct_name, "type")
             line = node.start_point[0] + 1
             add_node(struct_nid, struct_name, line)
             add_edge(scope_nid, struct_nid, "defines", line)
@@ -191,7 +196,7 @@ def extract_julia(path: Path) -> dict:
             if type_head:
                 abs_name, super_name = _type_head_names(type_head)
                 if abs_name:
-                    abs_nid = _make_id(stem, abs_name)
+                    abs_nid = decl_id(_make_id(stem, abs_name), abs_name, "type")
                     line = node.start_point[0] + 1
                     add_node(abs_nid, abs_name, line)
                     add_edge(scope_nid, abs_nid, "defines", line)
@@ -206,7 +211,7 @@ def extract_julia(path: Path) -> dict:
             if sig_node:
                 func_name = _func_name_from_signature(sig_node)
                 if func_name:
-                    func_nid = _make_id(stem, func_name)
+                    func_nid = decl_id(_make_id(stem, func_name), func_name, "fn")
                     line = node.start_point[0] + 1
                     add_node(func_nid, f"{func_name}()", line)
                     add_edge(scope_nid, func_nid, "defines", line)
@@ -220,7 +225,7 @@ def extract_julia(path: Path) -> dict:
                 callee = lhs.children[0]
                 if callee.type == "identifier":
                     func_name = _read_text(callee, source)
-                    func_nid = _make_id(stem, func_name)
+                    func_nid = decl_id(_make_id(stem, func_name), func_name, "fn")
                     line = node.start_point[0] + 1
                     add_node(func_nid, f"{func_name}()", line)
                     add_edge(scope_nid, func_nid, "defines", line)

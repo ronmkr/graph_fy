@@ -4,6 +4,19 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 ## 0.3.1 (Unreleased)
 
+- Upstream Synchronization & Parity Fixes (`Graphify-Labs/graphify` v0.9.98 – v0.9.100):
+  - **Git Hook Path Security Refusal** (#3869): `graph_fy hook` now refuses to install when `core.hooksPath` points outside the repository root.
+  - **API Key & Secret Redaction**: Added comprehensive high-entropy secret, bearer token, and private key redaction in metadata sanitization.
+  - **Elixir Local Call Scope**: Preserved lexical call scope for unqualified Elixir calls across modules.
+  - **JVM Case-Insensitive Class Path Resolution**: Resolved case-differing class and interface names across Java, Kotlin, and Scala files.
+  - **TypeScript Namespace & Enum Containers**: Fixed AST extraction of TS namespaces and ambient modules as container nodes with proper line numbers.
+  - **C++ Decl/Def Pair & Scoped Member Resolution**: Reconciled out-of-line method definitions and in-class declarations (`.name()` method labels, `#2348` qualified fallback symbol lookups).
+  - **C# & Swift Interface Dispatch**: Generalized multi-implementer `dispatches_to` resolution with tiered confidence scores (`#3003`, `#3800`).
+  - **Shortest Path Tie-Breaking & Semantic Impedance**: Combined semantic impedance weighting (`DEFAULT_RELATION_WEIGHTS`) with `#4881` weakest-hop route tie-breaking.
+  - **Affected Command Reference Resolution & Exit Codes**: Supported `path::Symbol` and dotted Python reference forms with documented exit codes (`3` for ambiguous, `4` for not found).
+  - **AST Cache Hit Reporting**: Added transparent percentage cache hit metrics during parallel extraction.
+  - **Non-ASCII Word Character ID Parity**: Synchronized skill extraction prompt specifications with `ids.py` non-ASCII word character support.
+
 - Security: Dependabot Vulnerability Remediation & Python 3.11+ Modernization:
   - **Dependabot CVE Remediation**: Resolved all 70 open security alerts across lockfile dependencies:
     - Upgraded `Pillow` to `13.0.0` (resolves 41 alerts).
