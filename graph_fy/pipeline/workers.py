@@ -48,9 +48,12 @@ def run_worker_phase(
     total = len(paths)
     per_file: list[dict | None] = [None] * total
     uncached_work: list[tuple[int, Path]] = []
+    cache_hits = 0
+    no_extractor = 0
 
     for i, path in enumerate(paths):
         if get_extractor_fn(path) is None:
+            no_extractor += 1
             per_file[i] = {"nodes": [], "edges": []}
             continue
         bypass_cache = path.suffix in _JS_CACHE_BYPASS_SUFFIXES
@@ -58,8 +61,17 @@ def run_worker_phase(
             cached = load_cached(path, root, cache_root=cache_location)
             if cached is not None:
                 per_file[i] = cached
+                cache_hits += 1
                 continue
         uncached_work.append((i, path))
+
+    if total:
+        print(
+            f"  AST cache: {cache_hits}/{total} files served from cache "
+            f"({cache_hits * 100 // total}%); {len(uncached_work)} to extract"
+            + (f"; {no_extractor} without an extractor" if no_extractor else ""),
+            flush=True,
+        )
 
     if uncached_work:
         ran_parallel = False

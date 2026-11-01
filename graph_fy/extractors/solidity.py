@@ -1,537 +1,723 @@
-"""Solidity AST extractor and C3 linearization inherited call/modifier resolver."""
+"""Structural extraction for Solidity source files."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
-from graph_fy.extractors.base import _make_id
-from graph_fy.ids import normalize_id
-from graph_fy.skeleton import get_parser_for_path
+from tree_sitter import Node
+
+from graph_fy.extractors.base import _file_stem, _make_id, _read_source_bytes, _read_text
 
 
-def _parse_callee(call_node: Any, source: bytes) -> tuple[str, str | None]:
-    """Extract (callee_name, receiver) from a Solidity call_expression.
+_TYPE_DECLARATIONS = {
+    "contract_declaration": "contract",
+    "interface_declaration": "interface",
+    "library_declaration": "library",
+}
 
-    Receiver is None for bare calls ('f()'), 'this', 'super', or object identifier.
-    Unwraps binary expressions such as 'x || super.f(y)' to identify 'super'.
+
+def _unquote(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    return value
+
+
+def _callee_text(callee: Node, source: bytes) -> str:
+    """The callee as written, e.g. ``super.supportsInterface`` or ``_check``.
+
+    tree-sitter-solidity parses ``a || super.f(x)`` as a call of the member
+    ``(a || super).f``: the binary expression is swallowed into the member's
+    object. Read the right-most operand as the receiver instead, so the call
+    is seen as ``super.f`` (and ``a && b.c(x)`` as ``b.c``).
     """
-    expr = call_node.child_by_field_name("function")
-    if expr is None:
-        expr = next(
-            (c for c in call_node.children if c.type in ("expression", "member_expression", "identifier")),
-            None,
-        )
-    if expr is None:
-        return "", None
-    if expr.type == "expression" and expr.child_count == 1:
-        expr = expr.children[0]
-    if expr.type == "identifier":
-        return source[expr.start_byte:expr.end_byte].decode("utf-8", errors="ignore"), None
-    if expr.type == "member_expression":
-        attr_node = expr.children[-1]
-        callee_name = source[attr_node.start_byte:attr_node.end_byte].decode("utf-8", errors="ignore")
-        recv_expr = expr.children[0]
-        if recv_expr.type == "expression" and recv_expr.child_count == 1:
-            recv_expr = recv_expr.children[0]
-        while recv_expr.type == "binary_expression":
-            right = recv_expr.child_by_field_name("right") or recv_expr.children[-1]
-            recv_expr = right
-            if recv_expr.type == "expression" and recv_expr.child_count == 1:
-                recv_expr = recv_expr.children[0]
-        recv_text = source[recv_expr.start_byte:recv_expr.end_byte].decode("utf-8", errors="ignore")
-        return callee_name, recv_text
-    return "", None
-
-
-def extract_solidity(path: Path) -> dict[str, Any]:
-    """Extract Solidity contracts, interfaces, libraries, functions, modifiers, and calls."""
-    try:
-        source_bytes = path.read_bytes()
-    except Exception as exc:
-        return {"nodes": [], "edges": [], "error": str(exc)}
-
-    parser, lang_name = get_parser_for_path(".sol")
-    if not parser or lang_name != "solidity":
-        return {"nodes": [], "edges": [], "error": "tree_sitter_solidity parser not available"}
-
-    try:
-        tree = parser.parse(source_bytes)
-        if not tree or not tree.root_node:
-            return {"nodes": [], "edges": []}
-    except Exception as exc:
-        return {"nodes": [], "edges": [], "error": str(exc)}
-
-    nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
-    raw_calls: list[dict[str, Any]] = []
-
-    str_path = str(path)
-    file_nid = _make_id(str_path)
-    nodes.append({
-        "id": file_nid,
-        "label": path.name,
-        "file_type": "code",
-        "source_file": str_path,
-    })
-
-    # Track declarations per contract for same-contract call resolution
-    contract_fns: dict[str, set[str]] = {}
-    contract_mods: dict[str, set[str]] = {}
-
-    for top in tree.root_node.children:
-        if top.type not in ("contract_declaration", "interface_declaration", "library_declaration"):
-            continue
-
-        c_name_node = top.child_by_field_name("name")
-        if not c_name_node:
-            for c in top.children:
-                if c.type == "identifier":
-                    c_name_node = c
+    inner = callee.named_children[0] if callee.type == "expression" and callee.named_children else callee
+    if inner.type == "member_expression":
+        obj = inner.child_by_field_name("object")
+        prop = inner.child_by_field_name("property")
+        if obj is not None and prop is not None:
+            base = obj
+            while True:
+                unwrapped = base.named_children[0] if base.type == "expression" and base.named_children else base
+                right = unwrapped.child_by_field_name("right") if unwrapped.type == "binary_expression" else None
+                if right is None:
                     break
-        if not c_name_node:
-            continue
+                base = right
+            if base is not obj:
+                return f"{_read_text(base, source)}.{_read_text(prop, source)}"
+    return _read_text(callee, source)
 
-        c_name = source_bytes[c_name_node.start_byte:c_name_node.end_byte].decode("utf-8", errors="ignore")
-        if not c_name:
-            continue
 
-        c_nid = _make_id(file_nid, c_name)
-        c_line = top.start_point[0] + 1
-        nodes.append({
-            "id": c_nid,
-            "label": c_name,
-            "file_type": "code",
-            "source_file": str_path,
-            "source_location": f"L{c_line}",
-        })
-        edges.append({
-            "source": file_nid,
-            "target": c_nid,
-            "relation": "contains",
-            "source_file": str_path,
-            "source_location": f"L{c_line}",
-        })
-
-        contract_fns[c_name] = set()
-        contract_mods[c_name] = set()
-
-        # Inheritance specifiers: 'is A, B'
-        for child in top.children:
-            if child.type == "inheritance_specifier":
-                base_ident = None
-                for sub in child.children:
-                    if sub.type in ("user_defined_type", "identifier"):
-                        base_ident = sub if sub.type == "identifier" else (sub.children[0] if sub.children else None)
-                        break
-                if base_ident:
-                    base_name = source_bytes[base_ident.start_byte:base_ident.end_byte].decode("utf-8", errors="ignore")
-                    if base_name:
-                        edges.append({
-                            "source": c_nid,
-                            "target": base_name,
-                            "relation": "inherits",
-                            "confidence": "EXTRACTED",
-                            "confidence_score": 1.0,
-                            "source_file": str_path,
-                            "source_location": f"L{child.start_point[0] + 1}",
-                        })
-
-        body = top.child_by_field_name("body")
-        if not body:
-            body = next((c for c in top.children if c.type == "contract_body"), None)
-        if not body:
-            continue
-
-        # Pre-scan members of this contract
-        fn_counts: dict[str, int] = {}
-        for item in body.children:
-            if item.type == "function_definition":
-                name_n = item.child_by_field_name("name")
-                if name_n:
-                    fn_name = source_bytes[name_n.start_byte:name_n.end_byte].decode("utf-8", errors="ignore")
-                    fn_counts[fn_name] = fn_counts.get(fn_name, 0) + 1
-                    contract_fns[c_name].add(fn_name)
-            elif item.type == "modifier_definition":
-                name_n = item.child_by_field_name("name") or next((c for c in item.children if c.type == "identifier"), None)
-                if name_n:
-                    mod_name = source_bytes[name_n.start_byte:name_n.end_byte].decode("utf-8", errors="ignore")
-                    contract_mods[c_name].add(mod_name)
-
-        # Full extraction of members and calls
-        for item in body.children:
-            caller_nid = None
-            is_func_or_mod = False
-            item_modifiers: list[tuple[str, int]] = []
-
-            if item.type == "function_definition":
-                name_n = item.child_by_field_name("name")
-                fn_name = source_bytes[name_n.start_byte:name_n.end_byte].decode("utf-8", errors="ignore") if name_n else ""
-                if not fn_name:
-                    continue
-                params = [c for c in item.children if c.type == "parameter"]
-                arity = len(params)
-                line = item.start_point[0] + 1
-                if fn_counts.get(fn_name, 0) > 1:
-                    caller_nid = _make_id(c_nid, f"{fn_name}_{arity}_L{line}")
-                else:
-                    caller_nid = _make_id(c_nid, fn_name)
-                nodes.append({
-                    "id": caller_nid,
-                    "label": f"{fn_name}()",
-                    "file_type": "code",
-                    "source_file": str_path,
-                    "source_location": f"L{line}",
-                    "metadata": {"arity": arity, "contract": c_name},
-                })
-                edges.append({
-                    "source": c_nid,
-                    "target": caller_nid,
-                    "relation": "contains",
-                    "source_file": str_path,
-                    "source_location": f"L{line}",
-                })
-                is_func_or_mod = True
-
-            elif item.type == "modifier_definition":
-                name_n = item.child_by_field_name("name") or next((c for c in item.children if c.type == "identifier"), None)
-                mod_name = source_bytes[name_n.start_byte:name_n.end_byte].decode("utf-8", errors="ignore") if name_n else ""
-                if not mod_name:
-                    continue
-                params = [c for c in item.children if c.type == "parameter"]
-                arity = len(params)
-                line = item.start_point[0] + 1
-                caller_nid = _make_id(c_nid, mod_name)
-                nodes.append({
-                    "id": caller_nid,
-                    "label": f"{mod_name}()",
-                    "file_type": "code",
-                    "source_file": str_path,
-                    "source_location": f"L{line}",
-                    "metadata": {"arity": arity, "contract": c_name},
-                })
-                edges.append({
-                    "source": c_nid,
-                    "target": caller_nid,
-                    "relation": "contains",
-                    "source_file": str_path,
-                    "source_location": f"L{line}",
-                })
-                is_func_or_mod = True
-
-            elif item.type == "constructor_definition":
-                line = item.start_point[0] + 1
-                caller_nid = _make_id(c_nid, "constructor")
-                nodes.append({
-                    "id": caller_nid,
-                    "label": "constructor()",
-                    "file_type": "code",
-                    "source_file": str_path,
-                    "source_location": f"L{line}",
-                    "metadata": {"contract": c_name},
-                })
-                edges.append({
-                    "source": c_nid,
-                    "target": caller_nid,
-                    "relation": "contains",
-                    "source_file": str_path,
-                    "source_location": f"L{line}",
-                })
-                is_func_or_mod = True
-
-            elif item.type in ("fallback_receive_definition", "receive_function_definition", "fallback_function_definition"):
-                is_receive = "receive" in source_bytes[item.start_byte:item.end_byte].decode("utf-8", errors="ignore")
-                kind_name = "receive" if is_receive else "fallback"
-                line = item.start_point[0] + 1
-                caller_nid = _make_id(c_nid, kind_name)
-                nodes.append({
-                    "id": caller_nid,
-                    "label": f"{kind_name}()",
-                    "file_type": "code",
-                    "source_file": str_path,
-                    "source_location": f"L{line}",
-                    "metadata": {"contract": c_name},
-                })
-                edges.append({
-                    "source": c_nid,
-                    "target": caller_nid,
-                    "relation": "contains",
-                    "source_file": str_path,
-                    "source_location": f"L{line}",
-                })
-                is_func_or_mod = True
-
-            elif item.type == "event_definition":
-                name_n = item.child_by_field_name("name") or next((c for c in item.children if c.type == "identifier"), None)
-                if name_n:
-                    ev_name = source_bytes[name_n.start_byte:name_n.end_byte].decode("utf-8", errors="ignore")
-                    ev_nid = _make_id(c_nid, ev_name)
-                    line = item.start_point[0] + 1
-                    nodes.append({
-                        "id": ev_nid,
-                        "label": f"event {ev_name}",
-                        "file_type": "code",
-                        "source_file": str_path,
-                        "source_location": f"L{line}",
-                    })
-                    edges.append({
-                        "source": c_nid,
-                        "target": ev_nid,
-                        "relation": "contains",
-                        "source_file": str_path,
-                        "source_location": f"L{line}",
-                    })
-
-            if not is_func_or_mod or not caller_nid:
-                continue
-
-            # Modifiers on functions, constructors, receive, and fallback
-            for child in item.children:
-                if child.type == "modifier_invocation":
-                    mod_id_node = next((c for c in child.children if c.type == "identifier"), None)
-                    if mod_id_node:
-                        mod_name = source_bytes[mod_id_node.start_byte:mod_id_node.end_byte].decode("utf-8", errors="ignore")
-                        mod_line = child.start_point[0] + 1
-                        if mod_name in contract_mods.get(c_name, set()):
-                            edges.append({
-                                "source": caller_nid,
-                                "target": _make_id(c_nid, mod_name),
-                                "relation": "uses",
-                                "confidence": "EXTRACTED",
-                                "confidence_score": 1.0,
-                                "source_file": str_path,
-                                "source_location": f"L{mod_line}",
-                            })
-                        else:
-                            raw_calls.append({
-                                "caller_nid": caller_nid,
-                                "callee": mod_name,
-                                "is_member_call": False,
-                                "solidity_call": "modifier",
-                                "contract": c_name,
-                                "source_file": str_path,
-                                "source_location": f"L{mod_line}",
-                            })
-
-            # Walk function body for calls
-            def _walk_calls(n: Any) -> None:
-                if n.type == "call_expression":
-                    callee, recv = _parse_callee(n, source_bytes)
-                    if callee and callee not in ("require", "assert", "revert"):
-                        args = [c for c in n.children if c.type == "call_argument"]
-                        arity = len(args)
-                        call_line = n.start_point[0] + 1
-                        if recv == "super":
-                            raw_calls.append({
-                                "caller_nid": caller_nid,
-                                "callee": callee,
-                                "is_member_call": False,
-                                "solidity_call": "super",
-                                "contract": c_name,
-                                "arity": arity,
-                                "source_file": str_path,
-                                "source_location": f"L{call_line}",
-                            })
-                        elif recv in (None, "this"):
-                            # If defined in same contract, emit direct call edge
-                            if callee in contract_fns.get(c_name, set()):
-                                edges.append({
-                                    "source": caller_nid,
-                                    "target": _make_id(c_nid, callee),
-                                    "relation": "calls",
-                                    "confidence": "EXTRACTED",
-                                    "confidence_score": 1.0,
-                                    "source_file": str_path,
-                                    "source_location": f"L{call_line}",
-                                })
-                            else:
-                                raw_calls.append({
-                                    "caller_nid": caller_nid,
-                                    "callee": callee,
-                                    "is_member_call": False,
-                                    "solidity_call": "inherited",
-                                    "contract": c_name,
-                                    "arity": arity,
-                                    "source_file": str_path,
-                                    "source_location": f"L{call_line}",
-                                })
-                for child in n.children:
-                    _walk_calls(child)
-
-            _walk_calls(item)
-
+def _inherited_call(
+    caller_id: str, callee: str, arity: int | None, kind: str, source_file: str, node: Node,
+) -> dict[str, Any]:
+    """A call or modifier the contract itself does not declare, for
+    :func:`resolve_solidity_inherited_calls`. ``kind`` is ``inherited`` (bare
+    ``f()`` / ``this.f()``), ``super`` (``super.f()``) or ``modifier``."""
     return {
-        "nodes": nodes,
-        "edges": edges,
-        "raw_calls": raw_calls,
+        "caller_nid": caller_id,
+        "callee": callee,
+        "arity": arity,
+        "solidity_call": kind,
+        "language": "solidity",
+        "source_file": source_file,
+        "source_location": f"L{node.start_point[0] + 1}",
     }
 
 
-def c3_linearize(contract_name: str, bases_map: dict[str, list[str]]) -> list[str]:
-    """Compute C3 linearization order for a Solidity contract (matching solc).
+def _c3_linearization(type_id: str, bases: dict[str, list[str]]) -> list[str]:
+    """Solidity's C3 linearization of ``type_id``, most derived first.
 
-    In 'contract C is A, B', B is evaluated before A.
+    ``bases`` lists each type's direct bases in declaration order
+    (``contract C is A, B`` -> ``[A, B]``); Solidity treats the LAST one as
+    the most derived, so they are merged right to left. Falls back to a
+    right-to-left depth-first order when the bases cannot be merged (a cycle
+    or an inconsistent hierarchy), so a broken graph still resolves.
     """
-    bases = bases_map.get(contract_name, [])
-    if not bases:
-        return [contract_name]
-    reversed_bases = list(reversed(bases))
-    seqs = [c3_linearize(b, bases_map) for b in reversed_bases] + [list(reversed_bases)]
-    res = [contract_name]
-    while True:
-        seqs = [s for s in seqs if s]
-        if not seqs:
-            break
-        candidate = None
-        for s in seqs:
-            head = s[0]
-            if not any(head in other[1:] for other in seqs):
-                candidate = head
-                break
-        if not candidate:
-            return [contract_name] + list(reversed_bases)
-        res.append(candidate)
-        for s in seqs:
-            if s[0] == candidate:
-                s.pop(0)
-    return res
+    memo: dict[str, list[str]] = {}
+
+    def linearize(tid: str, active: frozenset[str]) -> list[str] | None:
+        if tid in memo:
+            return memo[tid]
+        if tid in active:
+            return None
+        parents = list(reversed(bases.get(tid, [])))
+        sequences: list[list[str]] = []
+        for parent in parents:
+            lin = linearize(parent, active | {tid})
+            if lin is None:
+                return None
+            sequences.append(list(lin))
+        sequences.append(list(parents))
+        result = [tid]
+        while any(sequences):
+            head = None
+            for seq in sequences:
+                if seq and not any(seq[0] in other[1:] for other in sequences):
+                    head = seq[0]
+                    break
+            if head is None:
+                return None
+            result.append(head)
+            for seq in sequences:
+                if seq and seq[0] == head:
+                    del seq[0]
+        memo[tid] = result
+        return result
+
+    linear = linearize(type_id, frozenset())
+    if linear is not None:
+        return linear
+    order: list[str] = []
+    stack = [type_id]
+    while stack:
+        tid = stack.pop()
+        if tid in order:
+            continue
+        order.append(tid)
+        stack.extend(bases.get(tid, []))
+    return order
+
+
+c3_linearize = _c3_linearization
 
 
 def resolve_solidity_inherited_calls(
-    per_file: list[dict],
-    all_nodes: list[dict],
-    all_edges: list[dict],
+    per_file: list[dict], all_nodes: list[dict], all_edges: list[dict]
 ) -> None:
-    """Resolve inherited calls, super calls, and modifiers via C3 linearization (#39, #4379, #4384)."""
-    node_by_id = {n.get("id"): n for n in all_nodes}
+    """Bind calls, ``super`` calls and modifiers a contract inherits.
 
-    # Contract inheritance graph
-    bases_map: dict[str, list[str]] = {}
-    contract_nodes: dict[str, str] = {}
-    for n in all_nodes:
-        # Check if contract node (contains function or event or inherits)
-        lbl = n.get("label", "")
-        if lbl and not lbl.endswith("()") and not lbl.startswith("."):
-            contract_nodes[lbl] = n.get("id")
+    The extractor binds ``f()`` and ``onlyX`` only inside the declaring
+    contract, so a call to a function or modifier declared in a base contract
+    (often in another file) got no edge. Runs after
+    :func:`resolve_solidity_type_references` has bound each ``inherits`` edge
+    to the base's real node, and walks the caller contract's C3 linearization
+    as the compiler does: the first contract that declares a matching member
+    wins (``super.f()`` starts after the caller's own contract, as the plain
+    lookup does once the extractor found nothing there); several same-arity
+    overloads in that contract are ambiguous and get no edge.
+    """
+    calls = [
+        rc
+        for result in per_file
+        for rc in result.get("raw_calls", []) or []
+        if rc.get("solidity_call")
+    ]
+    if not calls:
+        return
+    node_by_id = {node.get("id"): node for node in all_nodes}
 
-    for e in all_edges:
-        if e.get("relation") == "inherits":
-            src = e.get("source")
-            tgt = e.get("target")
-            src_node = node_by_id.get(src)
-            tgt_node = node_by_id.get(tgt)
-            src_name = src_node.get("label") if src_node else None
-            tgt_name = tgt_node.get("label") if tgt_node else tgt
-            if src_name and tgt_name:
-                bases_map.setdefault(src_name, []).append(tgt_name)
+    def meta(nid: Any) -> dict:
+        node = node_by_id.get(nid)
+        value = node.get("metadata") if node else None
+        return value if isinstance(value, dict) else {}
 
-    # Callables indexed by contract and name:
-    # contract_name -> callable_name -> list of (fn_nid, arity)
-    contract_functions: dict[str, dict[str, list[tuple[str, int]]]] = {}
-    contract_modifiers: dict[str, dict[str, list[str]]] = {}
+    type_kinds = set(_TYPE_DECLARATIONS.values())
+    owner: dict[str, str] = {}
+    functions: dict[str, dict[str, list[tuple[str, Any]]]] = {}
+    modifiers: dict[str, dict[str, list[str]]] = {}
+    bases: dict[str, list[str]] = {}
+    existing: set[tuple[Any, Any, Any]] = set()
+    for edge in all_edges:
+        source, target, relation = edge.get("source"), edge.get("target"), edge.get("relation")
+        existing.add((source, target, relation))
+        if not isinstance(source, str) or not isinstance(target, str):
+            continue
+        source_meta = meta(source)
+        if source_meta.get("language") != "solidity" or source_meta.get("kind") not in type_kinds:
+            continue
+        if relation == "method":
+            member = meta(target)
+            name = str(node_by_id.get(target, {}).get("label", ""))
+            name = name[:-2] if name.endswith("()") else name
+            owner[target] = source
+            if member.get("kind") == "function":
+                functions.setdefault(source, {}).setdefault(name, []).append(
+                    (target, member.get("arity"))
+                )
+            elif member.get("kind") == "modifier":
+                modifiers.setdefault(source, {}).setdefault(name, []).append(target)
+        elif relation == "inherits" and meta(target).get("kind") in type_kinds:
+            bases.setdefault(source, []).append(target)
 
-    for e in all_edges:
-        if e.get("relation") == "contains":
-            c_nid = e.get("source")
-            m_nid = e.get("target")
-            c_node = node_by_id.get(c_nid)
-            m_node = node_by_id.get(m_nid)
-            if not c_node or not m_node:
+    def find(linear: list[str], name: str, arity: Any, kind: str) -> str | None:
+        for type_id in linear:
+            if kind == "modifier":
+                found = modifiers.get(type_id, {}).get(name, [])
+            else:
+                found = [
+                    nid for nid, declared in functions.get(type_id, {}).get(name, [])
+                    if arity is None or declared is None or declared == arity
+                ]
+            if found:
+                return found[0] if len(found) == 1 else None
+        return None
+
+    linear_cache: dict[str, list[str]] = {}
+    for rc in calls:
+        caller = rc.get("caller_nid")
+        contract = owner.get(caller)
+        name = rc.get("callee")
+        if not contract or not name:
+            continue
+        if contract not in linear_cache:
+            linear_cache[contract] = _c3_linearization(contract, bases)
+        kind = rc["solidity_call"]
+        # The extractor already looked in the caller's own contract.
+        target = find(linear_cache[contract][1:], name, rc.get("arity"), kind)
+        if target is None:
+            continue
+        relation = "uses" if kind == "modifier" else "calls"
+        if (caller, target, relation) in existing:
+            continue
+        existing.add((caller, target, relation))
+        all_edges.append({
+            "source": caller,
+            "target": target,
+            "relation": relation,
+            "confidence": "EXTRACTED",
+            "source_file": rc.get("source_file"),
+            "source_location": rc.get("source_location"),
+            "weight": 1.0,
+        })
+
+
+def resolve_solidity_type_references(
+    _per_file: list[dict], all_nodes: list[dict], all_edges: list[dict]
+) -> None:
+    """Bind inheritance and using references to types in the file or its imports."""
+    node_by_id = {node.get("id"): node for node in all_nodes}
+    file_id_by_source = {
+        str(node["source_file"]): node["id"]
+        for node in all_nodes
+        if node.get("source_file")
+        and node.get("label") == Path(str(node["source_file"])).name
+    }
+    source_by_file_id = {nid: source for source, nid in file_id_by_source.items()}
+    imported_sources: dict[str, set[str]] = {}
+    for edge in all_edges:
+        if edge.get("relation") != "imports_from":
+            continue
+        source_file = source_by_file_id.get(edge.get("source"))
+        target_file = source_by_file_id.get(edge.get("target"))
+        if source_file and target_file:
+            imported_sources.setdefault(source_file, set()).add(target_file)
+
+    types: dict[tuple[str, str], list[str]] = {}
+    for node in all_nodes:
+        metadata = node.get("metadata")
+        if not isinstance(metadata, dict) or metadata.get("kind") not in _TYPE_DECLARATIONS.values():
+            continue
+        source_file = node.get("source_file")
+        if source_file:
+            types.setdefault((str(source_file), str(node.get("label", ""))), []).append(node["id"])
+
+    for edge in all_edges:
+        context = edge.get("context")
+        if not isinstance(context, str) or not context.startswith("solidity_type:"):
+            continue
+        source_node = node_by_id.get(edge.get("source"))
+        if not source_node or not source_node.get("source_file"):
+            continue
+        source_file = str(source_node["source_file"])
+        name = context.split(":", 1)[1]
+        candidates = list(types.get((source_file, name), []))
+        for imported in imported_sources.get(source_file, set()):
+            candidates.extend(types.get((imported, name), []))
+        if len(candidates) == 1:
+            edge["target"] = candidates[0]
+
+
+def extract_solidity(path: Path) -> dict:
+    try:
+        import tree_sitter_solidity
+        from tree_sitter import Language, Parser
+    except ImportError:
+        return {"nodes": [], "edges": [], "error": "tree-sitter-solidity not installed"}
+
+    try:
+        source = _read_source_bytes(path)
+        root = Parser(Language(tree_sitter_solidity.language())).parse(source).root_node
+    except Exception as exc:
+        return {"nodes": [], "edges": [], "error": f"Solidity grammar failed to load: {exc}"}
+
+    source_file = str(path)
+    stem = _file_stem(path)
+    file_id = _make_id(source_file)
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    raw_calls: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_edges: set[tuple[str, str, str]] = set()
+
+    def add_node(
+        nid: str,
+        label: str,
+        node: Node,
+        *,
+        kind: str,
+        source_backed: bool = True,
+        callable_node: bool = False,
+        arity: int | None = None,
+    ) -> str:
+        if nid not in seen_ids:
+            seen_ids.add(nid)
+            metadata: dict[str, Any] = {"language": "solidity", "kind": kind}
+            if arity is not None:
+                # Parameter count, so the cross-contract pass can pick the
+                # same overload the in-contract lookup does (name, arity).
+                metadata["arity"] = arity
+            item: dict[str, Any] = {
+                "id": nid,
+                "label": label,
+                "file_type": "code",
+                "source_location": f"L{node.start_point[0] + 1}",
+                "metadata": metadata,
+            }
+            if source_backed:
+                item["source_file"] = source_file
+            if callable_node:
+                item["_callable"] = True
+            nodes.append(item)
+        return nid
+
+    def add_edge(
+        source_id: str,
+        target_id: str,
+        relation: str,
+        node: Node,
+        *,
+        context: str | None = None,
+        target_file: str | None = None,
+    ) -> None:
+        key = (source_id, target_id, relation)
+        if not source_id or not target_id or source_id == target_id or key in seen_edges:
+            return
+        seen_edges.add(key)
+        item: dict[str, Any] = {
+            "source": source_id,
+            "target": target_id,
+            "relation": relation,
+            "confidence": "EXTRACTED",
+            "source_file": source_file,
+            "source_location": f"L{node.start_point[0] + 1}",
+            "weight": 1.0,
+        }
+        if context:
+            item["context"] = context
+        if target_file:
+            item["target_file"] = target_file
+        edges.append(item)
+
+    add_node(file_id, path.name, root, kind="file")
+
+    def type_stub(name: str, node: Node) -> str:
+        name = name.split(".")[-1]
+        nid = _make_id("solidity", "type", name)
+        add_node(nid, name, node, kind="external_type", source_backed=False)
+        return nid
+
+    for declaration in root.named_children:
+        if declaration.type != "import_directive":
+            continue
+        source_node = declaration.child_by_field_name("source")
+        if source_node is None:
+            continue
+        relative = _unquote(_read_text(source_node, source))
+        if not relative or relative.startswith(("http:", "https:")):
+            continue
+        target = path.parent / relative
+        add_edge(
+            file_id,
+            _make_id(str(target)),
+            "imports_from",
+            declaration,
+            target_file=str(target),
+        )
+
+    for declaration in root.named_children:
+        type_kind = _TYPE_DECLARATIONS.get(declaration.type)
+        if type_kind is None:
+            continue
+        name_node = declaration.child_by_field_name("name")
+        body = declaration.child_by_field_name("body")
+        if name_node is None or body is None:
+            continue
+        type_name = _read_text(name_node, source)
+        type_id = add_node(
+            _make_id(stem, type_kind, type_name),
+            type_name,
+            declaration,
+            kind=type_kind,
+            callable_node=type_kind == "contract",
+        )
+        add_edge(file_id, type_id, "contains", declaration)
+
+        for child in declaration.named_children:
+            if child.type != "inheritance_specifier":
                 continue
-            c_name = c_node.get("label", "")
-            m_label = m_node.get("label", "")
-            meta = m_node.get("metadata", {})
-            arity = meta.get("arity", 0)
+            ancestor = child.child_by_field_name("ancestor")
+            if ancestor is None:
+                continue
+            base_name = _read_text(ancestor, source).split(".")[-1]
+            add_edge(
+                type_id,
+                type_stub(base_name, child),
+                "inherits",
+                child,
+                context=f"solidity_type:{base_name}",
+            )
 
-            clean_name = m_label.rstrip("()")
-            if clean_name:
-                contract_functions.setdefault(c_name, {}).setdefault(clean_name, []).append((m_nid, arity))
-                contract_modifiers.setdefault(c_name, {}).setdefault(clean_name, []).append(m_nid)
+        functions: dict[tuple[str, int], list[str]] = {}
+        modifiers: dict[str, str] = {}
+        reference_targets: dict[tuple[str, int], str] = {}
+        bodies: list[tuple[Node, str]] = []
+        pending_modifiers: list[tuple[str, str, Node]] = []
 
-    existing_pairs = {(e.get("source"), e.get("target")) for e in all_edges}
+        def add_member(
+            member: Node,
+            name: str,
+            label: str,
+            kind: str,
+            *,
+            relation: str = "contains",
+            signature: str = "",
+            callable_node: bool = False,
+            arity: int | None = None,
+        ) -> str:
+            # Callables carry an arity:types signature (distinguishes overloads).
+            # Non-callable members (struct/enum/event/error/state-var) have no
+            # signature; discriminate on the name — which is unique per kind
+            # within a contract scope — rather than the line number, so a node's
+            # id stays stable when the member moves (avoids incremental id churn).
+            member_id = _make_id(type_id, kind, name, signature or name)
+            add_node(
+                member_id,
+                label,
+                member,
+                kind=kind,
+                callable_node=callable_node,
+                arity=arity,
+            )
+            add_edge(type_id, member_id, relation, member)
+            return member_id
 
-    for result in per_file:
-        for rc in result.get("raw_calls", []):
-            call_type = rc.get("solidity_call")
-            if not call_type:
+        for member in body.named_children:
+            kind = member.type
+            if kind == "using_directive":
+                # `using Lib for T;` names the library directly as a child.
+                # `using {f1, f2} for T;` (free functions bound as members,
+                # legal since 0.8.13) wraps each one in its own `using_alias`
+                # child instead, so the direct-child scan below saw nothing
+                # and silently dropped the whole directive.
+                alias_nodes = [
+                    child for child in member.named_children
+                    if child.type in {"type_alias", "identifier", "user_defined_type"}
+                ]
+                for child in member.named_children:
+                    if child.type == "using_alias":
+                        alias_nodes.extend(
+                            grandchild for grandchild in child.named_children
+                            if grandchild.type in {"type_alias", "identifier", "user_defined_type"}
+                        )
+                for alias_node in alias_nodes:
+                    alias = _read_text(alias_node, source)
+                    if not alias:
+                        continue
+                    name = alias.split(".")[-1]
+                    add_edge(
+                        type_id,
+                        type_stub(name, member),
+                        "uses",
+                        member,
+                        context=f"solidity_type:{name}",
+                    )
                 continue
 
-            c_name = rc.get("contract")
-            callee = rc.get("callee")
-            caller = rc.get("caller_nid")
-            arity = rc.get("arity", 0)
-            if not c_name or not callee or not caller:
+            if kind == "struct_declaration":
+                member_name_node = member.child_by_field_name("name")
+                struct_body = member.child_by_field_name("body")
+                if member_name_node is None:
+                    continue
+                name = _read_text(member_name_node, source)
+                struct_id = add_member(member, name, name, "struct")
+                if struct_body is not None:
+                    for field in struct_body.named_children:
+                        if field.type != "struct_member":
+                            continue
+                        field_name_node = field.child_by_field_name("name")
+                        if field_name_node is None:
+                            continue
+                        field_name = _read_text(field_name_node, source)
+                        field_id = _make_id(struct_id, "field", field_name)
+                        add_node(field_id, field_name, field, kind="field")
+                        add_edge(struct_id, field_id, "contains", field)
                 continue
 
-            order = c3_linearize(c_name, bases_map)
+            if kind == "enum_declaration":
+                member_name_node = member.child_by_field_name("name")
+                enum_body = member.child_by_field_name("body")
+                if member_name_node is None:
+                    continue
+                name = _read_text(member_name_node, source)
+                enum_id = add_member(member, name, name, "enum")
+                if enum_body is not None:
+                    for value in enum_body.named_children:
+                        if value.type != "enum_value":
+                            continue
+                        value_name = _read_text(value, source)
+                        value_id = _make_id(enum_id, value_name)
+                        add_node(value_id, value_name, value, kind="enum_value")
+                        # An enum value is a discriminant case, not a declared
+                        # field, so it gets `case_of` like every other language
+                        # with enums (Java #1719, C#, Swift, Rust, VB.NET). The
+                        # relation also matters to resolution: `case_of` targets
+                        # are excluded from constructor binding, so an enum value
+                        # named like a type can no longer be mistaken for one.
+                        add_edge(enum_id, value_id, "case_of", value)
+                continue
 
-            if call_type == "inherited":
-                for base in order[1:]:
-                    funcs = contract_functions.get(base, {}).get(callee, [])
-                    if funcs:
-                        matches = [nid for nid, a in funcs if a == arity]
-                        if len(matches) == 1:
-                            target_nid = matches[0]
-                            if (caller, target_nid) not in existing_pairs:
-                                existing_pairs.add((caller, target_nid))
-                                all_edges.append({
-                                    "source": caller,
-                                    "target": target_nid,
-                                    "relation": "calls",
-                                    "confidence": "EXTRACTED",
-                                    "confidence_score": 1.0,
-                                    "source_file": rc.get("source_file", ""),
-                                    "source_location": rc.get("source_location"),
-                                    "weight": 1.0,
-                                })
-                            break
-                        elif len(matches) > 1:
-                            break  # ambiguous overload in winning base contract
+            simple_kinds = {
+                "event_definition": "event",
+                "error_declaration": "error",
+                "state_variable_declaration": "state_variable",
+            }
+            if kind in simple_kinds:
+                member_name_node = member.child_by_field_name("name")
+                if member_name_node is None:
+                    continue
+                name = _read_text(member_name_node, source)
+                member_id = add_member(member, name, name, simple_kinds[kind])
+                arity = sum(child.type in {"event_parameter", "parameter"} for child in member.named_children)
+                reference_targets[(name, arity)] = member_id
+                continue
 
-            elif call_type == "super":
-                # Find caller contract index in C3 linearization
-                caller_contract = node_by_id.get(caller, {}).get("metadata", {}).get("contract", c_name)
-                start_idx = (order.index(caller_contract) + 1) if caller_contract in order else 1
-                for base in order[start_idx:]:
-                    funcs = contract_functions.get(base, {}).get(callee, [])
-                    if funcs:
-                        matches = [nid for nid, a in funcs if a == arity]
-                        if len(matches) == 1:
-                            target_nid = matches[0]
-                            if (caller, target_nid) not in existing_pairs:
-                                existing_pairs.add((caller, target_nid))
-                                all_edges.append({
-                                    "source": caller,
-                                    "target": target_nid,
-                                    "relation": "calls",
-                                    "confidence": "EXTRACTED",
-                                    "confidence_score": 1.0,
-                                    "source_file": rc.get("source_file", ""),
-                                    "source_location": rc.get("source_location"),
-                                    "weight": 1.0,
-                                })
-                            break
-                        elif len(matches) > 1:
-                            break
+            if kind not in {
+                "function_definition", "constructor_definition", "modifier_definition",
+                "fallback_receive_definition",
+            }:
+                continue
 
-            elif call_type == "modifier":
-                for base in order[1:]:
-                    mods = contract_modifiers.get(base, {}).get(callee, [])
-                    if mods:
-                        if len(mods) == 1:
-                            target_nid = mods[0]
-                            if (caller, target_nid) not in existing_pairs:
-                                existing_pairs.add((caller, target_nid))
-                                all_edges.append({
-                                    "source": caller,
-                                    "target": target_nid,
-                                    "relation": "uses",
-                                    "confidence": "EXTRACTED",
-                                    "confidence_score": 1.0,
-                                    "source_file": rc.get("source_file", ""),
-                                    "source_location": rc.get("source_location"),
-                                    "weight": 1.0,
+            name_node = member.child_by_field_name("name")
+            if kind == "constructor_definition":
+                name = "constructor"
+                callable_kind = "constructor"
+            elif kind == "fallback_receive_definition":
+                text = _read_text(member, source).lstrip()
+                name = "receive" if text.startswith("receive") else "fallback"
+                callable_kind = name
+            else:
+                if name_node is None:
+                    continue
+                name = _read_text(name_node, source)
+                callable_kind = "modifier" if kind == "modifier_definition" else "function"
+
+            parameters = [
+                child for child in member.named_children
+                if child.type in {"parameter", "fallback_receive_parameter"}
+            ]
+            signature = ",".join(
+                _read_text(child.child_by_field_name("type"), source)
+                for child in parameters
+                if child.child_by_field_name("type") is not None
+            )
+            arity = len(parameters)
+            member_id = add_member(
+                member,
+                name,
+                f"{name}()",
+                callable_kind,
+                relation="method",
+                signature=f"{arity}:{signature}",
+                callable_node=True,
+                arity=arity,
+            )
+            if callable_kind == "modifier":
+                modifiers[name] = member_id
+            else:
+                functions.setdefault((name, arity), []).append(member_id)
+            member_body = member.child_by_field_name("body")
+            if member_body is not None:
+                bodies.append((member_body, member_id))
+            if callable_kind != "modifier":
+                for child in member.named_children:
+                    if child.type != "modifier_invocation":
+                        continue
+                    modifier_name = next(
+                        (
+                            _read_text(item, source)
+                            for item in child.named_children
+                            if item.type == "identifier"
+                        ),
+                        "",
+                    )
+                    if modifier_name:
+                        pending_modifiers.append((member_id, modifier_name, child))
+
+        for caller_id, modifier_name, modifier_node in pending_modifiers:
+            target = modifiers.get(modifier_name)
+            if target:
+                add_edge(caller_id, target, "uses", modifier_node)
+            else:
+                # Declared in a base contract (`onlyOwner` from Ownable), or a
+                # base-constructor call (`ERC20("n", "s")`), which the
+                # inheritance pass finds no modifier for and drops.
+                raw_calls.append(_inherited_call(
+                    caller_id, modifier_name, None, "modifier", source_file, modifier_node,
+                ))
+
+        for function_body, caller_id in bodies:
+            stack = [function_body]
+            while stack:
+                node = stack.pop()
+                if node.type == "call_expression":
+                    callee_node = node.child_by_field_name("function")
+                    if callee_node is not None:
+                        written = _callee_text(callee_node, source)
+                        callee = written.split(".")[-1]
+                        arity = sum(child.type == "call_argument" for child in node.named_children)
+                        candidates: list[str] = []
+                        if "." not in written or written.startswith("this."):
+                            candidates = functions.get((callee, arity), [])
+                        if len(candidates) == 1:
+                            add_edge(caller_id, candidates[0], "calls", node)
+                        else:
+                            referenced = reference_targets.get((callee, arity))
+                            if referenced is not None and "." not in written:
+                                add_edge(caller_id, referenced, "references", node)
+                            elif not candidates and callee and (
+                                "." not in written or written.startswith("this.")
+                            ):
+                                # Not declared in this contract: an inherited
+                                # function (`_msgSender()` from Context), bound
+                                # by resolve_solidity_inherited_calls through
+                                # the contract's linearized bases.
+                                raw_calls.append(_inherited_call(
+                                    caller_id, callee, arity, "inherited", source_file, node,
+                                ))
+                            elif written.startswith("super.") and written.count(".") == 1:
+                                raw_calls.append(_inherited_call(
+                                    caller_id, callee, arity, "super", source_file, node,
+                                ))
+                            elif callee and "." in written:
+                                raw_calls.append({
+                                    "caller_nid": caller_id,
+                                    "callee": callee,
+                                    "is_member_call": True,
+                                    "language": "solidity",
+                                    "source_file": source_file,
+                                    "source_location": f"L{node.start_point[0] + 1}",
                                 })
-                            break
-                        elif len(mods) > 1:
-                            break
+                stack.extend(reversed(node.named_children))
+
+    # Free (file-level) functions live at source-unit scope, outside any
+    # contract/library/interface. Solidity >=0.7 allows them, but the
+    # type-declaration loop above only descends into named type declarations,
+    # so a free function — and every call it makes — was dropped entirely.
+    free_functions: dict[tuple[str, int], list[str]] = {}
+    free_bodies: list[tuple[Node, str]] = []
+    for declaration in root.named_children:
+        if declaration.type != "function_definition":
+            continue
+        name_node = declaration.child_by_field_name("name")
+        if name_node is None:
+            continue
+        name = _read_text(name_node, source)
+        parameters = [
+            child for child in declaration.named_children
+            if child.type == "parameter"
+        ]
+        signature = ",".join(
+            _read_text(child.child_by_field_name("type"), source)
+            for child in parameters
+            if child.child_by_field_name("type") is not None
+        )
+        arity = len(parameters)
+        func_id = add_node(
+            _make_id(stem, "function", name, f"{arity}:{signature}"),
+            f"{name}()",
+            declaration,
+            kind="function",
+            callable_node=True,
+        )
+        add_edge(file_id, func_id, "contains", declaration)
+        free_functions.setdefault((name, arity), []).append(func_id)
+        body = declaration.child_by_field_name("body")
+        if body is not None:
+            free_bodies.append((body, func_id))
+
+    # Resolve calls made from free-function bodies. Only an unambiguous
+    # same-file free function is linked directly; a member call (Lib.f()) is
+    # left for cross-file resolution. Contract methods stay out of scope so we
+    # never guess a relationship across a scope we cannot see (fail-closed).
+    for function_body, caller_id in free_bodies:
+        stack = [function_body]
+        while stack:
+            node = stack.pop()
+            if node.type == "call_expression":
+                callee_node = node.child_by_field_name("function")
+                if callee_node is not None:
+                    written = _callee_text(callee_node, source)
+                    callee = written.split(".")[-1]
+                    arity = sum(child.type == "call_argument" for child in node.named_children)
+                    if "." not in written:
+                        candidates = free_functions.get((callee, arity), [])
+                        if len(candidates) == 1:
+                            add_edge(caller_id, candidates[0], "calls", node)
+                    elif callee:
+                        raw_calls.append({
+                            "caller_nid": caller_id,
+                            "callee": callee,
+                            "is_member_call": True,
+                            "language": "solidity",
+                            "source_file": source_file,
+                            "source_location": f"L{node.start_point[0] + 1}",
+                        })
+            stack.extend(reversed(node.named_children))
+
+    clean_edges = [
+        edge for edge in edges
+        if edge["source"] in seen_ids
+        and (edge["target"] in seen_ids or edge["relation"] == "imports_from")
+    ]
+    return {"nodes": nodes, "edges": clean_edges, "raw_calls": raw_calls}

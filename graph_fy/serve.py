@@ -236,6 +236,12 @@ from graph_fy.serve_traversal import (  # noqa: F401
     find_node_ambiguity,
     _node_arg,
     _resolve_single_node,
+    _ambiguity_message,
+    _is_ambiguity_refusal,
+    _resolve_path_endpoint,
+    _weakest_shortest_path,
+    _path_confidence_line,
+    _confidence_tag,
     _shortest_path_text,
     _filter_blank_stdin,
     _community_header,
@@ -692,7 +698,7 @@ def _build_server(graph_path: str):
         raw = _node_arg(arguments)
         if not raw:
             return "Provide a node label or id (accepted keys: label, node_id, id)."
-        label = raw.lower()
+        label = raw
         nid, err = _resolve_single_node(G, label)
         if err:
             return err
@@ -725,7 +731,7 @@ def _build_server(graph_path: str):
         raw = _node_arg(arguments)
         if not raw:
             return "Provide a node label or id (accepted keys: label, node_id, id)."
-        label = raw.lower()
+        label = raw
         rel_filter = arguments.get("relation_filter", "").lower()
         nid, err = _resolve_single_node(G, label)
         if err:
@@ -740,23 +746,23 @@ def _build_server(graph_path: str):
                 if loc else ""
             )
         for nb in G.successors(nid):
-            d = edge_data(G, nid, nb)
-            rel = d.get("relation", "")
-            if rel_filter and rel_filter not in rel.lower():
-                continue
-            lines.append(
-                f"  --> {sanitize_label(G.nodes[nb].get('label', nb))} "
-                f"[{sanitize_label(str(rel))}] [{sanitize_label(str(d.get('confidence', '')))}]{_edge_at(d)}"
-            )
+            for d in edge_datas(G, nid, nb):
+                rel = d.get("relation", "")
+                if rel_filter and rel_filter not in rel.lower():
+                    continue
+                lines.append(
+                    f"  --> {sanitize_label(G.nodes[nb].get('label', nb))} "
+                    f"[{sanitize_label(str(rel))}] [{sanitize_label(_confidence_tag(d))}]{_edge_at(d)}"
+                )
         for nb in G.predecessors(nid):
-            d = edge_data(G, nb, nid)
-            rel = d.get("relation", "")
-            if rel_filter and rel_filter not in rel.lower():
-                continue
-            lines.append(
-                f"  <-- {sanitize_label(G.nodes[nb].get('label', nb))} "
-                f"[{sanitize_label(str(rel))}] [{sanitize_label(str(d.get('confidence', '')))}]{_edge_at(d)}"
-            )
+            for d in edge_datas(G, nb, nid):
+                rel = d.get("relation", "")
+                if rel_filter and rel_filter not in rel.lower():
+                    continue
+                lines.append(
+                    f"  <-- {sanitize_label(G.nodes[nb].get('label', nb))} "
+                    f"[{sanitize_label(str(rel))}] [{sanitize_label(_confidence_tag(d))}]{_edge_at(d)}"
+                )
         budget = int(arguments.get("token_budget", 2000))
         return _cut_lines_to_budget(
             lines, budget, "Narrow with relation_filter or use get_node for a specific symbol"

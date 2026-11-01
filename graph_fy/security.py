@@ -508,6 +508,36 @@ _AWS_KEY_RE = re.compile(
     r"\b(AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\b"
 )
 
+_SECRET_SHAPE_RE = re.compile(
+    r"(?s:-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----"
+    r"(?:.*?-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|.*))"
+    r"|(?<![A-Za-z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Za-z0-9])"
+    r"|(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{36,}"
+    r"|(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_]{22,}"
+    r"|(?<![A-Za-z0-9])xox[abeoprs]-[A-Za-z0-9-]{10,}"
+    r"|(?<![A-Za-z0-9])[sr]k_(?:live|test)_[A-Za-z0-9]{10,}"
+    r"|(?<![A-Za-z0-9])sk-(?:ant-|proj-)?(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{20,}"
+    r"|(?<![A-Za-z0-9])AIza[0-9A-Za-z_-]{35}"
+    r"|(?<![A-Za-z0-9])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{10,}"
+    r"|(?<=\bBearer )[A-Za-z0-9._~+/=-]{16,}"
+    r"|(?<=://)[^\s/@]*:[^\s?#]*(?=@[^\s@/?#]+)"
+)
+
+REDACTED_MARKER = "[redacted]"
+
+
+def redact_secrets(text: str | None) -> str:
+    """Replace credential-shaped substrings in *text* with ``[redacted]``.
+
+    Applied to free text copied out of source files (docstrings and ``# WHY:``
+    style comments) before it becomes a node label, so a token pasted into a
+    comment does not land in graph.json / graph.html / GRAPH_REPORT.md.
+    """
+    if not text:
+        return "" if text is None else text
+    return _SECRET_SHAPE_RE.sub(REDACTED_MARKER, str(text))
+
+
 _SECRET_PATTERNS: list[tuple[re.Pattern, str]] = [
     (_PEM_KEY_RE, "[redacted]"),
     (_URL_USERINFO_RE, r"\1[redacted]@\3"),
@@ -523,6 +553,7 @@ def redact_credentials(text: str) -> str:
     """Redact API keys, tokens, passwords, and private keys from *text*."""
     if not text:
         return text
+    text = redact_secrets(text)
     for pat, repl in _SECRET_PATTERNS:
         text = pat.sub(repl, text)
     return text

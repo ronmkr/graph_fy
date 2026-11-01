@@ -416,7 +416,8 @@ def _rank_path(source_file: str, root: Path | None) -> str:
     return normalized
 
 
-def _collision_rank(node: dict, root: Path | None = None) -> tuple:
+def _collision_rank(node: dict, root: Path | None = None,
+                    outranked: "frozenset | set" = frozenset()) -> tuple:
     """A total order for choosing the survivor of an ID collision, independent of
     the order the colliding nodes arrive in.
 
@@ -433,8 +434,10 @@ def _collision_rank(node: dict, root: Path | None = None) -> tuple:
     label = node.get("label") or ""
     rank_path = _rank_path(node.get("source_file") or "", root)
     label_penalty = 1 if not label or not any(c.isalnum() for c in label) else 0
+    key = (node.get("id"), rank_path)
     return (
         not _defines_id(node),  # definers (False) sort before references (True)
+        key in outranked and node.get("_origin") != "ast",  # (#4859)
         not bool(node.get("source_file")),  # located nodes (False) beat sourceless stubs (True) (#4492)
         _lifecycle_penalty(rank_path),  # active paths beat archived ones (#2532)
         label_penalty,          # real names beat non-alphanumeric punctuation
@@ -442,6 +445,45 @@ def _collision_rank(node: dict, root: Path | None = None) -> tuple:
         label,                  # lexical tiebreak
         tuple(reversed([s for s in rank_path.split("/") if s and s != "."])),
     )
+
+
+def _full_stem(source_file: str) -> str:
+    """The extension-stripped, slugified full-path stem a file's own IDs start with."""
+    stem = _EXTENSION.sub("", source_file.replace("\\", "/"))
+    return "_".join(s for s in (normalize_id(p) for p in stem.split("/")) if s)
+
+
+def _outranked_by_ast(nodes: list[dict], root: Path | None) -> set[tuple[str, str]]:
+    """``(id, root-relative file)`` of non-AST definers that an AST node from
+    another file also defines, while their own file has no AST definer (#4859).
+
+    The AST node is extracted fact and the other is an inference about it, so the
+    AST node keeps the id. The check is strict on ``_origin == "ast"``, as in the
+    build ghost pass: fresh semantic chunks arrive unstamped. A file that has its
+    own AST definer (#2091 enrichment) is never listed, and an AST node with the
+    same full stem (an ``x.py``/``x.html`` twin, or a slug twin such as
+    ``pkg/service.py`` and ``pkg_service.py``) never counts against it.
+    """
+    ast_defs: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    others: list[tuple[str, str, str]] = []
+    for node in nodes:
+        nid = node.get("id") or ""
+        source_file = node.get("source_file") or ""
+        rank_path = _rank_path(source_file, root)
+        if not nid or not _defines_id(node):
+            continue
+        entry = (rank_path, _full_stem(source_file))
+        if node.get("_origin") == "ast":
+            ast_defs[nid].append(entry)
+        else:
+            others.append((nid, *entry))
+    outranked = set()
+    for nid, rank_path, stem in others:
+        defs = ast_defs.get(nid, [])
+        if (defs and rank_path not in {rp for rp, _ in defs}
+                and any(ast_stem != stem for _, ast_stem in defs)):
+            outranked.add((nid, rank_path))
+    return outranked
 
 
 def _same_source_entity(survivor: dict, duplicate: dict) -> bool:
@@ -605,6 +647,8 @@ def deduplicate_entities(
     except Exception:
         root_resolved = None
 
+    outranked = _outranked_by_ast(nodes, root_resolved)
+
     # Pre-deduplicate: one node per ID. The survivor is the node that *defines* the
     # ID (its source_file is the file the ID encodes), not merely the first seen —
     # otherwise chunk order decides whether an entity keeps its own attributes or a
@@ -620,7 +664,7 @@ def deduplicate_entities(
         incumbent = seen_ids.get(nid)
         if incumbent is None:
             seen_ids[nid] = node
-        elif _collision_rank(node, root_resolved) < _collision_rank(incumbent, root_resolved):
+        elif _collision_rank(node, root_resolved, outranked) < _collision_rank(incumbent, root_resolved, outranked):
             # Smallest-ranked node wins; the min over a total order is independent
             # of the order nodes arrive in, so the survivor no longer depends on
             # chunk ordering (#1851).
@@ -638,7 +682,7 @@ def deduplicate_entities(
         survivor = seen_ids[nid]
         same_source = sorted(
             (l for l in losers if _same_source_entity(survivor, l)),
-            key=lambda l: _collision_rank(l, root_resolved),
+            key=lambda l: _collision_rank(l, root_resolved, outranked),
         )
         for loser in same_source:
             survivor = _merge_missing_attributes(survivor, loser)

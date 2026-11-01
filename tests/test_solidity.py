@@ -53,12 +53,12 @@ def test_solidity_extractor_basic(tmp_path):
     assert "totalSupply()" in nodes
     assert "onlyOwner()" in nodes
     assert "constructor()" in nodes
-    assert "event Transfer" in nodes
+    assert "Transfer" in nodes
 
     edges = [(e["source"], e["relation"], e["target"]) for e in res["edges"]]
     token_nid = nodes["Token"]["id"]
     # Token inherits IERC20
-    assert any(e[0] == token_nid and e[1] == "inherits" and e[2] == "IERC20" for e in edges)
+    assert any(e[0] == token_nid and e[1] == "inherits" and "ierc20" in e[2].lower() for e in edges)
     # constructor uses onlyOwner
     cons_nid = nodes["constructor()"]["id"]
     only_owner_nid = nodes["onlyOwner()"]["id"]
@@ -212,3 +212,33 @@ def test_solidity_cross_file_inheritance(tmp_path):
         e["source"] == child_hello_nid and e["target"] == parent_greet_nid and e["relation"] == "calls"
         for e in edges
     )
+
+
+def test_solidity_using_free_function_set_emits_uses_edges(tmp_path):
+    """`using {freeAdd, freeSub} for uint;` (free functions bound as members, legal since
+    0.8.13) wraps each name in its own `using_alias` child instead of putting
+    it directly under the using_directive the way `using Lib for T;` does.
+    The extractor only looked at direct children, so it saw nothing to read
+    and silently dropped the whole directive -- no edge at all, for either
+    function."""
+    source = tmp_path / "Counter.sol"
+    source.write_text(
+        "pragma solidity ^0.8.13;\n"
+        "function freeAdd(uint a, uint b) pure returns (uint) { return a + b; }\n"
+        "function freeSub(uint a, uint b) pure returns (uint) { return a - b; }\n"
+        "contract Counter {\n"
+        "  using {freeAdd, freeSub} for uint;\n"
+        "  uint public count;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = extract([source], cache_root=tmp_path / "graph_fy_out", parallel=False)
+    labels = {node["id"]: node["label"] for node in result["nodes"]}
+    uses = {
+        (labels.get(edge["source"], edge["source"]), labels.get(edge["target"], edge["target"]))
+        for edge in result["edges"]
+        if edge.get("relation") == "uses"
+    }
+    assert ("Counter", "freeAdd()") in uses
+    assert ("Counter", "freeSub()") in uses

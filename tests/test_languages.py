@@ -2257,6 +2257,67 @@ def test_fortran_capital_F_parses_preprocessed():
     assert any("compute_volume" in l for l in labels)
 
 
+def test_fortran_derived_type_extends_emits_inherits_edge(tmp_path):
+    """`type, extends(base) :: derived` is Fortran's derived-type inheritance
+    syntax. It was never handled — only the bare `type :: name` form was read —
+    so every extends() clause was silently dropped and no inherits edge was
+    ever emitted, unlike every other OOP language extractor in this codebase.
+    """
+    src = tmp_path / "geom.f90"
+    src.write_text(
+        "module geom\n"
+        "  type :: shape\n"
+        "    real :: area\n"
+        "  end type shape\n"
+        "  type, extends(shape) :: circle\n"
+        "    real :: radius\n"
+        "  end type circle\n"
+        "end module geom\n",
+        encoding="utf-8",
+    )
+    r = extract_fortran(src)
+    assert "error" not in r
+    assert ("circle", "shape") in _edge_labels(r, "inherits")
+
+
+def test_fortran_abstract_extends_also_emits_inherits_edge(tmp_path):
+    """`type, abstract, extends(base) :: derived` combines the abstract and
+    extends specifiers; the inherits edge must still be emitted alongside the
+    plain extends() case."""
+    src = tmp_path / "shapes.f90"
+    src.write_text(
+        "module shapes\n"
+        "  type, abstract :: shape\n"
+        "    real :: area\n"
+        "  end type shape\n"
+        "  type, abstract, extends(shape) :: polygon\n"
+        "    integer :: sides\n"
+        "  end type polygon\n"
+        "end module shapes\n",
+        encoding="utf-8",
+    )
+    r = extract_fortran(src)
+    assert "error" not in r
+    assert ("polygon", "shape") in _edge_labels(r, "inherits")
+
+
+def test_fortran_plain_derived_type_has_no_inherits_edge(tmp_path):
+    """Control: a derived type with no extends() clause must not gain a
+    spurious inherits edge from this fix."""
+    src = tmp_path / "plain.f90"
+    src.write_text(
+        "module plain\n"
+        "  type :: point\n"
+        "    real :: x, y\n"
+        "  end type point\n"
+        "end module plain\n",
+        encoding="utf-8",
+    )
+    r = extract_fortran(src)
+    assert "error" not in r
+    assert _edge_labels(r, "inherits") == set()
+
+
 def test_fortran_subroutine_call_to_another_module_is_sourceless(tmp_path):
     """A `call` to a subroutine implemented in another module resolves to a
     sourceless stub the corpus rewire can collapse, never a dangling edge.
@@ -3640,6 +3701,29 @@ def test_systemverilog_no_dangling_edges():
         assert e["target"] in node_ids, f"dangling target: {e}"
 
 
+def test_systemverilog_constructor_method_gets_a_node():
+    """A `new` constructor has no return type, but the function-header regex
+    always required one (`function TYPE NAME(...)`), so `function new(...)` -
+    the single most common class method in SystemVerilog - matched nothing at
+    all: no node, no `method` edge, and its parameter types vanished too.
+    """
+    r = extract_verilog(FIXTURES / "sample.sv")
+    assert ("DataProcessor", "new") in _edge_labels(r, "method")
+    assert ("new", "Config") in _edge_labels(r, "references", "parameter_type")
+
+
+def test_systemverilog_explicit_return_type_function_still_works():
+    """Control: a function with an explicit return type (the adjacent, already
+    working case) must still separate its return type from its name correctly
+    after the header regex's return type became optional."""
+    r = extract_verilog(FIXTURES / "sample.sv")
+    assert ("DataProcessor", "build") in _edge_labels(r, "method")
+    assert ("build", "Result") in _edge_labels(r, "references", "return_type")
+    assert ("build", "Payload") in _edge_labels(r, "references", "parameter_type")
+    # The return type must not be swallowed as part of the method name.
+    assert "Resultbuild" not in _labels(r)
+
+
 # ── Header/impl class merge + .h routing (#1547 C++, #1556 ObjC/Swift) ─────────
 from graph_fy.extract import (
     extract as _extract_corpus,
@@ -3705,9 +3789,9 @@ def test_cpp_paired_method_decl_and_def_are_one_node():
         e["target"] for e in r["edges"]
         if e["source"] == foo and e["relation"] in ("method", "defines", "contains")
     }
-    bar_nodes = [n for n in r["nodes"] if n["id"] in method_targets and n["label"] in ("bar", "Foo::bar()")]
+    bar_nodes = [n for n in r["nodes"] if n["id"] in method_targets and n["label"] in (".bar()", "Foo::bar()")]
     # There must be exactly one node representing bar (decl and def merged).
-    bar_ids = {n["id"] for n in r["nodes"] if n["label"] in ("bar", "Foo::bar()")}
+    bar_ids = {n["id"] for n in r["nodes"] if n["label"] in (".bar()", "Foo::bar()")}
     assert len(bar_ids) == 1, f"bar decl/def should be one node, got {bar_ids}"
     assert bar_nodes, "the merged bar node should be a member of Foo"
 
@@ -3717,7 +3801,7 @@ def test_cpp_paired_merged_node_records_definition_site():
     DECLARATION. The survivor must still carry where the symbol is implemented,
     or the definition site is lost with the dropped impl node."""
     r = _corpus("cpp_paired/Foo.h", "cpp_paired/Foo.cpp", "cpp_paired/Main.cpp")
-    bars = [n for n in r["nodes"] if n["label"] in ("bar", "Foo::bar()")]
+    bars = [n for n in r["nodes"] if n["label"] in (".bar()", "Foo::bar()")]
     assert len(bars) == 1, f"bar decl/def should be one node, got {bars}"
     bar = bars[0]
     assert str(bar["source_file"]).endswith("Foo.h"), bar
@@ -3939,6 +4023,41 @@ def test_cl_crossfile_superclass_inherits_edge_survives(tmp_path):
     assert ("service-dog", "base-animal") in inherits
     base = next(n for n in r["nodes"] if n["label"] == "base-animal")
     assert base["source_file"] == "", "cross-file superclass must be a sourceless stub"
+
+
+@_needs_commonlisp
+def test_cl_forward_referenced_superclass_binds_to_local_node(tmp_path):
+    """A superclass listed before its own defclass form, in the same file,
+    must still bind to that file's local node instead of a sourceless stub.
+
+    ensure_class_ref used to check only seen_ids, which is populated in file
+    order as _walk_forms reaches each form. A subclass appearing above its
+    parent asked before the parent's node existed, so it got the external-stub
+    treatment meant for a genuinely different file, splitting "parent" into
+    two unconnected nodes in the same file.
+    """
+    f = tmp_path / "fwd.lisp"
+    f.write_text(
+        "(defclass child (parent) ())\n"
+        "(defclass parent () ())\n"
+    )
+    r = extract_commonlisp(f)
+    assert "error" not in r
+    parent_nodes = [n for n in r["nodes"] if n["label"] == "parent"]
+    assert len(parent_nodes) == 1, "forward-referenced parent must not split into two nodes"
+    assert parent_nodes[0]["source_file"] == str(f)
+
+    id_to_node = {n["id"]: n for n in r["nodes"]}
+    inherits = {
+        (id_to_node[e["source"]]["label"], id_to_node[e["target"]]["label"])
+        for e in r["edges"]
+        if e["relation"] == "inherits"
+        and e["source"] in id_to_node and e["target"] in id_to_node
+    }
+    assert ("child", "parent") in inherits
+    assert id_to_node[
+        next(e["target"] for e in r["edges"] if e["relation"] == "inherits")
+    ]["source_file"] == str(f), "inherits edge must target the local parent node, not a stub"
 
 
 @_needs_commonlisp

@@ -99,6 +99,7 @@ from graph_fy.llm_providers import (
     _call_bedrock,
     _call_claude,
     _call_claude_cli,
+    _claude_prompt_cache_enabled,
     _call_openai_compat,
     _claude_cli_available,
     _claude_cli_envelope,

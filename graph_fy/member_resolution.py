@@ -8,6 +8,7 @@ from typing import Any
 
 from graph_fy.extractors.base import _LANGUAGE_BUILTIN_GLOBALS, _make_id
 from graph_fy.extractors.csharp import CsharpNameResolver
+from graph_fy.extractors.node_merging import _lang_family
 from graph_fy.extractors.resolution import _is_type_like_definition
 from graph_fy.paths import disambiguate_ambiguous_candidates
 
@@ -343,13 +344,39 @@ def _resolve_python_member_calls(
         return _key(stem or n.get("label", ""))
 
     existing_pairs = {(e.get("source"), e.get("target")) for e in all_edges}
+    call_like_pairs = {
+        (e.get("source"), e.get("target")) for e in all_edges
+        if e.get("relation") in ("calls", "indirect_call")
+    }
 
     def _emit_call(caller: str, target_nid: "str | None", rc: dict) -> None:
-        if not target_nid or target_nid == caller or (caller, target_nid) in existing_pairs:
+        if not target_nid or target_nid == caller:
             return
         target_file = node_by_id.get(target_nid, {}).get("source_file")
         if target_file and not _is_python_file(target_file):
             return
+        if rc.get("indirect"):
+            if (caller, target_nid) in call_like_pairs:
+                return
+            if not node_by_id.get(target_nid, {}).get("_callable") or node_by_id.get(target_nid, {}).get("_callable_class"):
+                return
+            call_like_pairs.add((caller, target_nid))
+            existing_pairs.add((caller, target_nid))
+            all_edges.append({
+                "source": caller,
+                "target": target_nid,
+                "relation": "indirect_call",
+                "context": rc.get("context", "collection"),
+                "confidence": "INFERRED",
+                "confidence_score": 0.85,
+                "source_file": rc.get("source_file", ""),
+                "source_location": rc.get("source_location"),
+                "weight": 1.0,
+            })
+            return
+        if (caller, target_nid) in existing_pairs:
+            return
+        call_like_pairs.add((caller, target_nid))
         existing_pairs.add((caller, target_nid))
         # EXTRACTED: a qualified call (`ClassName.method()` or `module.func()`) is
         # an explicit, unambiguous static reference resolved to exactly one
@@ -424,7 +451,8 @@ def _resolve_python_member_calls(
             curr = curr.parent
         return None
 
-    for rc in all_raw_calls:
+    raw_calls_to_process = [r for r in all_raw_calls if not r.get("indirect")] + [r for r in all_raw_calls if r.get("indirect")]
+    for rc in raw_calls_to_process:
         if not rc.get("is_member_call"):
             continue
         if not _is_python_file(rc.get("source_file")):
@@ -435,6 +463,8 @@ def _resolve_python_member_calls(
         if not receiver or not callee or not caller:
             continue
         if receiver[:1].isupper():
+            if rc.get("indirect"):
+                continue
             # Class arm (#1446): a capitalized receiver is a class reference; an
             # instance (`self`, `obj`) never collides with a same-spelled class.
             class_nids = class_def_nids.get(_key(receiver), [])
@@ -442,6 +472,8 @@ def _resolve_python_member_calls(
                 continue
             _emit_call(caller, _method_of(class_nids[0], callee), rc)
         elif rc.get("_python_fixture_param"):
+            if rc.get("indirect"):
+                continue
             # Fixture arm (#45, #4332, #4333): a member call on a pytest fixture parameter
             # is typed from the fixture's returned class according to pytest scoping.
             caller_sf = rc.get("source_file", "")
@@ -493,7 +525,7 @@ def _resolve_python_member_calls(
             # receiver also matches the local alias bound on that import edge
             # (#2082), so an aliased import resolves the same as the bare name.
             rkey = _key(receiver)
-            caller_file = file_of_node.get(caller)
+            caller_file = file_of_node.get(caller) or caller
             file_aliases = import_alias_by_filenode.get(caller_file, {})
             mods = [t for t in imported_by_filenode.get(caller_file, ())
                     if t in contains_children
@@ -750,6 +782,12 @@ def _resolve_cpp_member_calls(
             enclosing_type.setdefault(tgt, src)
             method_index[(src, _key(tnode.get("label", "")))] = tgt
 
+    qualified_method_nids: dict[str, list[str]] = {}
+    for n in all_nodes:
+        label = str(n.get("label", ""))
+        if n.get("source_file") and label.endswith("()") and "::" in label:
+            qualified_method_nids.setdefault(label, []).append(n["id"])
+
     all_raw_calls: list[dict] = []
     for result in per_file:
         all_raw_calls.extend(result.get("raw_calls", []))
@@ -770,6 +808,7 @@ def _resolve_cpp_member_calls(
         if rc.get("lang") != "cpp":
             continue
         # Determine the receiver's type and the resulting confidence.
+        qualified_fallback_label: str | None = None
         if receiver == "this":
             # this->bar(): receiver is the caller's own enclosing class.
             type_nid = enclosing_type.get(caller)
@@ -778,6 +817,7 @@ def _resolve_cpp_member_calls(
             type_qualified = True
         elif receiver[:1].isupper():
             # Foo::bar(): the type is named explicitly in source.
+            qualified_fallback_label = f"{receiver}::{callee}()"
             type_defs = type_def_nids.get(_key(receiver), [])
             if not type_defs:
                 # Declared nowhere here, which in a multi-repo setup usually means
@@ -809,6 +849,10 @@ def _resolve_cpp_member_calls(
             type_nid = type_defs[0]
             type_qualified = False
         method_nid = method_index.get((type_nid, _key(callee)))
+        if method_nid is None and qualified_fallback_label is not None:
+            candidates = qualified_method_nids.get(qualified_fallback_label, [])
+            if len(candidates) == 1:
+                method_nid = candidates[0]
         target = method_nid or type_nid
         relation = "calls" if method_nid else "references"
         if target == caller or (caller, target) in existing_pairs:
@@ -1690,3 +1734,294 @@ def _resolve_kotlin_qualified_calls(
 # tail registry would rewrite the targets after promotion already read them.
 # It still uses the registry's LanguageResolver/driver for the suffix gate and
 # failure isolation.
+
+
+_JVM_NAME_SUFFIXES = frozenset({".java", ".kt", ".kts"})
+_JAVA_IMPORT_RE = re.compile(
+    r"(?m)^\s*import\s+(?:static\s+)?([\w.]+)\s*;"
+)
+
+
+def _jvm_package_name(path: Path, result: dict) -> tuple[str, str] | None:
+    """Return (source_file, package) for a JVM file, or None."""
+    suffix = Path(path).suffix.lower()
+    if suffix in (".kt", ".kts"):
+        source_file = next(
+            (n.get("source_file") for n in result.get("nodes", []) if n.get("source_file")),
+            str(path),
+        )
+        return str(source_file), str(result.get("kotlin_package") or "")
+    if suffix != ".java":
+        return None
+    source_file = next(
+        (n.get("source_file") for n in result.get("nodes", []) if n.get("source_file")),
+        str(path),
+    )
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        text = ""
+    match = re.search(r"(?m)^\s*package\s+([\w.]+)\s*;", text)
+    return str(source_file), match.group(1) if match else ""
+
+
+def _jvm_imports_by_file(path: Path, result: dict) -> dict[str, str]:
+    """simple name -> written FQN, for imports in one Java/Kotlin file."""
+    imports: dict[str, str] = {}
+    suffix = Path(path).suffix.lower()
+    if suffix in (".kt", ".kts"):
+        for edge in result.get("edges", []):
+            if edge.get("relation") != "imports":
+                continue
+            md = edge.get("metadata") or {}
+            fqn = md.get("target_fqn")
+            if fqn:
+                imports[str(fqn).split(".")[-1]] = str(fqn)
+        return imports
+    if suffix != ".java":
+        return imports
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return imports
+    for match in _JAVA_IMPORT_RE.finditer(text):
+        body = match.group(1).strip()
+        if body.endswith(".*") or "." not in body:
+            continue
+        simple = body.split(".")[-1]
+        if simple and simple[0].isupper():
+            imports[simple] = body
+    return imports
+
+
+def _resolve_jvm_references(
+    per_file: list[dict],
+    paths: list[Path],
+    all_nodes: list[dict],
+    all_edges: list[dict],
+) -> None:
+    """Resolve Java/Kotlin type references through one JVM-wide symbol index."""
+    by_fqn: dict[str, list[str]] = {}
+    pkg_by_file: dict[str, str] = {}
+    imports_by_file: dict[str, dict[str, str]] = {}
+
+    for path, result in zip(paths, per_file):
+        package_entry = _jvm_package_name(path, result)
+        if package_entry is None:
+            continue
+        source_file, package = package_entry
+        pkg_by_file[source_file] = package
+        imports_by_file[source_file] = _jvm_imports_by_file(path, result)
+        for node in result.get("nodes", []):
+            node_source = str(node.get("source_file") or "")
+            if node_source != source_file:
+                continue
+            if not _is_type_like_definition(node):
+                continue
+            label = str(node.get("label", "")).strip()
+            if not label:
+                continue
+            fqn = f"{package}.{label}" if package else label
+            by_fqn.setdefault(fqn, []).append(str(node["id"]))
+
+    if not by_fqn:
+        return
+
+    node_by_id = {str(n.get("id")): n for n in all_nodes if n.get("id")}
+    repoint = {"imports", "inherits", "extends", "implements", "references"}
+    for edge in all_edges:
+        if edge.get("relation") not in repoint:
+            continue
+        source_file = str(edge.get("source_file") or "")
+        if Path(source_file).suffix.lower() not in _JVM_NAME_SUFFIXES:
+            continue
+        target = str(edge.get("target") or "")
+        if not target:
+            continue
+        target_node = node_by_id.get(target) or {}
+        fqn = str((edge.get("metadata") or {}).get("target_fqn") or "")
+        simple = ""
+        if not fqn:
+            label = str(target_node.get("label") or "")
+            if target_node and not target_node.get("source_file") and "." in label:
+                fqn = label
+            elif label and not target_node.get("source_file"):
+                simple = label
+            else:
+                for name in imports_by_file.get(source_file, {}):
+                    if _make_id(name) == target:
+                        simple = name
+                        break
+            if not fqn and simple:
+                fqn = imports_by_file.get(source_file, {}).get(simple, "")
+                if not fqn:
+                    package = pkg_by_file.get(source_file, "")
+                    fqn = f"{package}.{simple}" if package else simple
+        if not fqn:
+            continue
+        candidates = by_fqn.get(fqn, [])
+        if len(candidates) != 1:
+            continue
+        candidate = candidates[0]
+        if candidate == target:
+            continue
+        if edge.get("relation") == "imports" and not target_node:
+            resolved = dict(edge)
+            resolved["target"] = candidate
+            all_edges.append(resolved)
+        else:
+            edge["target"] = candidate
+
+
+def _resolve_kotlin_member_calls(
+    per_file: list[dict],
+    all_nodes: list[dict],
+    all_edges: list[dict],
+) -> None:
+    """Resolve Kotlin object/class-qualified member calls across files (#1698)."""
+    raw = [
+        rc
+        for result in per_file
+        for rc in result.get("raw_calls", [])
+        if rc.get("lang") == "kotlin" and rc.get("kotlin_object_receiver")
+        and rc.get("callee") and rc.get("caller_nid")
+    ]
+    if not raw:
+        return
+
+    node_by_id: dict[str, dict] = {n.get("id"): n for n in all_nodes}
+    methods_by_type: dict[str, list[str]] = {}
+    for e in all_edges:
+        if e.get("relation") == "method":
+            methods_by_type.setdefault(e.get("source"), []).append(e.get("target"))
+
+    types_by_name: dict[str, list[str]] = {}
+    for n in all_nodes:
+        if not n.get("_callable_class"):
+            continue
+        sf = str(n.get("source_file") or "")
+        if _lang_family(sf) != "jvm":
+            continue
+        name = str(n.get("label", ""))
+        if name:
+            types_by_name.setdefault(name, []).append(n["id"])
+
+    existing_pairs = {(e.get("source"), e.get("target")) for e in all_edges}
+    for rc in raw:
+        receiver = rc["kotlin_object_receiver"]
+        callee = rc["callee"]
+        caller = rc["caller_nid"]
+        type_nids = types_by_name.get(receiver, [])
+        if not type_nids:
+            if receiver not in _LANGUAGE_BUILTIN_GLOBALS:
+                _park_unresolved_member_call(
+                    node_by_id.get(caller), callee, receiver, "kotlin", rc)
+            continue
+        if len(type_nids) != 1:
+            continue
+        wanted = f".{callee}"
+        candidates = [
+            m for m in methods_by_type.get(type_nids[0], [])
+            if str(node_by_id.get(m, {}).get("label", "")).strip("()") == wanted
+        ]
+        if len(candidates) != 1:
+            continue
+        tgt = candidates[0]
+        if tgt == caller or (caller, tgt) in existing_pairs:
+            continue
+        existing_pairs.add((caller, tgt))
+        all_edges.append({
+            "source": caller,
+            "target": tgt,
+            "relation": "calls",
+            "context": "call",
+            "confidence": "EXTRACTED",
+            "confidence_score": 1.0,
+            "source_file": rc.get("source_file", ""),
+            "source_location": rc.get("source_location"),
+            "weight": 1.0,
+        })
+
+
+def _resolve_go_member_calls(
+    per_file: list[dict],
+    all_nodes: list[dict],
+    all_edges: list[dict],
+) -> None:
+    """Resolve Go member calls (``g.Greet()``) through the receiver's declared type."""
+    raw = [
+        rc
+        for result in per_file
+        for rc in result.get("raw_calls", [])
+        if rc.get("language") == "go" and rc.get("is_member_call")
+        and rc.get("member_receiver") and rc.get("callee") and rc.get("caller_nid")
+    ]
+    if not raw:
+        return
+    type_table_by_file: dict[str, dict[str, str]] = {}
+    for result in per_file:
+        tt = result.get("go_type_table")
+        if tt and tt.get("path"):
+            type_table_by_file[tt["path"]] = tt.get("table", {})
+
+    def _key(label: object) -> str:
+        return str(label or "").strip().removeprefix(".").removesuffix("()")
+
+    type_def_nids: dict[str, list[str]] = {}
+    node_by_id: dict[str, dict] = {}
+    fields_by_type: dict[str, list[dict[str, str]]] = {}
+    for n in all_nodes:
+        node_by_id[n.get("id")] = n
+        if n.get("_callable_class") and _lang_family(n.get("source_file")) == "go":
+            type_def_nids.setdefault(_key(n.get("label", "")), []).append(n["id"])
+        for struct_nid, fields in (n.get("_go_fields") or {}).items():
+            fields_by_type.setdefault(struct_nid, []).append(fields)
+
+    method_index: dict[tuple[str, str], list[str]] = {}
+    for e in all_edges:
+        if e.get("relation") != "method":
+            continue
+        tnode = node_by_id.get(e.get("target"))
+        if tnode is not None:
+            method_index.setdefault(
+                (e.get("source"), _key(tnode.get("label", ""))), []).append(e["target"])
+
+    existing_pairs = {(e.get("source"), e.get("target")) for e in all_edges}
+    for rc in raw:
+        receiver, callee, caller = rc["member_receiver"], rc["callee"], rc["caller_nid"]
+        type_name = rc.get("receiver_type") or type_table_by_file.get(
+            rc.get("source_file", ""), {}).get(receiver)
+        if not type_name and rc.get("field_owner"):
+            owner_defs = type_def_nids.get(_key(rc["field_owner"]), [])
+            declared = fields_by_type.get(owner_defs[0], []) if len(owner_defs) == 1 else []
+            if len(declared) == 1:
+                type_name = declared[0].get(receiver)
+        if not type_name or type_name in _LANGUAGE_BUILTIN_GLOBALS:
+            continue
+        type_defs = type_def_nids.get(_key(type_name), [])
+        if not type_defs:
+            if not rc.get("indirect"):
+                _park_unresolved_member_call(node_by_id.get(caller), callee, type_name, "go", rc)
+            continue
+        if len(type_defs) != 1:
+            continue
+        targets = method_index.get((type_defs[0], _key(callee)), [])
+        if len(targets) != 1:
+            continue
+        target = targets[0]
+        if target == caller or (caller, target) in existing_pairs:
+            continue
+        existing_pairs.add((caller, target))
+        indirect = bool(rc.get("indirect"))
+        all_edges.append({
+            "source": caller,
+            "target": target,
+            "relation": "indirect_call" if indirect else "calls",
+            "context": rc.get("context", "argument") if indirect else "call",
+            "confidence": "INFERRED",
+            "confidence_score": 0.85,
+            "source_file": rc.get("source_file", ""),
+            "source_location": rc.get("source_location"),
+            "weight": 1.0,
+        })
+

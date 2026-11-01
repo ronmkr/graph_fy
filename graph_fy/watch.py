@@ -289,17 +289,52 @@ def _reconcile_existing_graph(
         # until a semantic re-extraction supersedes them. Same provenance rule
         # the node reconciliation above applies via _origin (#1865). Deletion
         # eviction stays provenance-blind.
+        def _edge_evicted(edge: dict) -> bool:
+            return not source_paths.is_evicted(edge, excluded_alive_files) and (
+                source_paths.is_evicted(edge, edge_evicted_source_identities)
+                or (
+                    _is_ast_tier(edge)
+                    and source_paths.is_evicted(edge, rebuilt_source_identities)
+                )
+            )
+
+        existing_edges = existing.get("links", existing.get("edges", []))
         preserved_edges = [
             edge
-            for edge in existing.get("links", existing.get("edges", []))
+            for edge in existing_edges
             if edge.get("source") in all_ids
             and edge.get("target") in all_ids
-            and not source_paths.is_evicted(edge, edge_evicted_source_identities)
-            and not (
-                _is_ast_tier(edge)
-                and source_paths.is_evicted(edge, rebuilt_source_identities)
-            )
+            and not _edge_evicted(edge)
         ]
+        # `reverse_import` stands for the target file's import back, which the
+        # undirected build dropped in favour of this edge (#4839). That import
+        # is the target file's, so it goes when an edge from that file would:
+        # clear the stamp then (re-extracting the file stamps it again), and
+        # move it onto the fresh edge when only this edge's own file was
+        # re-extracted.
+        node_files = {
+            n.get("id"): n.get("source_file")
+            for n in existing.get("nodes", []) if isinstance(n, dict)
+        }
+
+        def _reverse_leg_evicted(edge: dict) -> bool:
+            return _edge_evicted({**edge, "source_file": node_files.get(edge.get("target"))})
+
+        preserved_edges = [
+            {k: v for k, v in edge.items() if k != "reverse_import"}
+            if edge.get("reverse_import") and _reverse_leg_evicted(edge) else edge
+            for edge in preserved_edges
+        ]
+        carried_reverse = {
+            (edge.get("source"), edge.get("target"), edge.get("relation"))
+            for edge in existing_edges
+            if edge.get("reverse_import")
+            and _edge_evicted(edge)
+            and not _reverse_leg_evicted(edge)
+        }
+        for edge in result["edges"]:
+            if (edge.get("source"), edge.get("target"), edge.get("relation")) in carried_reverse:
+                edge["reverse_import"] = True
 
         preserved_edges = _reconcile_markdown_links(
             result,
@@ -827,7 +862,7 @@ def _rebuild_code(
                     # #2438: the persisted callability markers are the only
                     # thing that lets an unchanged target pass the
                     # indirect_call guard — never re-derived from the label.
-                    for marker in ("_callable", "_callable_class"):
+                    for marker in ("_callable", "_callable_class", "_go_fields", "_elixir_module"):
                         if node.get(marker):
                             ctx_node[marker] = node[marker]
                     metadata = node.get("metadata")
@@ -1010,17 +1045,23 @@ def _rebuild_code(
                 dedupe_edges as _dedupe_edges,
                 dedupe_nodes as _dedupe_nodes,
                 disambiguate_file_labels_in_nodes as _disamb_labels,
+                qualify_csharp_method_labels_in_nodes as _qualify_cs_methods,
+                has_parallel_links as _has_parallel_links,
             )
             raw_nodes = _dedupe_nodes(result.get("nodes", []))
             _disamb_labels(raw_nodes)
+            _qualify_cs_methods(raw_nodes, result.get("edges", []))
+            _directed = bool((existing_graph_data or {}).get("directed", False))
+            raw_links = _dedupe_edges(result.get("edges", []))
             candidate_graph_data = {
                 **{k: v for k, v in result.items() if k not in ("edges", "nodes")},
                 "nodes": raw_nodes,
-                "links": _dedupe_edges(result.get("edges", [])),
+                "links": raw_links,
                 # Inherit the existing graph's directed flag (#2342) so
                 # `graph_fy update --no-cluster` can't silently drop it -
                 # `result` (the raw merged extraction) never carries one.
-                "directed": bool((existing_graph_data or {}).get("directed", False)),
+                "directed": _directed,
+                "multigraph": _has_parallel_links(raw_links, directed=_directed),
             }
             candidate_graph_text = _json_text(candidate_graph_data)
             same_graph = False
@@ -1522,6 +1563,8 @@ def patch_graph_in_memory(
             "type": attrs.get("type"),
             **({"_callable": attrs["_callable"]} if attrs.get("_callable") else {}),
             **({"_callable_class": attrs["_callable_class"]} if attrs.get("_callable_class") else {}),
+            **({"_go_fields": attrs["_go_fields"]} if attrs.get("_go_fields") else {}),
+            **({"_elixir_module": attrs["_elixir_module"]} if attrs.get("_elixir_module") else {}),
         }
         for nid, attrs in G.nodes(data=True)
         if attrs.get("_origin", "ast") == "ast" and attrs.get("source_file")

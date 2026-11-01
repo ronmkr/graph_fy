@@ -12,7 +12,12 @@ def cmd_affected(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> 
         print("Usage: graph_fy affected \"<node-or-label>\" [--relation R] [--depth N] [--graph path]", file=sys.stderr)
         return 1
 
-    from graph_fy.affected import DEFAULT_AFFECTED_RELATIONS, format_affected, load_graph
+    from graph_fy.affected import (
+        DEFAULT_AFFECTED_RELATIONS,
+        format_affected,
+        load_graph,
+        resolve_seed_outcome,
+    )
 
     query = argv[2]
     graph_path = default_graph_path_fn()
@@ -72,6 +77,14 @@ def cmd_affected(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> 
 
     from graph_fy.paths import graph_fy_OUT_NAME
     graph_root = gp.parent.parent if gp.parent.name == graph_fy_OUT_NAME else gp.parent
+    seed, rivals = resolve_seed_outcome(graph, query, graph_root)
+    if seed is None:
+        if rivals:
+            from graph_fy.serve import _ambiguity_message
+            print(_ambiguity_message(graph, query, rivals), file=sys.stderr)
+            return 3
+        print(f"No unique node match for {query}", file=sys.stderr)
+        return 4
     print(
         format_affected(
             graph,
@@ -79,6 +92,7 @@ def cmd_affected(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> 
             relations=relations or DEFAULT_AFFECTED_RELATIONS,
             depth=depth,
             root=graph_root,
+            seed=seed,
         )
     )
     return 0

@@ -57,6 +57,7 @@ from graph_fy.extractors.ocaml import extract_ocaml  # noqa: F401
 from graph_fy.extractors.pascal_forms import extract_delphi_form, extract_lazarus_form  # noqa: F401
 from graph_fy.extractors.powershell import extract_powershell, extract_powershell_manifest  # noqa: F401
 from graph_fy.extractors.razor import extract_razor  # noqa: F401
+from graph_fy.extractors.r import extract_r, resolve_r_sourced_calls  # noqa: F401
 from graph_fy.extractors.robot import extract_robot  # noqa: F401
 from graph_fy.extractors.rust import extract_rust  # noqa: F401
 from graph_fy.extractors.sln import extract_sln  # noqa: F401
@@ -372,6 +373,9 @@ from graph_fy.member_resolution import (
     _resolve_kotlin_import_targets,
     _resolve_csharp_qualified_calls,
     _resolve_kotlin_qualified_calls,
+    _resolve_jvm_references,
+    _resolve_kotlin_member_calls,
+    _resolve_go_member_calls,
 )
 from graph_fy.extractors.solidity import (
     extract_solidity,
@@ -451,6 +455,23 @@ register_language_resolver(
     LanguageResolver(
         "kotlin_qualified_calls", frozenset({".kt", ".kts"}), _resolve_kotlin_qualified_calls
     )
+)
+# Kotlin object/class-qualified member calls resolved across files (#1698):
+# `Receiver.method()` where the receiver's object/class is declared in another
+# file. Same god-node guard as kotlin_qualified_calls; runs in the tail registry.
+register_language_resolver(
+    LanguageResolver(
+        "kotlin_member_calls", frozenset({".kt", ".kts"}), _resolve_kotlin_member_calls
+    )
+)
+# Go receiver-typed member-call resolution: `g.Greet()` where the method is declared in
+# another file. The shared pass skips member calls, so these had no edge unless the bare
+# method name happened to match a symbol in the caller's own file.
+register_language_resolver(
+    LanguageResolver("go_member_calls", frozenset({".go"}), _resolve_go_member_calls)
+)
+register_language_resolver(
+    LanguageResolver("r_sourced_calls", frozenset({".r", ".R"}), resolve_r_sourced_calls)
 )
 # C# qualified construction (#2997): `new A.B.Cache()` arrives as the bare name,
 # so a colliding `Cache` elsewhere makes it ambiguous. Runs in the tail registry
@@ -654,6 +675,8 @@ _DISPATCH: dict[str, Any] = {
     ".xaml": extract_xaml,
     ".razor": extract_razor,
     ".cshtml": extract_razor,
+    ".r": extract_r,
+    ".R": extract_r,
     ".robot": extract_robot,
     ".resource": extract_robot,
     ".cls": extract_apex,
@@ -1143,6 +1166,9 @@ def extract(
 ) -> dict:
     """Extract AST nodes and edges from a list of code files via a 4-phase pipeline."""
     paths = [Path(p) for p in paths]
+    if resolution_context_nodes:
+        from graph_fy.extractors.csharp import bare_csharp_method_labels_in_nodes
+        resolution_context_nodes = bare_csharp_method_labels_in_nodes(resolution_context_nodes)
     anchor_root = Path(root) if root is not None else None
     _check_tree_sitter_version()
     _raise_recursion_limit()

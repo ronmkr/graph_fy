@@ -157,3 +157,52 @@ def _resolve_go_type_references(
         node for node in all_nodes
         if node.get("id") not in repointed_from or node.get("id") in referenced
     ]
+
+
+def _merge_go_package_types(
+    all_nodes: list[dict],
+    all_edges: list[dict],
+) -> None:
+    """Merge a Go package's type declared in one file with the copies minted by the
+    other files that declare methods on it into ONE node (#3399)."""
+    by_id: dict[str, list[dict]] = {}
+    for n in all_nodes:
+        nid = n.get("id")
+        label = str(n.get("label", ""))
+        if not isinstance(nid, str) or not nid or n.get("file_type") != "code":
+            continue
+        # A Go type name holds neither character, while every other label the extractor
+        # mints does: `Run()`, `.Close()`, and the file node's own `a.go`.
+        if not label or "." in label or "(" in label:
+            continue
+        if Path(str(n.get("source_file", ""))).suffix.lower() != ".go":
+            continue
+        by_id.setdefault(nid, []).append(n)
+
+    declaring_files: dict[str, set[str]] = {}
+    for e in all_edges:
+        if e.get("relation") == "contains":
+            declaring_files.setdefault(str(e.get("target", "")), set()).add(
+                str(e.get("source_file", "")))
+
+    drop_objs: set[int] = set()
+    for nid, group in by_id.items():
+        if len(group) < 2:
+            continue
+        files = [Path(str(n.get("source_file", ""))) for n in group]
+        if len({f.parent for f in files}) != 1:
+            continue
+        if any(f.name.endswith("_test.go") for f in files):
+            continue
+        # A type whose declaring file is outside the corpus leaves the whole group
+        # method-only; one node is still the answer, so fold on the lowest path.
+        declared = declaring_files.get(nid, set())
+        candidates = [n for n in group if str(n.get("source_file", "")) in declared] or group
+        keeper = min(candidates, key=lambda n: (str(n.get("source_file", "")),
+                                                str(n.get("source_location", ""))))
+        for node in group:
+            if node is not keeper:
+                drop_objs.add(id(node))
+
+    if drop_objs:
+        all_nodes[:] = [n for n in all_nodes if id(n) not in drop_objs]

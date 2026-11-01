@@ -763,7 +763,9 @@ def _resolve_js_module_path(raw: str | Path, start_dir: Path | None = None) -> P
     if start_dir is None:
         return _resolve_js_import_path(Path(raw))
     if raw.startswith("."):
-        return _resolve_js_import_path(start_dir / raw)
+        # Strip ?query / #fragment before resolving, as bundlers do (#4860).
+        specifier = raw.split("#", 1)[0].split("?", 1)[0]
+        return _resolve_js_import_path(start_dir / specifier)
 
     aliases = _load_tsconfig_aliases(start_dir)
     hit = _resolve_tsconfig_alias(raw, aliases,

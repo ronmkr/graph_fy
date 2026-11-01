@@ -97,23 +97,32 @@ def cmd_trace(
         G = json_graph.node_link_graph(_raw, edges="links")
     except TypeError:
         G = json_graph.node_link_graph(_raw)
-    src_scored = _score_nodes(G, [t.lower() for t in source_label.split()])
-    tgt_scored = _score_nodes(G, [t.lower() for t in target_label.split()])
-    if not src_scored:
-        print(f"No node matching '{source_label}' found.", file=sys.stderr)
-        return 1
-    if not tgt_scored:
-        print(f"No node matching '{target_label}' found.", file=sys.stderr)
-        return 1
-    src_nid = _pick_scored_endpoint(G, src_scored, source_label)
-    tgt_nid = _pick_scored_endpoint(G, tgt_scored, target_label)
+    from graph_fy.build import edge_datas, edge_evidence
+    from graph_fy.cli import EXIT_AMBIGUOUS, EXIT_NOT_FOUND
+    from graph_fy.serve import (
+        _confidence_tag,
+        _is_ambiguity_refusal,
+        _path_confidence_line,
+        _resolve_path_endpoint,
+        _weakest_shortest_path,
+    )
+
+    src_nid, src_scored, src_err = _resolve_path_endpoint(G, source_label)
+    tgt_nid, tgt_scored, tgt_err = _resolve_path_endpoint(G, target_label)
+    for _label, _nid, _err in (
+        (source_label, src_nid, src_err),
+        (target_label, tgt_nid, tgt_err),
+    ):
+        if _err or _nid is None:
+            print(_err or f"No node matching '{_label}' found.", file=sys.stderr)
+            sys.exit(EXIT_AMBIGUOUS if _is_ambiguity_refusal(_err) else EXIT_NOT_FOUND)
     if src_nid == tgt_nid:
         print(
             f"'{source_label}' and '{target_label}' both resolved to the same "
             f"node '{src_nid}'. Use a more specific label or the exact node ID.",
             file=sys.stderr,
         )
-        return 1
+        sys.exit(EXIT_AMBIGUOUS)
     for _name, _scored, _nid in (
         ("source", src_scored, src_nid),
         ("target", tgt_scored, tgt_nid),
@@ -129,7 +138,9 @@ def cmd_trace(
     try:
         view = get_canonical_search_graph(G, undirected=undirected, weighted=weighted)
         weight_attr = "weight" if weighted else None
-        path_nodes = _nx.shortest_path(view, src_nid, tgt_nid, weight=weight_attr)
+        path_nodes, _n_routes, _routes_capped = _weakest_shortest_path(
+            view, G, src_nid, tgt_nid, weight=weight_attr
+        )
     except (_nx.NetworkXNoPath, _nx.NodeNotFound):
         if undirected:
             print(f"No path found between '{source_label}' and '{target_label}'.")
@@ -142,6 +153,7 @@ def cmd_trace(
         sys.exit(0)
     hops = len(path_nodes) - 1
     segments: list[str] = []
+    hop_datas: list[list[dict]] = []
     for i in range(len(path_nodes) - 1):
         u, v = path_nodes[i], path_nodes[i + 1]
         fwd, bwd = [], []
@@ -150,10 +162,11 @@ def cmd_trace(
                 for d in edge_datas(G, a, b):
                     (fwd if d.get("_src", a) == u else bwd).append(d)
         datas = fwd or bwd
+        hop_datas.append(datas)
         forward = bool(fwd)
         rels = sorted({d.get("relation") for d in datas if d.get("relation")})
         rel = "/".join(rels) if rels else "related"
-        confs = sorted({d.get("confidence") for d in datas if d.get("confidence")})
+        confs = sorted({_confidence_tag(e) for d in datas for e in edge_evidence(d) if e.get("confidence")})
         conf_str = f" [{'/'.join(confs)}]" if confs else ""
         if i == 0:
             segments.append(G.nodes[u].get("label", u))
@@ -162,6 +175,11 @@ def cmd_trace(
         else:
             segments.append(f"<--{rel}{conf_str}-- {G.nodes[v].get('label', v)}")
     print(f"Shortest path ({hops} hops):\n  " + " ".join(segments))
+    _summary = _path_confidence_line(hop_datas)
+    if _summary and _n_routes > 1:
+        _summary += f" (weakest of {'256+' if _routes_capped else _n_routes} equal-length routes)"
+    if _summary:
+        print(_summary)
     querylog.log_query(
         kind="path",
         question=f"{source_label} -> {target_label}",

@@ -421,8 +421,36 @@ def _shorten_rationale_label(text: str, width: int = 80) -> str:
     return label
 
 
+def _python_under_type_checking(node, source: bytes) -> bool:
+    """True when ``node`` sits in the body of an ``if TYPE_CHECKING:`` block.
+
+    Matches ``TYPE_CHECKING`` and ``<module>.TYPE_CHECKING`` (``typing.``,
+    ``t.``, ``typing_extensions.``). Only the guarded body counts: the
+    ``else:`` branch of the same ``if`` runs at import time, and so does the
+    body of ``if not TYPE_CHECKING:``.
+    """
+    child, parent = node, getattr(node, "parent", None)
+    while parent is not None:
+        if (
+            parent.type in ("if_statement", "elif_clause")
+            and parent.child_by_field_name("consequence") == child
+        ):
+            cond = parent.child_by_field_name("condition")
+            if cond is not None and cond.type == "attribute":
+                cond = cond.child_by_field_name("attribute")
+            if (
+                cond is not None
+                and cond.type == "identifier"
+                and _read_text(cond, source) == "TYPE_CHECKING"
+            ):
+                return True
+        child, parent = parent, getattr(parent, "parent", None)
+    return False
+
+
 def _import_python(node, source: bytes, file_nid: str, stem: str, edges: list, str_path: str, scope_stack: list[str] | None = None) -> None:
     t = node.type
+    type_only = _python_under_type_checking(node, source)
     if t == "import_statement":
         for child in node.children:
             if child.type in ("dotted_name", "aliased_import"):
@@ -446,6 +474,8 @@ def _import_python(node, source: bytes, file_nid: str, stem: str, edges: list, s
                     # member-call resolver can match `alias.func()` against this
                     # edge instead of dropping it (#2082).
                     edge["local_alias"] = raw_alias.strip()
+                if type_only:
+                    edge["type_only"] = True
                 edges.append(edge)
     elif t == "import_from_statement":
         module_node = node.child_by_field_name("module_name")
@@ -500,6 +530,8 @@ def _import_python(node, source: bytes, file_nid: str, stem: str, edges: list, s
                         edge["target_file"] = str(target_path)
                 except OSError:
                     pass
+            if type_only:
+                edge["type_only"] = True
             edges.append(edge)
 
 
