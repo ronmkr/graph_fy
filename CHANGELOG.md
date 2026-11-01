@@ -4,6 +4,11 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 ## 0.3.1 (Unreleased)
 
+- Claude Backend Prompt Caching & Node-ID Alignment ([#100](https://github.com/ronmkr/graph_fy/issues/100)):
+  - **Claude Backend Prompt Caching** (#4835, #4855, #4880): In `graph_fy/llm_providers/claude.py`, send system prompt with `cache_control={"type": "ephemeral"}` so Anthropic caches repeated extraction system prompts across per-file calls. Account for Anthropic cache read and creation tokens (`cache_read_input_tokens`, `cache_creation_input_tokens`) in `input_tokens`. Support disabling via `GRAPH_FY_CLAUDE_PROMPT_CACHE=0` or `GRAPHIFY_CLAUDE_PROMPT_CACHE=0`.
+  - **Node-ID Specification Alignment** (#4432, #4799): Aligned compact extraction spec (`extraction-spec-compact.md`) with `ids.py` and `extraction-spec.md` (`word characters only ([^\W] after casefolding — [a-z0-9_] for ASCII input, but non-ASCII letters and digits are kept as-is)`).
+  - **Test Coverage**: Added comprehensive backend caching tests and environment override isolation tests in `tests/test_llm_backends.py` and `tests/conftest.py`.
+
 - Upstream Synchronization & Parity Fixes (`Graphify-Labs/graphify` v0.9.98 – v0.9.100):
   - **Git Hook Path Security Refusal** (#3869): `graph_fy hook` now refuses to install when `core.hooksPath` points outside the repository root.
   - **API Key & Secret Redaction**: Added comprehensive high-entropy secret, bearer token, and private key redaction in metadata sanitization.

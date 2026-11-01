@@ -93,6 +93,19 @@ def check_graph_staleness(
             "reason": "no_graph_artifact",
         }
 
+    try:
+        graph_file.resolve().relative_to(root_path)
+    except ValueError:
+        return {
+            "is_stale": False,
+            "modified_files": [],
+            "deleted_files": [],
+            "staleness_count": 0,
+            "action": "clean",
+            "warning_banner": None,
+            "reason": "graph_outside_project_root",
+        }
+
     graph_mtime = graph_file.stat().st_mtime
     modified_files: set[str] = set()
     deleted_files: set[str] = set()
@@ -236,9 +249,12 @@ def hot_patch_graph(
     new_edges: list[dict] = []
 
     if mod_paths:
+        import contextlib
+        import io
         from graph_fy.extract import extract
         try:
-            extracted = extract(mod_paths, root=root_path, parallel=False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                extracted = extract(mod_paths, root=root_path, parallel=False)
             new_nodes = extracted.get("nodes", [])
             new_edges = extracted.get("edges", [])
         except Exception:

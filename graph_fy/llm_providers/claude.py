@@ -41,14 +41,17 @@ def _anthropic_response_text(content, default: str | None = None) -> str | None:
 
 def _claude_prompt_cache_enabled() -> bool:
     """Keep prompt caching on by default; allow incompatible endpoints to opt out."""
-    raw = os.environ.get("graph_fy_CLAUDE_PROMPT_CACHE", os.environ.get("GRAPHIFY_CLAUDE_PROMPT_CACHE", "")).strip().lower()
-    if raw in ("", "1", "true", "yes", "on"):
-        return True
-    if raw in ("0", "false", "no", "off"):
-        return False
-    raise ValueError(
-        "graph_fy_CLAUDE_PROMPT_CACHE must be 1/true/yes/on or 0/false/no/off"
-    )
+    for var in ("GRAPH_FY_CLAUDE_PROMPT_CACHE", "GRAPHIFY_CLAUDE_PROMPT_CACHE", "graph_fy_CLAUDE_PROMPT_CACHE"):
+        if var in os.environ:
+            raw = os.environ[var].strip().lower()
+            if raw in ("", "1", "true", "yes", "on"):
+                return True
+            if raw in ("0", "false", "no", "off"):
+                return False
+            raise ValueError(
+                f"{var} must be 1/true/yes/on or 0/false/no/off"
+            )
+    return True
 
 
 def _call_claude(
