@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Exhaustive benchmark suite of real-world software engineering tasks, CVE blast-radius analyses, dependency migrations, circular import refactors, and anti-hallucination tests for graph_fy.",
   "metadata": {
-    "total_scenarios": 106,
+    "total_scenarios": 111,
     "categories": [
       "API Breaking Changes & Migration",
       "Anti-Hallucination & Zombie APIs",
@@ -15,7 +15,8 @@
       "Performance & Resource Leaks",
       "Security / CVE Blast Radius",
       "State Leaks & Concurrency",
-      "Typo-Tolerance & Did-You-Mean"
+      "Typo-Tolerance & Did-You-Mean",
+      "Adversarial & Counterfactual Stress Tests"
     ]
   },
   "scenarios": [
@@ -3476,6 +3477,181 @@
         ],
         "is_phantom": false,
         "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ADV-001",
+      "title": "Adversarial Homonym Disambiguation: Session in Flask vs SQLAlchemy",
+      "category": "Adversarial & Counterfactual Stress Tests",
+      "severity": "HIGH",
+      "real_world_context": "Adversarial stress test: when multiple unrelated packages define identical class names ('Session'), the retrieval system must prioritize the contextual package (Flask) and suppress look-alike homonyms (SQLAlchemy/Requests).",
+      "user_prompt": "Audit session handling in Flask and inspect SessionInterface implementation for cookie-backed storage.",
+      "target_symbols": [
+        "session",
+        "SessionInterface",
+        "SecureCookieSession"
+      ],
+      "expected_files": [
+        "flask/sessions.py"
+      ],
+      "forbidden_hallucinations": [
+        "sqlalchemy.orm.session.Session",
+        "requests.sessions.Session"
+      ],
+      "plausible_distractors": [
+        "sqlalchemy.orm.Session",
+        "requests.Session",
+        "tornado.web.RequestHandler"
+      ],
+      "verification": {
+        "must_contain": [
+          "session",
+          "SessionInterface"
+        ],
+        "must_not_contain": [
+          "sqlalchemy.orm.Session",
+          "requests.Session"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ADV-002",
+      "title": "Adversarial Counterfactual: Removed Flask before_first_request",
+      "category": "Adversarial & Counterfactual Stress Tests",
+      "severity": "CRITICAL",
+      "real_world_context": "Counterfactual test: before_first_request was removed in Flask 3.0. An adversarial query asks to analyze its callers; the system must reject or report absence rather than hallucinating an AST skeleton.",
+      "user_prompt": "Audit all registered hooks and execution paths for before_first_request in Flask 3.0 request lifecycle.",
+      "target_symbols": [
+        "before_first_request"
+      ],
+      "expected_files": [
+        "flask/app.py"
+      ],
+      "forbidden_hallucinations": [
+        "def before_first_request",
+        "app.before_first_request_funcs"
+      ],
+      "plausible_distractors": [
+        "before_request",
+        "after_request",
+        "teardown_request"
+      ],
+      "verification": {
+        "must_contain": [
+          "Target Symbol Not Found"
+        ],
+        "must_not_contain": [
+          "def before_first_request"
+        ],
+        "is_phantom": true,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ADV-003",
+      "title": "Adversarial Confabulation: Non-Existent Function Parameter on jsonify",
+      "category": "Adversarial & Counterfactual Stress Tests",
+      "severity": "MEDIUM",
+      "real_world_context": "Parameter confabulation test: the user query asks how jsonify handles a non-existent parameter 'safe_serialization'. The AST skeleton must preserve the true signature and avoid confabulating the requested parameter.",
+      "user_prompt": "Trace jsonify parameter parsing and inspect how safe_serialization flag is handled in dumps pipeline.",
+      "target_symbols": [
+        "jsonify"
+      ],
+      "expected_files": [
+        "flask/json/__init__.py"
+      ],
+      "forbidden_hallucinations": [
+        "safe_serialization: bool",
+        "def jsonify(*args, safe_serialization"
+      ],
+      "plausible_distractors": [
+        "compact_mode",
+        "strict_types"
+      ],
+      "verification": {
+        "must_contain": [
+          "jsonify"
+        ],
+        "must_not_contain": [
+          "safe_serialization: bool"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "LOW",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ADV-004",
+      "title": "Adversarial Polymorphism: Disambiguate process_response Receivers",
+      "category": "Adversarial & Counterfactual Stress Tests",
+      "severity": "HIGH",
+      "real_world_context": "Polymorphic dispatch test: multiple classes implement process_response. The eval verifies that the retrieval identifies the concrete Flask application receiver rather than smearing unrelated middleware classes.",
+      "user_prompt": "Trace Flask application response finalization through process_response and verify after_request pipeline execution.",
+      "target_symbols": [
+        "process_response",
+        "Flask",
+        "after_request"
+      ],
+      "expected_files": [
+        "flask/app.py"
+      ],
+      "forbidden_hallucinations": [
+        "DjangoMiddleware.process_response",
+        "CORSMiddleware.process_response"
+      ],
+      "plausible_distractors": [
+        "WSGIHandler.process_response",
+        "BaseMiddleware.process_response"
+      ],
+      "verification": {
+        "must_contain": [
+          "process_response",
+          "after_request"
+        ],
+        "must_not_contain": [
+          "DjangoMiddleware",
+          "CORSMiddleware"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "MEDIUM",
+        "max_tokens": 1500
+      }
+    },
+    {
+      "id": "ADV-005",
+      "title": "Adversarial God-Node Hub Flood Resistance: url_for Blast Radius",
+      "category": "Adversarial & Counterfactual Stress Tests",
+      "severity": "HIGH",
+      "real_world_context": "God-node resistance test: url_for has high degree fan-out across hundreds of endpoints. The briefing must remain compact, focused, and bounded without blowing token budgets or drowning in noisy neighbor endpoints.",
+      "user_prompt": "Inspect url_for helper implementation and evaluate downstream coupling with URL routing MapAdapter.",
+      "target_symbols": [
+        "url_for",
+        "MapAdapter"
+      ],
+      "expected_files": [
+        "flask/helpers.py"
+      ],
+      "forbidden_hallucinations": [
+        "url_for_super_cache"
+      ],
+      "plausible_distractors": [
+        "django.urls.reverse",
+        "flask.helpers.send_file"
+      ],
+      "verification": {
+        "must_contain": [
+          "url_for"
+        ],
+        "must_not_contain": [
+          "url_for_super_cache"
+        ],
+        "is_phantom": false,
+        "expected_risk_tier": "HIGH",
         "max_tokens": 1500
       }
     }

@@ -4,6 +4,12 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 ## 0.3.1 (Unreleased)
 
+- Realistic, Adversarial & Graded Evaluation Framework:
+  - **Lokanathan Invariant ("If Your AI Scores 100%, Your Eval Is Wrong")**: Eliminated false 100% pass rates caused by lenient binary substring thresholds. Introduced multi-metric continuous Grounding Fidelity (0–100%), Precision@3/5, and Context Noise Ratio.
+  - **Hard Plausible Distractors**: Added look-alike symbols and cross-package homonyms (e.g. `Session` in Flask vs SQLAlchemy vs Requests) to test isolation fidelity and detect context pollution.
+  - **Adversarial & Counterfactual Scenarios**: Added 5 new stress test scenarios (`ADV-001` through `ADV-005`) covering homonym resolution, version-drift removed APIs (`before_first_request` in Flask 3.0), confabulated function parameters, polymorphic method disambiguation, and god-node hub flood resistance.
+  - **Quality Grade Distribution**: Replaced binary win/loss with tiered `PASS` (Fidelity >= 75%), `PARTIAL` (50% <= Fidelity < 75%), and `FAIL` breakdowns in both JSON and Markdown benchmark reports.
+
 - Claude Backend Prompt Caching & Node-ID Alignment ([#100](https://github.com/ronmkr/graph_fy/issues/100)):
   - **Claude Backend Prompt Caching** (#4835, #4855, #4880): In `graph_fy/llm_providers/claude.py`, send system prompt with `cache_control={"type": "ephemeral"}` so Anthropic caches repeated extraction system prompts across per-file calls. Account for Anthropic cache read and creation tokens (`cache_read_input_tokens`, `cache_creation_input_tokens`) in `input_tokens`. Support disabling via `GRAPH_FY_CLAUDE_PROMPT_CACHE=0` or `GRAPHIFY_CLAUDE_PROMPT_CACHE=0`.
   - **Node-ID Specification Alignment** (#4432, #4799): Aligned compact extraction spec (`extraction-spec-compact.md`) with `ids.py` and `extraction-spec.md` (`word characters only ([^\W] after casefolding — [a-z0-9_] for ASCII input, but non-ASCII letters and digits are kept as-is)`).
