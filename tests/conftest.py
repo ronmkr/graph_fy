@@ -93,3 +93,35 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
             continue
         for warning_filter in _ANALYZE_WARNING_FILTERS:
             item.add_marker(pytest.mark.filterwarnings(warning_filter))
+
+
+@pytest.fixture
+def run_cli_in_process(capsys, monkeypatch):
+    """Run graph_fy CLI commands in-process with argument monkeypatching and stdout/stderr capture.
+
+    Eliminates cold-start subprocess overhead (saving ~150-350ms per test invocation).
+    """
+    import os
+    import sys
+    from graph_fy.__main__ import main
+
+    def _run(*args: str, cwd: Path | None = None) -> tuple[int, str, str]:
+        old_cwd = Path.cwd()
+        if cwd:
+            os.chdir(cwd)
+        monkeypatch.setattr(sys, "argv", ["graph_fy", *args])
+        exit_code = 0
+        try:
+            res = main()
+            if isinstance(res, int):
+                exit_code = res
+        except SystemExit as exc:
+            exit_code = exc.code if isinstance(exc.code, int) else (1 if exc.code else 0)
+        finally:
+            if cwd:
+                os.chdir(old_cwd)
+        captured = capsys.readouterr()
+        return exit_code, captured.out, captured.err
+
+    return _run
+

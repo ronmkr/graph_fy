@@ -33,3 +33,12 @@ This repository uses graph_fy for codebase indexing, structural AST navigation, 
 - Cut conversational filler, pleasantries, preambles, apologies, and redundant restatements.
 - Output in dense, high-signal bullet points and concise technical fragments.
 - Preserve 100% technical fidelity: exact file paths, line ranges, symbol names, shell commands, and code diffs must always be verbatim and uncompressed.
+
+### Testing Best Practices & Anti-Bloat Protocol
+
+- **No Micro-File Sprawl**: Never create a new standalone test file for a single bug, issue, or PR (e.g. `test_issue_123.py`). Always add regression test cases directly into the existing domain test suite (e.g., `tests/test_javascript.py`, `tests/test_csharp.py`, `tests/test_indirect_dispatch.py`).
+- **Parameterize Over Proliferation**: When testing syntax variations or edge cases, group them into `@pytest.mark.parametrize` matrices rather than proliferating separate single-assertion test functions.
+- **Explicit Behavioral Assertions**: Every test MUST assert concrete AST outputs (node IDs, labels, edge types, confidence levels, or reachability). Never write zero-assertion "did it not crash?" tests.
+- **In-Process CLI Execution**: Prefer invoking in-process entry points (`graph_fy.__main__.main()`) over `subprocess.run(["graph_fy", ...])` to avoid paying Python interpreter cold-start penalties (~150ms per call).
+- **Fast Parallel Execution**: Always run test suites with `uv run pytest -n auto -q` to utilize all local CPU cores.
+- **Selective Blast-Radius Testing**: During iterative refactoring, run only the tests reached by the modified symbols via `graph_fy affected` before executing the broader suite.

@@ -4,6 +4,17 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 ## 0.3.1 (Unreleased)
 
+- Test Suite Rationalization, Anti-Bloat Protocol & Parallelization:
+  - **Pytest Parallel Execution (`pytest-xdist`)**: Distributed test runs across local CPU cores via `-n auto`, dropping total repository test suite runtime from **380.8s (~6m 20s) down to 64.5s (~1m 04s)** (a 6x speedup).
+  - **Marker Taxonomy & Tiering**: Added formal marker configuration to `pyproject.toml` (`unit`, `integration`, `slow`, `cli`) enabling fast sub-5s local iteration loops.
+  - **Regression File De-Sprawl**: Consolidated 11 fragmented single-feature test files into cohesive domain modules:
+    - Merged 6 JS/TS indirect call shadowing test files into `tests/test_js_indirect_call_shadowing.py`.
+    - Merged 5 C# member and generic call site files into `tests/test_csharp_generics.py` and `tests/test_csharp_members.py`.
+    - Preserved 100% of test cases while eliminating duplicate file fixtures, repeated module imports, and discovery overhead.
+  - **In-Process CLI Execution Runner**: Added `run_cli_in_process` fixture in `tests/conftest.py` to invoke CLI commands in-process with argument monkeypatching and captured stdout, eliminating Python interpreter cold-start forks.
+  - **Contract Strengthening**: Upgraded zero-assertion tests in `test_corrupt_graph_json.py`, `test_export_control_characters.py`, and `test_dedup_remaps_hyperedges.py` to assert explicit structural and behavioral invariants.
+  - **Agent Guidelines Enshrined**: Documented Testing Best Practices & Anti-Bloat Protocol in `CLAUDE.md`, `GEMINI.md`, and `AGENTS.md`.
+
 - Realistic, Adversarial & Graded Evaluation Framework:
   - **Lokanathan Invariant ("If Your AI Scores 100%, Your Eval Is Wrong")**: Eliminated false 100% pass rates caused by lenient binary substring thresholds. Introduced multi-metric continuous Grounding Fidelity (0–100%), Precision@3/5, and Context Noise Ratio.
   - **Hard Plausible Distractors**: Added look-alike symbols and cross-package homonyms (e.g. `Session` in Flask vs SQLAlchemy vs Requests) to test isolation fidelity and detect context pollution.

@@ -78,6 +78,7 @@ Signatures below are the real ones - `tests/test_architecture_doc.py` imports ev
 | `serve.py` | `serve(graph_path)`, `serve_http(graph_path, *, host, port, ...)` | graph file path → MCP stdio server / HTTP server |
 | `watch.py` | `watch(watch_path, debounce=3.0)`, `check_update(watch_path)` | directory → rebuild on change; `check_update` reports whether a re-extraction is pending |
 | `benchmark.py` | `run_benchmark(graph_path)` | graph file → corpus vs subgraph token comparison |
+| `comparative_eval.py` | `run_comparative_evals(scenarios, graphs)` | scenarios + graphs → comparative empirical evaluation report with continuous grounding fidelity and distractor suppression |
 
 ### Calling `extract()` from your own code
 

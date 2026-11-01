@@ -41,14 +41,17 @@ def test_diagnostics_read_corrupt_raises_runtimeerror(tmp_path):
 
 
 def test_valid_graph_still_loads(tmp_path):
-    """Happy path unchanged: a well-formed graph.json loads without raising."""
+    """Happy path unchanged: a well-formed graph.json loads with correct nodes."""
     p = tmp_path / "graph.json"
     p.write_text(
         '{"nodes": [{"id": "a", "label": "a", "file_type": "code"}], "edges": []}',
         encoding="utf-8",
     )
-    # none of these should raise
-    load_graph(p)
-    load_graph(str(p))  # string path must not raise AttributeError
-    _read_json_file(p)
-    build_merge([], graph_path=p, dedup=False)
+    g1 = load_graph(p)
+    assert "a" in g1.nodes
+    g2 = load_graph(str(p))  # string path must not raise AttributeError
+    assert "a" in g2.nodes
+    data = _read_json_file(p)
+    assert len(data.get("nodes", [])) == 1
+    g3 = build_merge([], graph_path=p, dedup=False)
+    assert "a" in g3.nodes

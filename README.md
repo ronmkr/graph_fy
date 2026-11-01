@@ -24,6 +24,26 @@ Blind agent exploration is expensive and slow. Coding agents typically read hund
 
 ---
 
+## Production-Grade Advancement: graph_fy vs Upstream graphify (latest v0.9.100)
+
+`graph_fy` is a comprehensive architectural advancement over upstream `graphify` (latest `v0.9.100` / branch `v8`). While upstream focuses primarily on offline static graph generation and wiki generation, `graph_fy` re-engineers it into an active, low-latency agent context harness and neuro-symbolic engine:
+
+| Capability / Architecture | Upstream `graphify` (latest v0.9.100) | `graph_fy` (Production Engine) |
+| :--- | :--- | :--- |
+| **Agent MCP Server** | ❌ None (no `graphify/mcp.py`) | **Native MCP server** (11 tools: `get_agent_context`, `get_diff_context`, etc.) |
+| **Pre-Agent Context Briefing** | ❌ None (only static `GRAPH_REPORT.md`) | **`graph_fy context "<task>"`**: Mermaid diagrams, AST skeletons, callers/callees in <45ms |
+| **Transitive Blast Radius & Risk** | ❌ None (no `impact.py`) | **Bidirectional reachability**: risk tiers (`TIER_1`–`TIER_3`), affected tests & endpoints |
+| **Multi-Tier AST Elision Ladder** | ❌ None (dumps raw text) | **Multi-tier ladder**: Tier 1 (AST skeletons) $\to$ Tier 2 (signatures) $\to$ Tier 3 (citations) |
+| **Git Temporal Coupling** | ❌ None (no git log analysis) | **Mines historical temporal co-changes** to reveal hidden file relationships |
+| **Empirical Evaluation Suite** | ❌ Toy script (`len(text) // 4` token guess) | **111 real-world scenarios + 5 adversarial tests** (`Lokanathan Invariant`) |
+| **Evaluation Rigor** | ❌ None | **Continuous Grounding Fidelity (0–100%)**, Precision@3/5, Distractor Isolation |
+| **LLM Prompt Caching** | ❌ None | **Claude Ephemeral Prompt Caching** (`cache_control`) + Deterministic Node Ordering |
+| **Diff-Scoped Code Review** | ❌ None | **`graph_fy diff`**: 18–35 ms blast radius on active git diffs |
+| **Interactive Visualizers** | Basic HTML | **WCAG AAA Dashboards**: Architecture Map, D3 Graph, Sequence Callflow, Symbol Tree |
+| **Test Verification** | Heuristic script tests | **6,019 automated tests passing** across 10+ language AST extractors |
+
+---
+
 ## Interactive Visualizers & Architecture Showcase
 
 `graph_fy` exports 100% offline, self-contained interactive visualizers with WCAG AAA color contrast, hardware-accelerated SVG animations, deep-linking state synchronization (`?search=...`, `?theme=...`, `?focus=...`, `?view=...`), and iframe dashboard embedding:

@@ -62,7 +62,8 @@ COMMUNITIES = {0: ["a", "b"]}
 def test_graphml_survives_a_control_character(tmp_path, ch):
     out = tmp_path / "g.graphml"
     to_graphml(_graph(f"Build {ch}log capture"), COMMUNITIES, str(out))
-    ET.fromstring(out.read_text(encoding="utf-8"))  # must be well-formed XML
+    tree = ET.fromstring(out.read_text(encoding="utf-8"))  # must be well-formed XML
+    assert tree.tag.endswith("graphml"), f"Expected GraphML root tag, got {tree.tag}"
 
 
 @pytest.mark.parametrize("ch", KEEP)
@@ -87,7 +88,8 @@ def test_graphml_survives_a_control_character_in_a_node_id(tmp_path):
     })
     out = tmp_path / "g.graphml"
     to_graphml(G, {0: ["we\x0bird"]}, str(out))
-    ET.fromstring(out.read_text(encoding="utf-8"))
+    tree = ET.fromstring(out.read_text(encoding="utf-8"))
+    assert tree.tag.endswith("graphml"), f"Expected GraphML root tag, got {tree.tag}"
 
 
 def test_graphml_still_carries_the_readable_part_of_the_label(tmp_path):

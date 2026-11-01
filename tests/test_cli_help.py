@@ -6,21 +6,11 @@ never appeared. Precedent: #2071 / PR #2075 (one usage line + stdout assert).
 """
 from __future__ import annotations
 
-import subprocess
-import sys
 
-PYTHON = sys.executable
-
-
-def test_help_lists_prs_provider_and_export_formats():
+def test_help_lists_prs_provider_and_export_formats(run_cli_in_process):
     """#3140: `graph_fy --help` must advertise prs, provider, and all export formats."""
-    r = subprocess.run(
-        [PYTHON, "-m", "graph_fy", "--help"],
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode == 0, f"--help should exit 0: {r.stderr}"
-    out = r.stdout
+    code, out, err = run_cli_in_process("--help")
+    assert code == 0, f"--help should exit 0: {err}"
     assert "  prs" in out, "`graph_fy --help` must list prs (#3140)"
     assert "provider" in out, "`graph_fy --help` must list provider (#3140)"
     for fmt in (
