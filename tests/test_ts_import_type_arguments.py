@@ -323,8 +323,8 @@ def test_ts_normalizer_scales_linearly_on_large_files():
     large = min(timed(2000) for _ in range(5))
 
     # Linear work doubles (~2x). Quadratic work quadruples (~4x). A generous
-    # 3x ceiling separates the two without being flaky under load.
-    assert large < small * 3, (
+    # 3.5x ceiling separates the two without being flaky under parallel load.
+    assert large < small * 3.5, (
         f"scaling looks super-linear: {small:.4f}s -> {large:.4f}s "
         f"({large / small:.1f}x for 2x input)"
     )

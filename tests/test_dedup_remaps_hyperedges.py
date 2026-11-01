@@ -118,7 +118,10 @@ def test_object_members_keep_their_other_fields():
     "not-a-dict",
 ])
 def test_malformed_hyperedges_do_not_raise(he):
-    _remap_hyperedge_members([he], {"a": "b"})
+    hes = [he]
+    _remap_hyperedge_members(hes, {"a": "b"})
+    assert isinstance(hes, list)
+    assert len(hes) == 1
 
 
 def test_an_empty_remap_changes_nothing():

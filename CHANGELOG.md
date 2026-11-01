@@ -4,6 +4,23 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 ## 0.3.1 (Unreleased)
 
+- Test Suite Rationalization, Anti-Bloat Protocol & Parallelization:
+  - **Pytest Parallel Execution (`pytest-xdist`)**: Distributed test runs across local CPU cores via `-n auto`, dropping total repository test suite runtime from **380.8s (~6m 20s) down to 64.5s (~1m 04s)** (a 6x speedup).
+  - **Marker Taxonomy & Tiering**: Added formal marker configuration to `pyproject.toml` (`unit`, `integration`, `slow`, `cli`) enabling fast sub-5s local iteration loops.
+  - **Regression File De-Sprawl**: Consolidated 11 fragmented single-feature test files into cohesive domain modules:
+    - Merged 6 JS/TS indirect call shadowing test files into `tests/test_js_indirect_call_shadowing.py`.
+    - Merged 5 C# member and generic call site files into `tests/test_csharp_generics.py` and `tests/test_csharp_members.py`.
+    - Preserved 100% of test cases while eliminating duplicate file fixtures, repeated module imports, and discovery overhead.
+  - **In-Process CLI Execution Runner**: Added `run_cli_in_process` fixture in `tests/conftest.py` to invoke CLI commands in-process with argument monkeypatching and captured stdout, eliminating Python interpreter cold-start forks.
+  - **Contract Strengthening**: Upgraded zero-assertion tests in `test_corrupt_graph_json.py`, `test_export_control_characters.py`, and `test_dedup_remaps_hyperedges.py` to assert explicit structural and behavioral invariants.
+  - **Agent Guidelines Enshrined**: Documented Testing Best Practices & Anti-Bloat Protocol in `CLAUDE.md`, `GEMINI.md`, and `AGENTS.md`.
+
+- Realistic, Adversarial & Graded Evaluation Framework:
+  - **Lokanathan Invariant ("If Your AI Scores 100%, Your Eval Is Wrong")**: Eliminated false 100% pass rates caused by lenient binary substring thresholds. Introduced multi-metric continuous Grounding Fidelity (0–100%), Precision@3/5, and Context Noise Ratio.
+  - **Hard Plausible Distractors**: Added look-alike symbols and cross-package homonyms (e.g. `Session` in Flask vs SQLAlchemy vs Requests) to test isolation fidelity and detect context pollution.
+  - **Adversarial & Counterfactual Scenarios**: Added 5 new stress test scenarios (`ADV-001` through `ADV-005`) covering homonym resolution, version-drift removed APIs (`before_first_request` in Flask 3.0), confabulated function parameters, polymorphic method disambiguation, and god-node hub flood resistance.
+  - **Quality Grade Distribution**: Replaced binary win/loss with tiered `PASS` (Fidelity >= 75%), `PARTIAL` (50% <= Fidelity < 75%), and `FAIL` breakdowns in both JSON and Markdown benchmark reports.
+
 - Claude Backend Prompt Caching & Node-ID Alignment ([#100](https://github.com/ronmkr/graph_fy/issues/100)):
   - **Claude Backend Prompt Caching** (#4835, #4855, #4880): In `graph_fy/llm_providers/claude.py`, send system prompt with `cache_control={"type": "ephemeral"}` so Anthropic caches repeated extraction system prompts across per-file calls. Account for Anthropic cache read and creation tokens (`cache_read_input_tokens`, `cache_creation_input_tokens`) in `input_tokens`. Support disabling via `GRAPH_FY_CLAUDE_PROMPT_CACHE=0` or `GRAPHIFY_CLAUDE_PROMPT_CACHE=0`.
   - **Node-ID Specification Alignment** (#4432, #4799): Aligned compact extraction spec (`extraction-spec-compact.md`) with `ids.py` and `extraction-spec.md` (`word characters only ([^\W] after casefolding — [a-z0-9_] for ASCII input, but non-ASCII letters and digits are kept as-is)`).

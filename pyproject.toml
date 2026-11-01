@@ -121,6 +121,7 @@ dev = [
     "pyright>=1.1.409",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.5.0",
     "ruff>=0.15.13",
     "setuptools>=68.0.0",
     "wheel>=0.47.0",
@@ -148,6 +149,12 @@ graph_fy = ["skill.md", "skill-copilot.md", "skill-vscode.md", "skills/*/referen
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "unit: Fast pure-function and in-memory AST tests (<10ms)",
+    "integration: File system, SQLite, and networkx graph integration tests",
+    "slow: Heavy monorepo, large graph, or comparative benchmark tests",
+    "cli: Subprocess and command-line execution tests",
+]
 norecursedirs = [
     ".*", "*.egg", "build", "dist",
     "graphify-benchmark", "graphify_eval", "graphify_test",

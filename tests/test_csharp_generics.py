@@ -1,32 +1,26 @@
-"""C# generic type arguments at CALL SITES.
+"""Tests for C# generic arguments, field generics, and generic call sites.
 
-Properties, returns, and parameters already walk the full type expression and
-emit ``references[generic_arg]`` edges for every type argument. The C#
-``invocation_expression`` handler did not -- the type-argument list on a call
-site (``recv.Do<T>()``, ``services.AddScoped<ISvc, Impl>()``, the
-``Microsoft.Extensions.DependencyInjection`` shape) was dropped, so the
-generic arguments never became nodes. This erased dependency edges silently
-(``affected`` returns a smaller, confident answer rather than an error).
-
-PR #2913 closed the FIELD-position gap (the parallel ``field_declaration``
-handler); this test covers the call-site gap that PR #2913 deliberately left
-for a follow-up. Each case asserts the edge exists (no count) -- absence is
-the bug; counts are an implementation detail.
+Consolidated test suite covering:
+- Call-site generic arguments (Invoke<T>(), Register<T, U>(), nested Box<IThing>)
+- Field and property generic arguments (List<T>, Dictionary<K, V>, nested generics)
+- Unqualified and this-qualified generic callsites resolving to base members (#3406)
+- Prevention of fabricated nodes for generic type parameters (T, U, TResult)
 """
 from __future__ import annotations
 
 import os
 from pathlib import Path
+import pytest
 
 from graph_fy.extract import extract
 
 
 def _refs(tmp_path, files: dict[str, str]) -> set[tuple[str, str]]:
-    """Extract, returning {(source_label, target_label)} for `references` edges."""
+    """Extract, returning {(source_label, target_label)} for  edges."""
     for name, body in files.items():
         p = tmp_path / name
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(body)
+        p.write_text(body, encoding="utf-8")
     old = os.getcwd()
     try:
         os.chdir(tmp_path)
@@ -42,14 +36,11 @@ def _refs(tmp_path, files: dict[str, str]) -> set[tuple[str, str]]:
 
 
 def _all_refs(tmp_path, files: dict[str, str]) -> list[tuple[str, str, str | None]]:
-    """Extract, returning [(source_label, target_label, context)] for every
-    `references` edge, preserving duplicates (so two IZeta references in the
-    same call site are visible).
-    """
+    """Extract, returning [(source_label, target_label, context)] for every  edge."""
     for name, body in files.items():
         p = tmp_path / name
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(body)
+        p.write_text(body, encoding="utf-8")
     old = os.getcwd()
     try:
         os.chdir(tmp_path)
@@ -64,19 +55,70 @@ def _all_refs(tmp_path, files: dict[str, str]) -> list[tuple[str, str, str | Non
     ]
 
 
-_TYPES = (
-    "public interface IThing { }\n"
-    "public interface IService { }\n"
-    "public interface IImpl { }\n"
-    "public class Box<T> { }\n"
-    "public static class StaticHolder\n"
-    "{\n"
-    "    public static void Invoke<T>() { }\n"
-    "    public static void Register<T, U>() { }\n"
-    "}\n"
-    "public class Registry { public void Do<T>() { } }\n"
-)
+_TYPES = """\
+public interface IThing { }
+public interface IService { }
+public interface IImpl { }
+public class Box<T> { }
+public static class StaticHolder
+{
+    public static void Invoke<T>() { }
+    public static void Register<T, U>() { }
+}
+public class Registry { public void Do<T>() { } }
+"""
 
+SETTINGS_CS = """\
+namespace Demo
+{
+    public class Settings
+    {
+        public T Get<T>(string key) { return default(T); }
+        public string GetRaw(string key) { return key; }
+    }
+}
+"""
+
+READER_CS = """\
+namespace Demo
+{
+    public class Reader : Settings
+    {
+        public int A() { return Get<int>("port"); }
+        public int B() { return this.Get<int>("port"); }
+        public string C() { return GetRaw("host"); }
+        public string D() { return this.GetRaw("host"); }
+    }
+}
+"""
+
+LOCAL_CS = """\
+namespace Demo
+{
+    public class Local
+    {
+        public T Make<T>() { return default(T); }
+        public int E() { return Make<int>(); }
+    }
+}
+"""
+
+
+def _calls(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "Settings.cs").write_text(SETTINGS_CS, encoding="utf-8")
+    (tmp_path / "Reader.cs").write_text(READER_CS, encoding="utf-8")
+    (tmp_path / "Local.cs").write_text(LOCAL_CS, encoding="utf-8")
+    r = extract(sorted(tmp_path.glob("*.cs")), cache_root=tmp_path)
+    return {(e["source"], e["target"]) for e in r["edges"]
+            if e["relation"] == "calls"}
+
+
+def _has(calls, src_frag, tgt_frag):
+    return any(src_frag in s and tgt_frag in t for s, t in calls)
+
+
+# ── Call Site Generic Args ────────────────────────────────────────────────
 
 def test_member_call_with_one_type_argument(tmp_path):
     refs = _refs(tmp_path, {
@@ -86,7 +128,6 @@ def test_member_call_with_one_type_argument(tmp_path):
     assert (".A()", "IThing") in refs, (
         "member call `recv.Do<T>()` must emit a generic_arg reference to T"
     )
-
 
 def test_member_call_with_multiple_type_arguments(tmp_path):
     """The Microsoft.Extensions.DependencyInjection shape that the issue calls out."""
@@ -111,7 +152,6 @@ def test_member_call_with_multiple_type_arguments(tmp_path):
         "two-arg call must emit a generic_arg reference to the second type argument"
     )
 
-
 def test_nested_type_argument_in_call_site(tmp_path):
     refs = _refs(tmp_path, {
         "T.cs": _TYPES,
@@ -120,7 +160,6 @@ def test_nested_type_argument_in_call_site(tmp_path):
     assert (".A()", "IThing") in refs, (
         "innermost generic argument in a call site must produce a generic_arg reference"
     )
-
 
 def test_call_without_type_argument_is_unchanged(tmp_path):
     """A plain call site (no explicit type args) must not regress."""
@@ -132,7 +171,6 @@ def test_call_without_type_argument_is_unchanged(tmp_path):
     assert not any(src == ".A()" and tgt == "IThing" for src, tgt in refs), (
         "call without type arguments must not invent generic_arg references"
     )
-
 
 def test_type_parameter_in_call_site_arg_is_not_fabricated(tmp_path):
     refs = _refs(tmp_path, {
@@ -148,7 +186,6 @@ def test_type_parameter_in_call_site_arg_is_not_fabricated(tmp_path):
     assert not refs_with_t_target, (
         "a type parameter (T) used as a call-site type argument must not become a node"
     )
-
 
 def test_call_site_generic_args_appear_in_issue_repro(tmp_path):
     """End-to-end: the exact two-file repro from #2911 produces all six edges."""
@@ -226,3 +263,105 @@ def test_call_site_generic_args_appear_in_issue_repro(tmp_path):
     assert (".Di()", "Box") in {(s, t) for s, t, _c in all_di_refs}, (
         "the Box<...> argument itself must still link from the Di method"
     )
+
+
+# ── Field Generic Args ────────────────────────────────────────────────
+
+def test_field_generic_argument_produces_edge(tmp_path):
+    refs = _refs(tmp_path, {
+        "T.cs": _TYPES,
+        "P.cs": "public class Probe { private Box<IThing> _f = null!; }\n",
+    })
+    assert ("Probe", "Box") in refs, "outer field type must still be linked"
+    assert ("Probe", "IThing") in refs, "generic argument in field position must be linked"
+
+def test_field_matches_property_behaviour(tmp_path):
+    """A field and a property of the same type must produce the same references."""
+    refs = _refs(tmp_path, {
+        "T.cs": _TYPES,
+        "P.cs": (
+            "public class WithField { private Box<IThing> _f = null!; }\n"
+            "public class WithProp  { public Box<IThing> P { get; set; } = null!; }\n"
+        ),
+    })
+    field_targets = {t for s, t in refs if s == "WithField"}
+    prop_targets = {t for s, t in refs if s == "WithProp"}
+    assert field_targets == prop_targets, (
+        f"field and property disagree: field={field_targets} property={prop_targets}"
+    )
+
+def test_nested_generic_arguments(tmp_path):
+    refs = _refs(tmp_path, {
+        "T.cs": _TYPES,
+        "P.cs": "public class Probe { private Box<Box<IThing>> _f = null!; }\n",
+    })
+    assert ("Probe", "IThing") in refs, "innermost generic argument must be linked"
+
+def test_multiple_declarators_share_the_type(tmp_path):
+    refs = _refs(tmp_path, {
+        "T.cs": _TYPES,
+        "P.cs": "public class Probe { private Box<IThing> _a = null!, _b = null!; }\n",
+    })
+    assert ("Probe", "IThing") in refs
+
+def test_bare_type_parameter_is_not_fabricated(tmp_path):
+    """`T item` must not create a node for the type parameter itself."""
+    refs = _refs(tmp_path, {
+        "P.cs": "public class Probe<T> { private T _item = default!; }\n",
+    })
+    assert not any(t == "T" for _, t in refs), "type parameter must not become a node"
+
+def test_type_parameter_as_generic_argument_is_not_fabricated(tmp_path):
+    refs = _refs(tmp_path, {
+        "T.cs": _TYPES,
+        "P.cs": "public class Probe<T> { private Box<T> _f = null!; }\n",
+    })
+    assert ("Probe", "Box") in refs, "outer type is still a real reference"
+    assert not any(t == "T" for _, t in refs), "type parameter must not become a node"
+
+def test_predefined_types_are_not_fabricated(tmp_path):
+    refs = _refs(tmp_path, {
+        "T.cs": _TYPES,
+        "P.cs": "public class Probe { private Box<int> _f = null!; private string _s = \"\"; }\n",
+    })
+    assert not any(t in {"int", "string"} for _, t in refs), (
+        "builtin types must not become nodes"
+    )
+
+def test_plain_field_still_links(tmp_path):
+    """The non-generic path must be unchanged."""
+    refs = _refs(tmp_path, {
+        "T.cs": _TYPES,
+        "P.cs": "public class Probe { private IThing _f = null!; }\n",
+    })
+    assert ("Probe", "IThing") in refs
+
+
+# ── Generic Callsites ────────────────────────────────────────────────
+
+def test_unqualified_generic_call_resolves_to_base_member(tmp_path, monkeypatch):
+    """The issue's case 1: `Get<int>("port")` with the target on the base class."""
+    calls = _calls(tmp_path, monkeypatch)
+    assert _has(calls, "reader_a", "settings_get"), sorted(calls)
+
+def test_this_qualified_generic_call_resolves(tmp_path, monkeypatch):
+    """Case 2: `this.Get<int>("port")` — the member arm's generic_name name."""
+    calls = _calls(tmp_path, monkeypatch)
+    assert _has(calls, "reader_b", "settings_get"), sorted(calls)
+
+def test_same_class_generic_call_resolves(tmp_path, monkeypatch):
+    """Case 5: `Make<int>()` with the target on the same class."""
+    calls = _calls(tmp_path, monkeypatch)
+    assert _has(calls, "local_e", "local_make"), sorted(calls)
+
+def test_generic_call_never_targets_the_bracketed_text(tmp_path, monkeypatch):
+    """The old failure shape: no target derived from `Get<int>` raw text."""
+    calls = _calls(tmp_path, monkeypatch)
+    assert not any("<" in t for _, t in calls), sorted(calls)
+
+def test_non_generic_controls_unchanged(tmp_path, monkeypatch):
+    """Cases 3 and 4 resolved before the fix and must keep resolving."""
+    calls = _calls(tmp_path, monkeypatch)
+    assert _has(calls, "reader_c", "settings_getraw"), sorted(calls)
+    assert _has(calls, "reader_d", "settings_getraw"), sorted(calls)
+

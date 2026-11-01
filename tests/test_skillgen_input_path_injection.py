@@ -44,10 +44,20 @@ def step1_script() -> str:
 
 def _run_step1(script: str, input_path_value: str, cwd: Path) -> subprocess.CompletedProcess:
     substituted = script.replace("INPUT_PATH", input_path_value)
+    bin_dir = cwd / ".test_bin"
+    bin_dir.mkdir(exist_ok=True)
+    py3 = bin_dir / "python3"
+    try:
+        py3.symlink_to(sys.executable)
+    except (OSError, NotImplementedError):
+        pass
+    dummy_uv = bin_dir / "uv"
+    dummy_uv.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    dummy_uv.chmod(0o755)
     return subprocess.run(
         ["bash", "-c", substituted],
         cwd=cwd, capture_output=True, text=True,
-        env={**os.environ, "PATH": os.environ.get("PATH", "")},
+        env={**os.environ, "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}"},
     )
 
 
