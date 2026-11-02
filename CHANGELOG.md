@@ -11,7 +11,11 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 - Deterministic Codebase Priming & Cold-Start Accelerator (`graph_fy prime`, [#103](https://github.com/ronmkr/graph_fy/issues/103)):
   - **Hyper-Dense Architectural Header**: Implemented `graph_fy/commands/prime.py` generating a deterministic, ~120-word (~150 token) markdown briefing in `<20ms` summarizing top 3 bounded contexts, key entry points, high-risk hubs, and context retrieval directives.
-  - **Multi-Target Synchronization**: Supports `--target stdout|agents|cursor|copilot` (synchronizing `AGENTS.md`, `.cursorrules`, and `.github/copilot-instructions.md`) and `--output FILE`.
+  - **Code Abstraction Prioritization**: Intelligently filters out documentation headings (`Changelog`, release notes) when code nodes exist in the corpus, ensuring bounded contexts and high-risk hubs reflect actual symbols.
+  - **Multi-Target Synchronization**: Supports `--target stdout|agents|claude|gemini|cursor|copilot|all` (synchronizing `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, and `.github/copilot-instructions.md`) and `--output FILE`. Automatically self-pinned headers into repository agent instructions.
+
+- Pointed Code Comment & Architectural Quality Hardening:
+  - Upgraded code comments and docstrings across `graph_fy/commands/prime.py`, `graph_fy/commands/diff.py`, `graph_fy/commands/analysis.py`, `graph_fy/cli.py`, `graph_fy/impact.py`, and `graph_fy/report.py` with explicit algorithmic invariants, complexity ceilings, and CI gate protocols.
 
 - Repository Agent-Readiness Scorecard (`graph_fy report --agent-ready`, [#106](https://github.com/ronmkr/graph_fy/issues/106)):
   - **Readiness Scoring Engine**: Implemented `calculate_agent_readiness` in `graph_fy/report.py` scoring codebases (0–100%) across God-Node Interface Health (40%), Acyclicity (35%), and Clean Context Ratio (25%).

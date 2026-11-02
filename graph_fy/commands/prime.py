@@ -23,11 +23,34 @@ PRIME_END = "<!-- GRAPH_FY_PRIME_END -->"
 
 
 def generate_prime_header(graph: nx.Graph, root: Path | None = None) -> str:
-    """Generate a deterministic, ~150-250 token markdown architectural summary."""
-    # 1. Top Bounded Contexts (by community node count)
+    """Generate deterministic, ~150-250 token architectural briefing for AI agents.
+
+    Synthesizes three critical structural signals from graph.json without LLM calls:
+    1. Bounded Contexts: Top 3 community clusters by non-file node count.
+    2. Key Entry Points: Bootstrap callables and dispatchers from primary source modules.
+    3. High-Risk Hubs: Top god nodes by degree centrality (highest regression risk).
+    """
+    has_code_nodes = any(
+        d.get("file_type") == "code" or not d.get("file_type") or d.get("category") == "code"
+        for _, d in graph.nodes(data=True)
+        if not _is_file_node(graph, _)
+    )
+
+    def _is_doc_or_noise(nid: str, ndata: dict) -> bool:
+        if _is_file_node(graph, nid):
+            return True
+        if has_code_nodes:
+            if ndata.get("file_type") in ("document", "paper", "image"):
+                return True
+            if ndata.get("node_kind") in ("heading", "section"):
+                return True
+        return False
+
+    # 1. Bounded contexts: Louvain partition clusters ranked by functional symbol density
+    # Exclude raw file/directory nodes and documentation headings when code nodes are present.
     communities: dict[int, list[str]] = {}
     for n, d in graph.nodes(data=True):
-        if _is_file_node(graph, n):
+        if _is_doc_or_noise(n, d):
             continue
         c = d.get("community")
         if c is not None:
@@ -41,12 +64,13 @@ def generate_prime_header(graph: nx.Graph, root: Path | None = None) -> str:
     context_lines: list[str] = []
     for cid in top_cids:
         c_nodes = communities[cid]
-        # Pick top 2 most connected nodes in community
+        # Anchor context identity using top 2 highest-degree members rather than verbose listings
         c_sorted = sorted(c_nodes, key=lambda n: graph.degree(n), reverse=True)
         hubs = [f"`{graph.nodes[n].get('label', n)}`" for n in c_sorted[:2]]
         context_lines.append(f"  - Context {cid} ({len(c_nodes)} nodes): {', '.join(hubs)}")
 
-    # 2. Key Entry Points
+    # 2. Key entry points: Heuristic scan for bootstrap routines across primary filenames.
+    # Exclude test files, noisy markdown fragments, and excessively long labels.
     entry_candidates: list[str] = []
     for n, d in graph.nodes(data=True):
         src = str(d.get("source_file") or "").lower()
@@ -58,11 +82,17 @@ def generate_prime_header(graph: nx.Graph, root: Path | None = None) -> str:
                 entry_candidates.append(lbl)
     entry_points = sorted(list(dict.fromkeys(entry_candidates)))[:4]
 
-    # 3. High-Risk Hubs / God Nodes
-    all_gods = god_nodes(graph, top_n=5)
+    # 3. High-risk hubs: Top degree entities (god nodes) that propagate transitive blast radius.
+    # When code nodes exist, prioritize code abstractions over documentation headings.
+    all_gods = god_nodes(graph, top_n=10)
+    filtered_gods = [
+        g for g in all_gods
+        if not _is_doc_or_noise(g["id"], graph.nodes.get(g["id"], {}))
+    ] if has_code_nodes else all_gods
+    effective_gods = filtered_gods if filtered_gods else all_gods
     hub_strs = [
         f"`{g['label']}` ({g['degree']} edges)"
-        for g in all_gods[:3]
+        for g in effective_gods[:3]
     ]
 
     lines = [
@@ -89,7 +119,13 @@ def generate_prime_header(graph: nx.Graph, root: Path | None = None) -> str:
 
 
 def inject_prime_header(target_path: Path, header: str) -> None:
-    """Inject or replace the prime header in the target file."""
+    """Idempotently inject or replace prime header in destination markdown/rules file.
+
+    Guarantees:
+    - If markers exist: replaces bounded content in-place without altering surrounding text.
+    - If markers absent: prepends header cleanly with trailing newline spacing.
+    - Creates parent directories automatically if absent.
+    """
     if target_path.exists():
         content = target_path.read_text(encoding="utf-8")
         if PRIME_START in content and PRIME_END in content:
@@ -178,22 +214,36 @@ def cmd_prime(argv: list[str]) -> int:
         print(f"Injected prime header into {output_file} (~{approx_tokens} tokens)")
         return 0
 
+    target_map = {
+        "agents": "AGENTS.md",
+        "claude": "CLAUDE.md",
+        "gemini": "GEMINI.md",
+        "cursor": ".cursorrules",
+        "copilot": ".github/copilot-instructions.md",
+    }
+
     if target_mode == "stdout":
         print(header)
-    elif target_mode == "agents":
-        target_f = root_dir / "AGENTS.md"
-        inject_prime_header(target_f, header)
-        print(f"Synchronized prime header with {target_f} (~{approx_tokens} tokens)")
-    elif target_mode == "cursor":
-        target_f = root_dir / ".cursorrules"
-        inject_prime_header(target_f, header)
-        print(f"Synchronized prime header with {target_f} (~{approx_tokens} tokens)")
-    elif target_mode == "copilot":
-        target_f = root_dir / ".github" / "copilot-instructions.md"
+    elif target_mode == "all":
+        synced = []
+        for name, rel_path in target_map.items():
+            target_f = root_dir / rel_path
+            if target_f.exists():
+                inject_prime_header(target_f, header)
+                synced.append(str(target_f))
+        if not synced:
+            # Fall back to syncing default AGENTS.md and CLAUDE.md if neither exists
+            for def_name in ("AGENTS.md", "CLAUDE.md"):
+                target_f = root_dir / def_name
+                inject_prime_header(target_f, header)
+                synced.append(str(target_f))
+        print(f"Synchronized prime header with {len(synced)} file(s): {', '.join(synced)} (~{approx_tokens} tokens)")
+    elif target_mode in target_map:
+        target_f = root_dir / target_map[target_mode]
         inject_prime_header(target_f, header)
         print(f"Synchronized prime header with {target_f} (~{approx_tokens} tokens)")
     else:
-        print(f"error: unknown target '{target_mode}'. Use stdout, agents, cursor, or copilot.", file=sys.stderr)
+        print(f"error: unknown target '{target_mode}'. Use stdout, agents, claude, gemini, cursor, copilot, or all.", file=sys.stderr)
         return 1
 
     return 0

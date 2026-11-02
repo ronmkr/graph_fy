@@ -99,3 +99,15 @@ def test_cmd_prime_cli(tmp_path: Path, monkeypatch, capsys):
     rc2 = cmd_prime(["graph_fy", "prime", "--graph", str(graph_file), "--output", str(agents_file)])
     assert rc2 == 0
     assert PRIME_START in agents_file.read_text(encoding="utf-8")
+
+    # 3. Target claude and target all
+    claude_file = tmp_path / "CLAUDE.md"
+    claude_file.write_text("# Claude Rules\n", encoding="utf-8")
+    rc3 = cmd_prime(["graph_fy", "prime", "--graph", str(graph_file), "--root", str(tmp_path), "--target", "claude"])
+    assert rc3 == 0
+    assert PRIME_START in claude_file.read_text(encoding="utf-8")
+
+    rc4 = cmd_prime(["graph_fy", "prime", "--graph", str(graph_file), "--root", str(tmp_path), "--target", "all"])
+    assert rc4 == 0
+    assert "### graph_fy Prime Briefing" in agents_file.read_text(encoding="utf-8")
+    assert "### graph_fy Prime Briefing" in claude_file.read_text(encoding="utf-8")

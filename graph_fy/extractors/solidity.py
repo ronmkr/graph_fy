@@ -276,8 +276,12 @@ def extract_solidity(path: Path) -> dict:
         return {"nodes": [], "edges": [], "error": "tree-sitter-solidity not installed"}
 
     try:
+        import warnings
         source = _read_source_bytes(path)
-        root = Parser(Language(tree_sitter_solidity.language())).parse(source).root_node
+        with warnings.catch_warnings():
+            # tree-sitter-solidity C binding returns a raw int pointer deprecated in tree-sitter 0.22+
+            warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*int argument support.*")
+            root = Parser(Language(tree_sitter_solidity.language())).parse(source).root_node
     except Exception as exc:
         return {"nodes": [], "edges": [], "error": f"Solidity grammar failed to load: {exc}"}
 

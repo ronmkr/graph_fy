@@ -113,7 +113,9 @@ def calculate_agent_readiness(
         from .analyze import god_nodes
         god_node_list = god_nodes(G, top_n=10)
 
-    # God-node interface health
+    # Pillar 1: God-Node Interface Health (40% weight)
+    # Checks whether high-degree architectural hubs provide explicit docstrings, signatures,
+    # or typed parameters so agents do not hallucinate calling conventions or contracts.
     documented_hubs = 0
     for g in god_node_list:
         nid = g.get("id") or g.get("node") or g.get("label")
@@ -122,14 +124,18 @@ def calculate_agent_readiness(
             documented_hubs += 1
     hub_health_pct = round(100.0 * documented_hubs / max(1, len(god_node_list)), 1) if god_node_list else 100.0
 
-    # Acyclicity
+    # Pillar 2: Architectural Acyclicity (35% weight)
+    # Deducts 10 points per circular import cycle. Circular dependencies cause non-deterministic
+    # module initialization, mock leaks, and multi-hop reasoning loops for agent planners.
     if cycles is None:
         from .analyze import find_import_cycles
         cycles = find_import_cycles(G)
     cycle_count = len(cycles)
     acyclicity_score = max(0.0, 100.0 - 10.0 * cycle_count)
 
-    # Clean context ratio
+    # Pillar 3: Clean Context Ratio (25% weight)
+    # Penalizes disconnected orphan symbols (degree == 0) that pollute graph traversal and
+    # waste agent context window without providing reachability paths.
     orphans = [n for n in G.nodes if G.degree(n) == 0 and not _is_file_node(G, n)]
     orphan_ratio = len(orphans) / total_nodes
     clean_ratio_pct = round(100.0 * max(0.0, 1.0 - orphan_ratio * 2.0), 1)
