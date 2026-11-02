@@ -1,3 +1,14 @@
+<!-- GRAPH_FY_PRIME_START -->
+### graph_fy Prime Briefing (Zero-LLM Fast Path)
+- **Bounded Contexts**:
+  - Context 2 (222 nodes): `_read_text()`, `_extract_generic()`
+  - Context 13 (214 nodes): `detect()`, `_is_sensitive()`
+  - Context 1 (195 nodes): `_edge_labels()`, `extract_java()`
+- **Key Entry Points**: `_reenter_main()`, `_run_cli()`, `cli.py`, `dispatch_command()`
+- **High-Risk Hubs**: `extract()` (757 edges), `build_from_json()` (279 edges), `_read_text()` (206 edges)
+- **Protocol**: Run `graph_fy context "<task>"` for AST skeletons & blast radius before edits.
+<!-- GRAPH_FY_PRIME_END -->
+
 # graph_fy
 
 This project has a graph_fy knowledge graph at graph_fy_out/ with community structure, god nodes, and deterministic AST relationships.

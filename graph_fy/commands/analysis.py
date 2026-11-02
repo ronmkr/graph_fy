@@ -7,7 +7,18 @@ from pathlib import Path
 
 
 def cmd_affected(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> int:
-    """Execute 'graph_fy affected' query."""
+    """Execute 'graph_fy affected' query.
+
+    Resolves a seed symbol (by exact node ID, label, bare function name, or relative path),
+    then performs a BFS traversal backwards across in-edges (callers, importers, inheritors)
+    up to `depth` hops (default: 2).
+
+    Exit codes:
+        0: Successful resolution and output printed.
+        1: Invalid arguments or graph file not found.
+        3: Ambiguous symbol query with multiple competing candidate nodes.
+        4: Zero candidate nodes matched.
+    """
     if len(argv) < 3:
         print("Usage: graph_fy affected \"<node-or-label>\" [--relation R] [--depth N] [--graph path]", file=sys.stderr)
         return 1
@@ -99,7 +110,13 @@ def cmd_affected(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> 
 
 
 def cmd_impact(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> int:
-    """Execute 'graph_fy impact' and 'graph_fy blast' query."""
+    """Execute 'graph_fy impact' and 'graph_fy blast' query.
+
+    Calculates downstream transitive dependency closure up to `depth` hops (default: 10),
+    evaluating affected unit/integration tests, external API routes, and cloud/IaC resources.
+    Applies supernode degree damping to prune combinatorial explosion through utility hubs
+    (disable with `--no-damp`).
+    """
     if len(argv) < 3:
         print("Usage: graph_fy impact <target> [--depth N] [--json] [--terse] [--graph path]", file=sys.stderr)
         return 1
@@ -179,7 +196,12 @@ def cmd_impact(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> in
 
 
 def cmd_flow(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> int:
-    """Execute 'graph_fy flow' query."""
+    """Execute 'graph_fy flow' query.
+
+    Traces causal execution paths from an entry point symbol (e.g. CLI or controller)
+    downwards to an optional sink (e.g. database query, network client, or file sink)
+    up to `max_depth` (default: 15). Renders as Mermaid graph or structured JSON.
+    """
     if len(argv) < 3:
         print("Usage: graph_fy flow <entry_point> [--sink <sink>] [--json] [--graph <path>] [--max-depth N]", file=sys.stderr)
         return 1

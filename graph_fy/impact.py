@@ -329,12 +329,12 @@ def compute_impact(
         if item["id"] in god_node_set
     ]
 
-    # Calculate Blast Radius Risk Score
-    # Factors:
-    # 1. Dependent count (log-scaled)
-    # 2. God nodes impacted (high impact multiplier)
-    # 3. Community boundaries crossed (architectural spread)
-    # 4. Centrality (PageRank / degree centrality of target and dependents)
+    # Calculate Holistic Blast Radius Risk Score (0.000 to 1.000)
+    # Calibrated 4-factor risk model:
+    # 1. Dependent Scale Factor (weight: 0.40): Sub-linear log-growth scaling against 50-node ceiling.
+    # 2. God Node Risk Factor (weight: 0.25): High-degree architectural hubs increase regression likelihood.
+    # 3. Architectural Spread (weight: 0.20): Cross-community edges indicate breach of domain encapsulation.
+    # 4. Centrality Importance (weight: 0.15): Target's PageRank (or degree centrality) relative to graph maximum.
 
     downstream_count = len(downstream_entries)
     total_graph_nodes = max(1, len(graph))

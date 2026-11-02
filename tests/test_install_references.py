@@ -178,33 +178,20 @@ def test_hard_fail_when_bundle_dir_present_but_references_missing(tmp_path, monk
     shipped) and falls back to monolith, covered by
     ``test_unbuilt_bundle_host_falls_back_to_monolith``.
     """
-    platform = "claude"
-    bundle = mainmod._PLATFORM_CONFIG[platform]["skill_refs"]
-    skills_root = PKG_DIR / "skills"
-    bundle_dir = skills_root / bundle
+    fake_bundle_dir = tmp_path / "fake_bundle_no_refs"
+    fake_bundle_dir.mkdir(parents=True, exist_ok=True)
+    (fake_bundle_dir / "SKILL.md").write_text("body\n", encoding="utf-8")
+    missing_refs = fake_bundle_dir / "references"
 
-    created_root = not skills_root.exists()
-    backup_dir = None
-    if bundle_dir.exists():
-        backup_dir = Path(tempfile.mkdtemp()) / "bundle_backup"
-        shutil.move(str(bundle_dir), str(backup_dir))
-    # Bundle dir present, but no references/ subdir inside it.
-    bundle_dir.mkdir(parents=True, exist_ok=True)
-    (bundle_dir / "SKILL.md").write_text("body\n", encoding="utf-8")
-    try:
-        with pytest.raises(SystemExit) as exc:
-            with patch("graph_fy.__main__.Path.home", return_value=tmp_path):
-                monkeypatch.chdir(tmp_path)
-                mainmod._copy_skill_file("claude")
-        assert exc.value.code == 1
-    finally:
-        if bundle_dir.exists():
-            shutil.rmtree(bundle_dir, ignore_errors=True)
-        if backup_dir is not None:
-            shutil.move(str(backup_dir), str(bundle_dir))
-            shutil.rmtree(backup_dir.parent, ignore_errors=True)
-        elif created_root:
-            shutil.rmtree(skills_root, ignore_errors=True)
+    import graph_fy.install
+    monkeypatch.setattr(graph_fy.install, "_packaged_skill_refs_dir", lambda p: missing_refs if p == "claude" else None)
+    monkeypatch.setattr(mainmod, "_packaged_skill_refs_dir", lambda p: missing_refs if p == "claude" else None)
+
+    with pytest.raises(SystemExit) as exc:
+        with patch("graph_fy.__main__.Path.home", return_value=tmp_path):
+            monkeypatch.chdir(tmp_path)
+            mainmod._copy_skill_file("claude")
+    assert exc.value.code == 1
 
 
 def _first_unbuilt_progressive_host():

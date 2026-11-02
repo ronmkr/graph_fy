@@ -84,6 +84,11 @@ def _reenter_main() -> None:
 
 
 def dispatch_command(cmd: str) -> None:
+    """Route non-install subcommand to corresponding domain handler.
+
+    Exits process directly on completion with domain-specific status code.
+    Path arguments (e.g. `graph_fy ./src`) fall through to `_reenter_main()` for build/extract pipeline.
+    """
     if cmd == "prime":
         from graph_fy.commands.prime import cmd_prime
         rc = cmd_prime(sys.argv)

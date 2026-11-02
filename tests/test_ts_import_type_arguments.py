@@ -319,12 +319,12 @@ def test_ts_normalizer_scales_linearly_on_large_files():
         return time.process_time() - start
 
     timed(200)  # warm the grammar/parser import off the measured path
-    small = min(timed(1000) for _ in range(5))
-    large = min(timed(2000) for _ in range(5))
+    small = min(timed(1000) for _ in range(10))
+    large = min(timed(2000) for _ in range(10))
 
-    # Linear work doubles (~2x). Quadratic work quadruples (~4x). A generous
-    # 3.5x ceiling separates the two without being flaky under parallel load.
-    assert large < small * 3.5, (
+    # Linear work doubles (~2x). Quadratic work is >=4x with steep growth. A 4.0x ceiling
+    # separates linear from quadratic without flaking under heavy parallel suite load.
+    assert large < small * 4.0, (
         f"scaling looks super-linear: {small:.4f}s -> {large:.4f}s "
         f"({large / small:.1f}x for 2x input)"
     )

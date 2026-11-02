@@ -64,6 +64,9 @@ def cmd_diff(argv: list[str]) -> int:
     else:
         print(res.get("prompt_context", ""))
 
+    # CI Breaking-Change Quality Gate (#104):
+    # Exit with code 2 when transitive blast radius hits HIGH/CRITICAL or score >= 0.45.
+    # Enables zero-config gating in GitHub Actions PR checks before merge.
     if fail_on_breaking:
         tier = str(res.get("risk_tier", "LOW")).upper()
         score = float(res.get("risk_score", 0.0))
