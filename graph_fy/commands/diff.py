@@ -14,6 +14,7 @@ def cmd_diff(argv: list[str]) -> int:
     root_dir = "."
     graph_path = None
     fmt = "default"
+    fail_on_breaking = False
 
     args = argv[2:]
     i = 0
@@ -48,6 +49,9 @@ def cmd_diff(argv: list[str]) -> int:
         elif args[i].startswith("--format="):
             fmt = args[i].split("=", 1)[1]
             i += 1
+        elif args[i] in ("--fail-on-breaking", "--fail-on-risk"):
+            fail_on_breaking = True
+            i += 1
         elif not args[i].startswith("-"):
             base_ref = args[i]
             i += 1
@@ -59,4 +63,11 @@ def cmd_diff(argv: list[str]) -> int:
         print(json.dumps(res, indent=2))
     else:
         print(res.get("prompt_context", ""))
+
+    if fail_on_breaking:
+        tier = str(res.get("risk_tier", "LOW")).upper()
+        score = float(res.get("risk_score", 0.0))
+        if tier in ("CRITICAL", "HIGH") or score >= 0.45:
+            print(f"error: breaking changes or high blast-radius detected (tier={tier}, score={score:.2f})", file=sys.stderr)
+            return 2
     return 0

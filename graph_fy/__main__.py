@@ -582,6 +582,8 @@ def _run_cli() -> None:
         print("    --max-children N        cap children per node (default 200)")
         print("    --top-k-edges N         per-symbol outbound edges in inspector (default 12)")
         print("    --label NAME            project label in header")
+        print("  prime                   deterministic ~150-token codebase priming briefing for coding agents")
+        print("                          [--target stdout|agents|cursor|copilot] [--output FILE] [--json]")
         print("  describe arch           emit rich interactive architecture & stage-by-stage AST flow HTML")
         print("                          [--graph PATH] [--output HTML] [--focus TERM] [--json] [--open]")
         print("  extract <path>          headless full extraction (AST + semantic LLM) for CI/scripts")

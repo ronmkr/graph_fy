@@ -4,6 +4,23 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 ## 0.3.1 (Unreleased)
 
+- Predictive Blast Radius & Supernode Pruning ([#54](https://github.com/ronmkr/graph_fy/issues/54)):
+  - **Degree-Damped Reverse-BFS Traversal**: In `graph_fy/impact.py` (`compute_impact`), intermediate utility nodes with in-degree $\ge 100$ are automatically identified and damped, preventing ubiquitous utilities (`logger`, `Result`, `fmt`, `BaseEntity`) from flooding prompt context with 1,000+ low-signal callers.
+  - **Domain Asset Preservation**: Prioritizes unit and integration tests (`_is_test_node`), API route endpoints (`_is_api_endpoint`), and direct callers before capping fanout to `max_supernode_fanout=25`.
+  - **Report & CLI Surface**: Surfaces `Supernodes Damped: N utility hub(s) pruned` in ASCII blast radius reports and added `--include-supernodes` / `--no-damp` CLI override flag in `graph_fy impact`.
+
+- Deterministic Codebase Priming & Cold-Start Accelerator (`graph_fy prime`, [#103](https://github.com/ronmkr/graph_fy/issues/103)):
+  - **Hyper-Dense Architectural Header**: Implemented `graph_fy/commands/prime.py` generating a deterministic, ~120-word (~150 token) markdown briefing in `<20ms` summarizing top 3 bounded contexts, key entry points, high-risk hubs, and context retrieval directives.
+  - **Multi-Target Synchronization**: Supports `--target stdout|agents|cursor|copilot` (synchronizing `AGENTS.md`, `.cursorrules`, and `.github/copilot-instructions.md`) and `--output FILE`.
+
+- Repository Agent-Readiness Scorecard (`graph_fy report --agent-ready`, [#106](https://github.com/ronmkr/graph_fy/issues/106)):
+  - **Readiness Scoring Engine**: Implemented `calculate_agent_readiness` in `graph_fy/report.py` scoring codebases (0–100%) across God-Node Interface Health (40%), Acyclicity (35%), and Clean Context Ratio (25%).
+  - **Audit Trail & CLI Gate**: Embedded `## Agent-Readiness Scorecard` into `GRAPH_REPORT.md` and exposed `graph_fy report --agent-ready [--json]` and `graph_fy report --score`.
+
+- Transitive PR Diff Blast Radius & Breaking Guard (`graph_fy diff`, [#104](https://github.com/ronmkr/graph_fy/issues/104)):
+  - **CI Breaking Change Guard**: Added `--fail-on-breaking` flag in `graph_fy diff` exiting with code 2 when HIGH or CRITICAL blast radius risk is detected.
+  - **Structured Markdown Output**: Added `--format markdown` / `--format pr` in `graph_fy/retrieval_context.py` producing GitHub PR review markdown tables with affected test targets, risk tier, and directly touched symbols.
+
 - Test Suite Rationalization, Anti-Bloat Protocol & Parallelization:
   - **Pytest Parallel Execution (`pytest-xdist`)**: Distributed test runs across local CPU cores via `-n auto`, dropping total repository test suite runtime from **380.8s (~6m 20s) down to 64.5s (~1m 04s)** (a 6x speedup).
   - **Marker Taxonomy & Tiering**: Added formal marker configuration to `pyproject.toml` (`unit`, `integration`, `slow`, `cli`) enabling fast sub-5s local iteration loops.

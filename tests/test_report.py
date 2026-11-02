@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import networkx as nx
 from graph_fy.build import build_from_json
 from graph_fy.cluster import cluster, score_all
 from graph_fy.analyze import god_nodes, surprising_connections
@@ -201,3 +202,32 @@ def test_report_hubs_use_wikilinks_when_obsidian():
     labels = {cid: f"Widget {cid}" for cid in communities}
     report = generate(G, communities, cohesion, labels, gods, surprises, detection, tokens, "./project", min_community_size=1, obsidian=True)
     assert "[[_COMMUNITY_" in report
+
+
+def test_report_agent_readiness_scorecard():
+    """Verify Issue #106 consolidation: Agent-Readiness scorecard appears in GRAPH_REPORT.md."""
+    G, communities, cohesion, labels, gods, surprises, detection, tokens = make_inputs()
+    report = generate(G, communities, cohesion, labels, gods, surprises, detection, tokens, "./project")
+    assert "## Agent-Readiness Scorecard" in report
+    assert "Overall Score:" in report
+    assert "God-Node Interface Health:" in report
+    assert "Acyclicity Score:" in report
+    assert "Clean Context Ratio:" in report
+
+
+def test_calculate_agent_readiness_scoring():
+    """Verify numeric behavior of calculate_agent_readiness."""
+    from graph_fy.report import calculate_agent_readiness
+
+    G = nx.DiGraph()
+    # 2 hub nodes with docstrings
+    G.add_node("hub1", label="AuthHub", docstring="Handles authentication", file_type="code")
+    G.add_node("hub2", label="DataHub", signature="def query(sql: str)", file_type="code")
+    G.add_edge("hub1", "hub2", relation="calls")
+
+    res = calculate_agent_readiness(G, god_node_list=[{"id": "hub1"}, {"id": "hub2"}], cycles=[])
+    assert res["score"] >= 75.0
+    assert res["verdict"] == "AGENT_READY"
+    assert res["hub_health_pct"] == 100.0
+    assert res["cycle_count"] == 0
+

@@ -112,6 +112,7 @@ def cmd_impact(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> in
     depth = 10
     as_json = False
     terse = False
+    damp_supernodes = True
     args = argv[3:]
     i = 0
     while i < len(args):
@@ -147,6 +148,9 @@ def cmd_impact(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> in
         elif args[i] in ("--terse", "-t"):
             terse = True
             i += 1
+        elif args[i] in ("--no-damp", "--include-supernodes"):
+            damp_supernodes = False
+            i += 1
         else:
             i += 1
 
@@ -166,7 +170,7 @@ def cmd_impact(argv: list[str], default_graph_path_fn, find_graph_path_fn) -> in
 
     from graph_fy.paths import graph_fy_OUT_NAME
     graph_root = gp.parent.parent if gp.parent.name == graph_fy_OUT_NAME else gp.parent
-    impact_data = compute_impact(graph, target, max_depth=depth, root=graph_root)
+    impact_data = compute_impact(graph, target, max_depth=depth, root=graph_root, damp_supernodes=damp_supernodes)
     if as_json:
         print(json.dumps(impact_data, indent=2))
     else:

@@ -326,3 +326,76 @@ def test_mcp_serve_tools(tmp_path):
 
     server = _build_server(str(graph_path))
     assert server is not None
+
+
+def test_supernode_damping_prunes_utility_hub():
+    """Verify Issue #54: Supernodes with high in-degree are damped during reverse BFS."""
+    G = nx.DiGraph()
+    # Target node
+    G.add_node("business_fn", label="process_payment()", source_file="src/payment.py", file_type="code")
+    # Utility supernode: logger
+    G.add_node("logger", label="log_event()", source_file="src/logger.py", file_type="code")
+    G.add_edge("business_fn", "logger", relation="calls")
+
+    # Connect 120 generic callers to logger
+    for i in range(120):
+        cid = f"caller_{i}"
+        G.add_node(cid, label=f"caller_{i}()", source_file=f"src/caller_{i}.py", file_type="code")
+        G.add_edge(cid, "logger", relation="references")
+
+    # Connect 3 tests to logger
+    for j in range(3):
+        tid = f"test_{j}"
+        G.add_node(tid, label=f"test_{j}()", source_file=f"tests/test_{j}.py", file_type="code")
+        G.add_edge(tid, "logger", relation="calls")
+
+    # Case 1: Damping enabled (default) with threshold 100 and max fanout 20
+    damped_res = compute_impact(
+        G,
+        "logger",  # note logger as target won't be damped because it's a seed target
+        damp_supernodes=True,
+        supernode_threshold=100,
+    )
+    # When logger is the seed target, it is not damped
+    assert "logger" not in damped_res["damped_supernodes"]
+
+    # Now make target 'business_fn'. If business_fn is target, reverse BFS looks for callers of business_fn.
+    # To test intermediate damping: business_fn -> caller_A -> logger -> 120 callers.
+    # Reverse BFS from business_fn looks for callers of business_fn:
+    # Say client -> business_fn -> (business_fn doesn't lead to logger in reverse BFS, callers of business_fn do).
+    # In reverse BFS: if A calls B, B changes -> A is impacted.
+    # Suppose 'db_layer' is changed. 'logger' calls 'db_layer'. 120 callers call 'logger'.
+    G.add_node("db_pool", label="DatabasePool", source_file="src/db.py", file_type="code")
+    # logger calls db_pool
+    G.add_edge("logger", "db_pool", relation="calls")
+
+    # When db_pool changes, logger is impacted (caller of db_pool).
+    # Then logger's incoming edges (120 callers + 3 tests) are explored.
+    impact = compute_impact(
+        G,
+        "DatabasePool",
+        max_depth=5,
+        damp_supernodes=True,
+        supernode_threshold=100,
+        max_supernode_fanout=20,
+    )
+    assert "logger" in impact["damped_supernodes"]
+    assert impact["supernodes_pruned_count"] == 1
+    # Downstream count should be pruned to 1 (logger) + 3 (tests) + remaining up to fanout <= 25
+    assert impact["downstream_count"] <= 25
+    assert len(impact["affected_tests"]) == 3  # Tests are prioritized!
+
+    # Case 2: Damping disabled
+    undamped = compute_impact(
+        G,
+        "DatabasePool",
+        max_depth=5,
+        damp_supernodes=False,
+    )
+    assert undamped["supernodes_pruned_count"] == 0
+    assert undamped["downstream_count"] > 100
+
+    # Format report check
+    report = format_impact_report(impact)
+    assert "Supernodes Damped: 1 utility hub(s) pruned" in report
+

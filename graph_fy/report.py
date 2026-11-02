@@ -93,6 +93,67 @@ def _learning_section(lines: list, learning: dict | None, top_n: int = 10) -> No
                          + (f" -> {nodes}" if nodes else ""))
 
 
+def calculate_agent_readiness(
+    G: nx.Graph,
+    god_node_list: list[dict] | None = None,
+    cycles: list[dict] | None = None,
+) -> dict[str, Any]:
+    """Calculate Agent-Readiness Scorecard (0–100%) for a code graph (#106 consolidation).
+
+    Evaluates:
+    - God-Node Interface Health (40% weight): % of top hub nodes with docstrings, signatures, or typed params.
+    - Acyclicity Score (35% weight): Penalizes circular import loops (100% minus 10% per cycle).
+    - Clean Context Ratio (25% weight): Penalizes disconnected orphan symbols that bloat retrieval.
+    """
+    from typing import Any
+    from .analyze import _is_file_node
+
+    total_nodes = max(1, G.number_of_nodes())
+    if god_node_list is None:
+        from .analyze import god_nodes
+        god_node_list = god_nodes(G, top_n=10)
+
+    # God-node interface health
+    documented_hubs = 0
+    for g in god_node_list:
+        nid = g.get("id") or g.get("node") or g.get("label")
+        ndata = G.nodes.get(nid, {}) if nid else {}
+        if ndata.get("docstring") or ndata.get("signature") or ndata.get("type") or ndata.get("context") or ndata.get("file_type"):
+            documented_hubs += 1
+    hub_health_pct = round(100.0 * documented_hubs / max(1, len(god_node_list)), 1) if god_node_list else 100.0
+
+    # Acyclicity
+    if cycles is None:
+        from .analyze import find_import_cycles
+        cycles = find_import_cycles(G)
+    cycle_count = len(cycles)
+    acyclicity_score = max(0.0, 100.0 - 10.0 * cycle_count)
+
+    # Clean context ratio
+    orphans = [n for n in G.nodes if G.degree(n) == 0 and not _is_file_node(G, n)]
+    orphan_ratio = len(orphans) / total_nodes
+    clean_ratio_pct = round(100.0 * max(0.0, 1.0 - orphan_ratio * 2.0), 1)
+
+    overall_score = round(0.40 * hub_health_pct + 0.35 * acyclicity_score + 0.25 * clean_ratio_pct, 1)
+    if overall_score >= 75.0:
+        verdict = "AGENT_READY"
+    elif overall_score >= 50.0:
+        verdict = "NEEDS_IMPROVEMENT"
+    else:
+        verdict = "UNFRIENDLY"
+
+    return {
+        "score": overall_score,
+        "verdict": verdict,
+        "hub_health_pct": hub_health_pct,
+        "god_nodes_evaluated": len(god_node_list),
+        "acyclicity_score": acyclicity_score,
+        "cycle_count": cycle_count,
+        "clean_ratio_pct": clean_ratio_pct,
+        "orphan_count": len(orphans),
+    }
+
+
 def generate(
     G: nx.Graph,
     communities: dict[int, list[str]],
@@ -189,6 +250,27 @@ def generate(
         f"- Token cost: {token_cost.get('input', 0):,} input · {token_cost.get('output', 0):,} output",
     ]
 
+    _has_code = any(
+        d.get("file_type") == "code" for _, d in G.nodes(data=True)
+    ) or any(
+        d.get("relation") in ("imports", "imports_from")
+        for *_e, d in G.edges(data=True)
+    )
+    cycles = []
+    if _has_code:
+        from .analyze import find_import_cycles
+        cycles = find_import_cycles(G)
+
+    readiness = calculate_agent_readiness(G, god_node_list=god_node_list, cycles=cycles)
+    lines += [
+        "",
+        "## Agent-Readiness Scorecard",
+        f"- Overall Score: {readiness['score']}/100 [{readiness['verdict']}]",
+        f"- God-Node Interface Health: {readiness['hub_health_pct']}% of top architectural hubs documented/typed",
+        f"- Acyclicity Score: {readiness['acyclicity_score']:.1f}% ({readiness['cycle_count']} circular import cycle(s))",
+        f"- Clean Context Ratio: {readiness['clean_ratio_pct']}% ({readiness['orphan_count']} disconnected orphan symbol(s))",
+    ]
+
     if built_at_commit:
         lines += [
             "",
@@ -245,15 +327,7 @@ def generate(
     # for code — a documents-only corpus has no imports, so the section is pure
     # noise there ("None detected" on every run). Emit it only when the graph
     # actually contains code (#1657).
-    _has_code = any(
-        d.get("file_type") == "code" for _, d in G.nodes(data=True)
-    ) or any(
-        d.get("relation") in ("imports", "imports_from")
-        for *_e, d in G.edges(data=True)
-    )
     if _has_code:
-        from .analyze import find_import_cycles
-        cycles = find_import_cycles(G)
         lines += ["", "## Import Cycles"]
         if cycles:
             for c in cycles:

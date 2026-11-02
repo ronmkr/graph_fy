@@ -24,44 +24,37 @@ import pytest
 import graph_fy
 import graph_fy.__main__ as mainmod
 
-
-PKG_DIR = Path(graph_fy.__file__).parent
+pytestmark = [pytest.mark.xdist_group(name="skills_bundle")]
+PKG_DIR = Path(graph_fy.__file__).resolve().parent
 
 
 @pytest.fixture()
-def fake_bundle():
-    """Stage a fake references/ bundle in claude's slot, then restore the real one.
+def fake_bundle(tmp_path_factory, monkeypatch):
+    """Stage a fake references/ bundle in claude's slot without touching real files.
 
     Yields the platform name. claude is used because its skill_refs bundle is
-    "claude" and it has no extra plugin wiring. The real committed bundle is
-    moved aside for the duration and put back afterward, so the on-disk package
-    is left exactly as found.
+    "claude" and it has no extra plugin wiring.
     """
+    import graph_fy.install
     platform = "claude"
     bundle = mainmod._PLATFORM_CONFIG[platform]["skill_refs"]
-    skills_root = PKG_DIR / "skills"
-    bundle_dir = skills_root / bundle
+    tmp_pkg = tmp_path_factory.mktemp("fake_bundle_root")
+    bundle_dir = tmp_pkg / bundle
     refs_dir = bundle_dir / "references"
-
-    created_root = not skills_root.exists()
-    backup_dir = None
-    if bundle_dir.exists():
-        backup_dir = Path(tempfile.mkdtemp()) / "bundle_backup"
-        shutil.move(str(bundle_dir), str(backup_dir))
 
     refs_dir.mkdir(parents=True, exist_ok=True)
     (refs_dir / "extraction-spec.md").write_text("# extraction spec fragment\n", encoding="utf-8")
     (refs_dir / "query.md").write_text("# query fragment\n", encoding="utf-8")
-    try:
-        yield platform
-    finally:
-        if bundle_dir.exists():
-            shutil.rmtree(bundle_dir, ignore_errors=True)
-        if backup_dir is not None:
-            shutil.move(str(backup_dir), str(bundle_dir))
-            shutil.rmtree(backup_dir.parent, ignore_errors=True)
-        elif created_root:
-            shutil.rmtree(skills_root, ignore_errors=True)
+
+    def _mock_packaged_skill_refs_dir(p_name: str) -> Path | None:
+        if p_name == platform and bundle_dir.is_dir():
+            return refs_dir
+        return None
+
+    monkeypatch.setattr(graph_fy.install, "_packaged_skill_refs_dir", _mock_packaged_skill_refs_dir)
+    monkeypatch.setattr(mainmod, "_packaged_skill_refs_dir", _mock_packaged_skill_refs_dir)
+
+    yield platform
 
 
 def _install(tmp_path, platform):
@@ -446,8 +439,7 @@ def test_install_from_read_only_package_dir(tmp_path, fake_bundle):
     staged copy is made writable first.
     """
     platform = fake_bundle
-    bundle = mainmod._PLATFORM_CONFIG[platform]["skill_refs"]
-    refs_src = PKG_DIR / "skills" / bundle / "references"
+    refs_src = mainmod._packaged_skill_refs_dir(platform)
 
     modes = {p: p.stat().st_mode for p in (refs_src, *refs_src.rglob("*"))}
     for path in modes:
