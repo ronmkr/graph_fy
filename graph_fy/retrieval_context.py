@@ -328,7 +328,7 @@ def diff_context(
             lines.append(block)
             current_chars += len(block)
 
-    if format == "github-pr":
+    if format in ("github-pr", "markdown", "pr"):
         risk_emoji = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨"}.get(risk_tier, "⚪")
         pr_lines: list[str] = [
             "## 🔍 graph_fy AST Blast Radius Review",

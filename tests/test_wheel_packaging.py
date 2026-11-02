@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [pytest.mark.xdist_group(name="wheel_packaging")]
+
 REPO = Path(__file__).resolve().parents[1]
 PKG = REPO / "graph_fy"
 

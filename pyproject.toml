@@ -149,6 +149,7 @@ graph_fy = ["skill.md", "skill-copilot.md", "skill-vscode.md", "skills/*/referen
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--dist=loadfile"
 markers = [
     "unit: Fast pure-function and in-memory AST tests (<10ms)",
     "integration: File system, SQLite, and networkx graph integration tests",

@@ -146,6 +146,9 @@ def compute_impact(
     max_depth: int = 10,
     root: Path | None = None,
     pagerank: dict[Any, float] | None = None,
+    damp_supernodes: bool = True,
+    supernode_threshold: int = 100,
+    max_supernode_fanout: int = 25,
 ) -> dict[str, Any]:
     """Compute downstream transitive dependency closure and blast radius risk.
 
@@ -217,6 +220,7 @@ def compute_impact(
     seen = set(targets)
     queue: deque[tuple[str, int]] = deque((t, 0) for t in targets)
     downstream_entries: list[dict[str, Any]] = []
+    damped_supernodes: set[str] = set()
 
     # Also seed with member nodes (methods/contains) if any target is a class/module
     for t in targets:
@@ -244,12 +248,37 @@ def compute_impact(
 
         # In-edges where someone points to curr
         if hasattr(graph, "in_edges"):
-            incoming = graph.in_edges(curr, data=True)
+            incoming = list(graph.in_edges(curr, data=True))
         else:
-            incoming = (
+            incoming = [
                 (nbr if u == curr else u, curr, edata)
                 for u, nbr, edata in graph.edges(curr, data=True)
-            )
+            ]
+
+        # Degree-Damped Utility Hub Pruning (#54): Intermediate hubs with in-degree >= threshold
+        # (e.g. loggers, Result, fmt) cause combinatorial explosion. We damp their fanout to
+        # max_supernode_fanout while strictly prioritizing affected tests, APIs, and direct callers.
+        is_intermediate_supernode = (
+            damp_supernodes
+            and curr not in targets
+            and len(incoming) >= supernode_threshold
+        )
+        if is_intermediate_supernode:
+            damped_supernodes.add(curr)
+
+            def _edge_priority(item):
+                u_n, _v_n, ed = item
+                nd = graph.nodes.get(u_n, {})
+                if _is_test_node(nd) or _is_api_endpoint(nd) or _is_iac_resource(nd):
+                    return 0
+                r = str(ed.get("relation", "")).lower()
+                if r in ("calls", "indirect_call", "implements", "inherits"):
+                    return 1
+                return 2
+
+            incoming.sort(key=_edge_priority)
+            incoming = incoming[:max_supernode_fanout]
+
         for u, _v, edata in incoming:
             rel = str(edata.get("relation", "")).lower()
             if rel not in IMPACT_RELATIONS:
@@ -258,7 +287,7 @@ def compute_impact(
             if u_str not in seen:
                 seen.add(u_str)
                 u_data = graph.nodes[u_str]
-                downstream_entries.append({
+                entry = {
                     "id": u_str,
                     "label": str(u_data.get("label") or u_str),
                     "depth": d + 1,
@@ -266,7 +295,10 @@ def compute_impact(
                     "source_file": str(u_data.get("source_file") or ""),
                     "community": u_data.get("community"),
                     "type": str(u_data.get("type") or u_data.get("file_type") or ""),
-                })
+                }
+                if is_intermediate_supernode:
+                    entry["damped_from"] = curr
+                downstream_entries.append(entry)
                 queue.append((u_str, d + 1))
 
     # Detect affected tests, APIs, IaC
@@ -436,6 +468,8 @@ def compute_impact(
         "dynamic_risks": sorted(dynamic_risks),
         "downstream_count": downstream_count,
         "downstream_nodes": downstream_entries,
+        "damped_supernodes": sorted(damped_supernodes),
+        "supernodes_pruned_count": len(damped_supernodes),
         "affected_tests": affected_tests,
         "affected_apis": affected_apis,
         "affected_iac": affected_iac,
@@ -477,12 +511,14 @@ def format_impact_report(impact_data: dict[str, Any], terse: bool = False) -> st
     iac = impact_data.get("affected_iac", [])
     gods = impact_data.get("god_nodes_impacted", [])
     comms = impact_data.get("communities_crossed", [])
+    damped = impact_data.get("damped_supernodes", [])
 
     if terse:
+        damped_str = f", {len(damped)} damped" if damped else ""
         return (
             f"Impact for {target_name}: [{tier} | {score:.2f} | {conf_rating}] "
             f"{count} dependents, {len(tests)} tests, {len(apis)} APIs, "
-            f"{len(iac)} IaC, {len(comms)} communities"
+            f"{len(iac)} IaC, {len(comms)} communities{damped_str}"
         )
 
     # Full report
@@ -495,10 +531,14 @@ def format_impact_report(impact_data: dict[str, Any], terse: bool = False) -> st
         f"Downstream Nodes:  {count}",
         f"Communities:       {len(comms)} crossed ({comms if comms else 'none'})",
         f"God Nodes Touched: {len(gods)}",
+    ]
+    if damped:
+        lines.append(f"Supernodes Damped: {len(damped)} utility hub(s) pruned ({', '.join(damped[:3])})")
+    lines.extend([
         "--------------------------------------------------------------------------------",
         f"Summary: {impact_data.get('explanation', '')}",
         "--------------------------------------------------------------------------------",
-    ]
+    ])
 
     if apis:
         lines.append(f"\nAffected External API Endpoints ({len(apis)}):")

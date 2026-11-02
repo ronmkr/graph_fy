@@ -84,7 +84,11 @@ def _reenter_main() -> None:
 
 
 def dispatch_command(cmd: str) -> None:
-    if cmd == "describe":
+    if cmd == "prime":
+        from graph_fy.commands.prime import cmd_prime
+        rc = cmd_prime(sys.argv)
+        sys.exit(rc)
+    elif cmd == "describe":
         from graph_fy.describe_arch import cli_describe
         cli_describe(sys.argv[2:])
     elif cmd == "provider":
@@ -179,6 +183,9 @@ def dispatch_command(cmd: str) -> None:
             sys.exit(rc)
     elif cmd == "report":
         report_path = Path("graph_fy_out/GRAPH_REPORT.md")
+        show_agent_ready = "--agent-ready" in sys.argv
+        show_score = "--score" in sys.argv
+        as_json = "--json" in sys.argv
         if len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
             arg_p = Path(sys.argv[2])
             if arg_p.is_dir():
@@ -187,8 +194,66 @@ def dispatch_command(cmd: str) -> None:
             else:
                 report_path = arg_p
         if not report_path.exists():
+            # If graph exists, calculate on demand
+            gp = _find_graph_path_for_target()
+            if gp.exists() and (show_agent_ready or show_score):
+                from graph_fy.report import calculate_agent_readiness
+                from graph_fy.affected import load_graph
+                G = load_graph(gp)
+                res = calculate_agent_readiness(G)
+                if show_score:
+                    print(res["score"])
+                elif as_json:
+                    print(json.dumps(res, indent=2))
+                else:
+                    print(f"Agent-Readiness Score: {res['score']}/100 [{res['verdict']}]")
+                    print(f"  * God-Node Interface Health: {res['hub_health_pct']}%")
+                    print(f"  * Acyclicity Score: {res['acyclicity_score']:.1f}% ({res['cycle_count']} cycles)")
+                    print(f"  * Clean Context Ratio: {res['clean_ratio_pct']}% ({res['orphan_count']} orphans)")
+                sys.exit(0)
             print(f"Error: report file not found at {report_path}. Run `graph_fy build` first.", file=sys.stderr)
             sys.exit(1)
+
+        text = report_path.read_text(encoding="utf-8")
+        if show_agent_ready or show_score:
+            import re
+            m = re.search(r"## Agent-Readiness Scorecard\s*\n((?:- .*\n?)+)", text)
+            if m:
+                scorecard_text = m.group(1).strip()
+                if show_score:
+                    sm = re.search(r"Overall Score:\s*([\d\.]+)/100", scorecard_text)
+                    if sm:
+                        print(sm.group(1))
+                    else:
+                        print("unknown")
+                elif as_json:
+                    sm = re.search(r"Overall Score:\s*([\d\.]+)/100\s*\[(\w+)\]", scorecard_text)
+                    print(json.dumps({
+                        "score": float(sm.group(1)) if sm else 0.0,
+                        "verdict": sm.group(2) if sm else "UNKNOWN",
+                        "summary": scorecard_text,
+                    }, indent=2))
+                else:
+                    print(f"## Agent-Readiness Scorecard\n{scorecard_text}")
+            else:
+                # Calculate from graph directly
+                gp = _find_graph_path_for_target()
+                if gp.exists():
+                    from graph_fy.report import calculate_agent_readiness
+                    from graph_fy.affected import load_graph
+                    G = load_graph(gp)
+                    res = calculate_agent_readiness(G)
+                    if show_score:
+                        print(res["score"])
+                    elif as_json:
+                        print(json.dumps(res, indent=2))
+                    else:
+                        print(f"Agent-Readiness Score: {res['score']}/100 [{res['verdict']}]")
+                else:
+                    print(text)
+        else:
+            print(text)
+        sys.exit(0)
     elif cmd == "lint" and not (len(sys.argv) > 2 and sys.argv[2] == "multigraph"):
         from graph_fy.commands.lint import cmd_lint
         rc = cmd_lint(sys.argv, _default_graph_path, _find_graph_path_for_target)

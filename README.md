@@ -31,8 +31,11 @@ Blind agent exploration is expensive and slow. Coding agents typically read hund
 | Capability / Architecture | Upstream `graphify` (latest v0.9.100) | `graph_fy` (Production Engine) |
 | :--- | :--- | :--- |
 | **Agent MCP Server** | ❌ None (no `graphify/mcp.py`) | **Native MCP server** (11 tools: `get_agent_context`, `get_diff_context`, etc.) |
+| **Cold-Start Repo Priming** | ❌ None | **`graph_fy prime`**: deterministic ~150-token prompt-cache header for `AGENTS.md` / `.cursorrules` in <20ms |
 | **Pre-Agent Context Briefing** | ❌ None (only static `GRAPH_REPORT.md`) | **`graph_fy context "<task>"`**: Mermaid diagrams, AST skeletons, callers/callees in <45ms |
-| **Transitive Blast Radius & Risk** | ❌ None (no `impact.py`) | **Bidirectional reachability**: risk tiers (`TIER_1`–`TIER_3`), affected tests & endpoints |
+| **Degree-Damped Blast Radius** | ❌ None (no `impact.py`) | **`compute_impact` & `graph_fy impact`**: degree-damped utility hub pruning, prioritizing tests & endpoints |
+| **Repository Agent-Readiness** | ❌ None | **`graph_fy report --agent-ready`**: audits god-node interface health, acyclicity, clean context ratios |
+| **CI Breaking Change Guard** | ❌ None | **`graph_fy diff --fail-on-breaking`**: exits code 2 on HIGH/CRITICAL downstream blast radius |
 | **Multi-Tier AST Elision Ladder** | ❌ None (dumps raw text) | **Multi-tier ladder**: Tier 1 (AST skeletons) $\to$ Tier 2 (signatures) $\to$ Tier 3 (citations) |
 | **Git Temporal Coupling** | ❌ None (no git log analysis) | **Mines historical temporal co-changes** to reveal hidden file relationships |
 | **Empirical Evaluation Suite** | ❌ Toy script (`len(text) // 4` token guess) | **111 real-world scenarios + 5 adversarial tests** (`Lokanathan Invariant`) |
@@ -40,7 +43,7 @@ Blind agent exploration is expensive and slow. Coding agents typically read hund
 | **LLM Prompt Caching** | ❌ None | **Claude Ephemeral Prompt Caching** (`cache_control`) + Deterministic Node Ordering |
 | **Diff-Scoped Code Review** | ❌ None | **`graph_fy diff`**: 18–35 ms blast radius on active git diffs |
 | **Interactive Visualizers** | Basic HTML | **WCAG AAA Dashboards**: Architecture Map, D3 Graph, Sequence Callflow, Symbol Tree |
-| **Test Verification** | Heuristic script tests | **6,019 automated tests passing** across 10+ language AST extractors |
+| **Test Verification** | Heuristic script tests | **6,028 automated tests passing** across 10+ language AST extractors |
 
 ---
 
